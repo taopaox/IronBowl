@@ -1,6 +1,7 @@
 import Foundation
 import IronBowlKit
 import Observation
+import SwiftUI
 
 enum CalendarKeys {
     /// 每周第一天：2 = 周一，1 = 周日（Calendar.weekday）。
@@ -12,13 +13,74 @@ enum CalendarKeys {
     static let refreshMinutes = SettingKey<Int>("weather.refreshMinutes", default: 30)
     /// 菜单栏日历：是否显示，以及显示哪些内容。
     static let menuBarEnabled = SettingKey<Bool>("calendar.menuBar.enabled", default: true)
-    static let menuBarWeather = SettingKey<Bool>("calendar.menuBar.weather", default: true)
+    // 时间选项
+    static let menuBarTime = SettingKey<Bool>("calendar.menuBar.time", default: true)
+    static let menuBarTimeIcon = SettingKey<Bool>("calendar.menuBar.time.icon", default: false)
+    static let menuBarTime24Hour = SettingKey<Bool>("calendar.menuBar.time.24hour", default: true)
+    static let menuBarTimePeriod = SettingKey<Bool>("calendar.menuBar.time.period", default: false)
+    static let menuBarTimeSeconds = SettingKey<Bool>("calendar.menuBar.time.seconds", default: false)
+    // 日期选项
+    static let menuBarDateSection = SettingKey<Bool>("calendar.menuBar.dateSection", default: true)
+    static let menuBarLunar = SettingKey<Bool>("calendar.menuBar.lunar", default: false)
     static let menuBarDate = SettingKey<Bool>("calendar.menuBar.date", default: true)
     static let menuBarWeekday = SettingKey<Bool>("calendar.menuBar.weekday", default: true)
-    static let menuBarTime = SettingKey<Bool>("calendar.menuBar.time", default: true)
-    static let menuBarLunar = SettingKey<Bool>("calendar.menuBar.lunar", default: false)
+    // 天气选项
+    static let menuBarWeatherSection = SettingKey<Bool>("calendar.menuBar.weatherSection", default: true)
+    static let menuBarWeather = SettingKey<Bool>("calendar.menuBar.weather", default: true)
+    static let menuBarAQI = SettingKey<Bool>("calendar.menuBar.aqi", default: false)
+    static let popoverStyle = SettingKey<CalendarPopoverStyle>("calendar.popover.style", default: .appearance)
     /// 上次的天气，断网时也有东西看。
     static let lastWeather = SettingKey<WeatherSnapshot?>("weather.last", default: nil)
+}
+
+public nonisolated struct MenuBarDisplayConfig: Sendable, Equatable {
+    public var timeEnabled: Bool
+    public var timeShowIcon: Bool
+    public var timeUse24Hour: Bool
+    public var timeShowPeriod: Bool
+    public var timeShowSeconds: Bool
+
+    public var dateEnabled: Bool
+    public var dateShowLunar: Bool
+    public var dateShowSolar: Bool
+    public var dateShowWeekday: Bool
+
+    public var weatherEnabled: Bool
+    public var weatherShowWeather: Bool
+    public var weatherShowAQI: Bool
+
+    public init(
+        timeEnabled: Bool = true,
+        timeShowIcon: Bool = false,
+        timeUse24Hour: Bool = true,
+        timeShowPeriod: Bool = false,
+        timeShowSeconds: Bool = false,
+        dateEnabled: Bool = true,
+        dateShowLunar: Bool = false,
+        dateShowSolar: Bool = true,
+        dateShowWeekday: Bool = true,
+        weatherEnabled: Bool = true,
+        weatherShowWeather: Bool = true,
+        weatherShowAQI: Bool = false
+    ) {
+        self.timeEnabled = timeEnabled
+        self.timeShowIcon = timeShowIcon
+        self.timeUse24Hour = timeUse24Hour
+        self.timeShowPeriod = timeShowPeriod
+        self.timeShowSeconds = timeShowSeconds
+        self.dateEnabled = dateEnabled
+        self.dateShowLunar = dateShowLunar
+        self.dateShowSolar = dateShowSolar
+        self.dateShowWeekday = dateShowWeekday
+        self.weatherEnabled = weatherEnabled
+        self.weatherShowWeather = weatherShowWeather
+        self.weatherShowAQI = weatherShowAQI
+    }
+}
+
+public nonisolated enum MenuBarSegment: Sendable, Equatable {
+    case symbol(String)
+    case text(String)
 }
 
 /// 一个月历格子。
@@ -40,12 +102,18 @@ public final class CalendarModel {
     var weather: WeatherSnapshot?
     var weatherError: String?
     var isLoadingWeather = false
-    /// 分钟级时钟：菜单栏时间、跨天后「今天」的刷新都靠它。
+    /// 时钟：按是否开启「精确到秒」在整分钟和整秒之间动态切换，跨天后「今天」的刷新也靠它。
     public private(set) var now = Date()
+    /// macOS 真实的系统深浅外观，不受应用自身强制外观（`NSApp.appearance`）影响。
+    public private(set) var systemColorScheme: ColorScheme
+    private enum ClockMode { case minute, second }
     @ObservationIgnored private var timer: Timer?
-    @ObservationIgnored private var minuteTimer: Timer?
+    @ObservationIgnored private var clockTimer: Timer?
+    @ObservationIgnored private var clockMode: ClockMode?
+    @ObservationIgnored private var isRunning = false
+    @ObservationIgnored nonisolated(unsafe) private var systemThemeObserver: NSObjectProtocol?
 
-    static var cal: Calendar { Lunar.gregorian }
+    nonisolated static var cal: Calendar { Lunar.gregorian }
 
     public init(context: PluginContext) {
         self.context = context
@@ -53,10 +121,51 @@ public final class CalendarModel {
         selected = today
         month = Self.firstOfMonth(today)
         weather = context.settings[CalendarKeys.lastWeather]
+        systemColorScheme = Self.currentSystemColorScheme()
+        systemThemeObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshSystemColorScheme()
+            }
+        }
+    }
+
+    deinit {
+        if let systemThemeObserver {
+            DistributedNotificationCenter.default().removeObserver(systemThemeObserver)
+        }
+    }
+
+    /// 读取 macOS 全局 `AppleInterfaceStyle` 偏好，直接判断系统处于深色还是浅色模式。
+    public nonisolated static func currentSystemColorScheme() -> ColorScheme {
+        let style = CFPreferencesCopyValue(
+            "AppleInterfaceStyle" as CFString,
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost
+        ) as? String
+        return style?.caseInsensitiveCompare("dark") == .orderedSame ? .dark : .light
+    }
+
+    /// 刷新已记录的 macOS 真实系统外观。
+    public func refreshSystemColorScheme() {
+        let current = Self.currentSystemColorScheme()
+        if systemColorScheme != current {
+            systemColorScheme = current
+        }
+    }
+
+    public var appAppearance: AppearanceMode {
+        settings[AppSharedKeys.appearance]
     }
 
     public func start() {
+        isRunning = true
         Task { await refreshWeatherIfNeeded() }
+        timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -64,38 +173,167 @@ public final class CalendarModel {
             }
         }
         timer?.tolerance = 60
-        scheduleMinuteTick()
+        syncClockTimer()
     }
 
-    /// 对齐到整分钟刷新 `now`，菜单栏时间不会慢半拍，也不用每秒刷新。
-    private func scheduleMinuteTick() {
-        let next = Self.cal.nextDate(after: Date(), matching: DateComponents(second: 0), matchingPolicy: .nextTime) ?? Date().addingTimeInterval(60)
-        minuteTimer = Timer(fire: next, interval: 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.now = Date() }
+    public func stop() {
+        isRunning = false
+        timer?.invalidate()
+        timer = nil
+        clockTimer?.invalidate()
+        clockTimer = nil
+        clockMode = nil
+    }
+
+    /// 跨进程设置变更后同步天气快照与时钟精度。
+    public func syncExternalChanges() {
+        weather = settings[CalendarKeys.lastWeather]
+        syncClockTimer()
+    }
+
+    /// 根据是否开启「时间精确到秒」在整分钟与整秒定时器之间动态切换。
+    public func syncClockTimer() {
+        guard isRunning else { return }
+        let target: ClockMode = needsSecondTick ? .second : .minute
+        guard clockMode != target || clockTimer == nil else { return }
+        clockTimer?.invalidate()
+        clockTimer = nil
+        clockMode = target
+        now = Date()
+        let timer: Timer
+        switch target {
+        case .second:
+            let next = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970) + 1)
+            timer = Timer(fire: next, interval: 1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.now = Date() }
+            }
+            timer.tolerance = 0.05
+        case .minute:
+            let next = Self.cal.nextDate(after: Date(), matching: DateComponents(second: 0), matchingPolicy: .nextTime)
+                ?? Date().addingTimeInterval(60)
+            timer = Timer(fire: next, interval: 60, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.now = Date() }
+            }
+            timer.tolerance = 0.5
         }
-        minuteTimer?.tolerance = 0.5
-        RunLoop.main.add(minuteTimer!, forMode: .common)
+        RunLoop.main.add(timer, forMode: .common)
+        clockTimer = timer
     }
 
-    /// 菜单栏文字，比如「11月25日 周三 12:25」（天气图标在视图里拼）。
+    public var needsSecondTick: Bool {
+        settings[CalendarKeys.menuBarTime] && settings[CalendarKeys.menuBarTimeSeconds]
+    }
+
+    public var menuBarConfig: MenuBarDisplayConfig {
+        MenuBarDisplayConfig(
+            timeEnabled: settings[CalendarKeys.menuBarTime],
+            timeShowIcon: settings[CalendarKeys.menuBarTimeIcon],
+            timeUse24Hour: settings[CalendarKeys.menuBarTime24Hour],
+            timeShowPeriod: settings[CalendarKeys.menuBarTimePeriod],
+            timeShowSeconds: settings[CalendarKeys.menuBarTimeSeconds],
+            dateEnabled: settings[CalendarKeys.menuBarDateSection],
+            dateShowLunar: settings[CalendarKeys.menuBarLunar],
+            dateShowSolar: settings[CalendarKeys.menuBarDate],
+            dateShowWeekday: settings[CalendarKeys.menuBarWeekday],
+            weatherEnabled: settings[CalendarKeys.menuBarWeatherSection],
+            weatherShowWeather: settings[CalendarKeys.menuBarWeather],
+            weatherShowAQI: settings[CalendarKeys.menuBarAQI]
+        )
+    }
+
+    public nonisolated static func formatTime(
+        _ date: Date,
+        use24Hour: Bool,
+        showPeriod: Bool,
+        showSeconds: Bool
+    ) -> String {
+        let c = cal.dateComponents([.hour, .minute, .second], from: date)
+        let hour = c.hour ?? 0
+        let minute = c.minute ?? 0
+        let second = c.second ?? 0
+        let displayHour: String
+        if use24Hour {
+            displayHour = String(format: "%02d", hour)
+        } else {
+            let h12 = hour % 12 == 0 ? 12 : hour % 12
+            displayHour = "\(h12)"
+        }
+        var time = "\(displayHour):\(String(format: "%02d", minute))"
+        if showSeconds {
+            time += ":\(String(format: "%02d", second))"
+        }
+        if showPeriod {
+            let period = hour < 12 ? "上午" : "下午"
+            return "\(period) \(time)"
+        }
+        return time
+    }
+
+    public nonisolated static func menuBarSegments(
+        at date: Date,
+        weather: WeatherSnapshot?,
+        config: MenuBarDisplayConfig
+    ) -> [MenuBarSegment] {
+        var segments: [MenuBarSegment] = []
+        if config.weatherEnabled, let w = weather {
+            if config.weatherShowWeather {
+                segments.append(.symbol(w.symbol))
+                segments.append(.text("\(Int(w.temperature.rounded()))°"))
+            }
+            if config.weatherShowAQI, let aqi = w.aqi {
+                segments.append(.text("AQI \(aqi)"))
+            }
+        }
+        if config.dateEnabled {
+            if config.dateShowSolar {
+                segments.append(.text(CN.monthDay(date)))
+            }
+            if config.dateShowWeekday {
+                segments.append(.text(CN.weekdayShort(date)))
+            }
+            if config.dateShowLunar {
+                segments.append(.text(Lunar.lunar(date).text))
+            }
+        }
+        if config.timeEnabled {
+            if config.timeShowIcon {
+                segments.append(.symbol("clock"))
+            }
+            segments.append(.text(Self.formatTime(
+                date,
+                use24Hour: config.timeUse24Hour,
+                showPeriod: config.timeShowPeriod,
+                showSeconds: config.timeShowSeconds
+            )))
+        }
+        return segments
+    }
+
+    public var menuBarSegments: [MenuBarSegment] {
+        Self.menuBarSegments(at: now, weather: weather, config: menuBarConfig)
+    }
+
+    /// 菜单栏文字，比如「11月25日 周三 12:25」（图标在视图里拼）。
     public var menuBarText: String {
-        let d = now
-        var parts: [String] = []
-        if settings[CalendarKeys.menuBarWeather], let w = weather { parts.append("\(Int(w.temperature.rounded()))°") }
-        if settings[CalendarKeys.menuBarDate] { parts.append(CN.monthDay(d)) }
-        if settings[CalendarKeys.menuBarWeekday] { parts.append(CN.weekdayShort(d)) }
-        if settings[CalendarKeys.menuBarLunar] { parts.append(Lunar.lunar(d).dayName) }
-        if settings[CalendarKeys.menuBarTime] { parts.append(CN.time(d)) }
-        return parts.joined(separator: " ")
+        menuBarSegments.compactMap { segment in
+            if case .text(let s) = segment { return s }
+            return nil
+        }.joined(separator: " ")
     }
 
     public var menuBarSymbol: String? {
-        settings[CalendarKeys.menuBarWeather] ? weather?.symbol : nil
+        let cfg = menuBarConfig
+        return cfg.weatherEnabled && cfg.weatherShowWeather ? weather?.symbol : nil
     }
 
     public var menuBarEnabled: Bool {
         get { settings[CalendarKeys.menuBarEnabled] }
         set { settings[CalendarKeys.menuBarEnabled] = newValue }
+    }
+
+    public var popoverStyle: CalendarPopoverStyle {
+        get { settings[CalendarKeys.popoverStyle] }
+        set { settings[CalendarKeys.popoverStyle] = newValue }
     }
 
     // MARK: 月份与格子

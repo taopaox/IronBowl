@@ -6,11 +6,13 @@ import SwiftUI
 /// 独立版万年历：只依赖 IronBowlKit + CalendarPlugin，和饭碗共用同一个数据库（节假日、天气设置都共享）。
 @main
 struct CalendarApp: App {
+    @NSApplicationDelegateAdaptor(CalendarAppDelegate.self) private var delegate
     @State private var app = StandaloneCalendar()
 
     var body: some Scene {
         MenuBarExtra {
             CalendarPanel(app: app)
+                .menuBarPopoverDismissable()
         } label: {
             CalendarMenuLabel(app: app)
         }
@@ -27,6 +29,11 @@ struct CalendarApp: App {
         }
         .defaultSize(width: 1000, height: 700)
         .defaultLaunchBehavior(.suppressed)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                CalendarSettingsCommand(app: app)
+            }
+        }
 
         Window("万年历设置", id: "settings") {
             StandaloneSettings(app: app)
@@ -36,20 +43,50 @@ struct CalendarApp: App {
     }
 }
 
+private struct CalendarSettingsCommand: View {
+    let app: StandaloneCalendar
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("设置…") {
+            openWindow(id: "settings")
+            NSApp.activate()
+        }
+        .keyboardShortcut(",")
+    }
+}
+
+final class CalendarAppDelegate: NSObject, NSApplicationDelegate {
+    var app: StandaloneCalendar? { StandaloneCalendar.shared }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        app?.applyAppearance()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { app?.openWindow?("calendar") }
+        return true
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+}
+
 @Observable
 final class StandaloneCalendar {
+    nonisolated(unsafe) static weak var shared: StandaloneCalendar?
     let database: AppDatabase
     let settings: SettingsStore
     let workCalendar: WorkCalendar
     let plugin = CalendarPlugin()
     var now = Date()
-    var settingsPage = CalendarPlugin.settingsWeatherID
+    var settingsPage = CalendarPlugin.settingsDisplayID
     @ObservationIgnored var openWindow: ((String) -> Void)?
     @ObservationIgnored private var clock: Timer?
 
-    var fontScale: Double { settings[SettingKey<Double>("app.fontScale", default: 1.0)] }
+    var fontScale: Double { settings[AppSharedKeys.fontScale] }
 
     init() {
+        defer { StandaloneCalendar.shared = self }
         do {
             database = try AppDatabase(migrations: plugin.migrations)
         } catch {
@@ -57,7 +94,7 @@ final class StandaloneCalendar {
         }
         settings = SettingsStore(database: database)
         workCalendar = WorkCalendar(database: database, settings: settings)
-        DS.fontScale = settings[SettingKey<Double>("app.fontScale", default: 1.0)]
+        DS.fontScale = settings[AppSharedKeys.fontScale]
         let context = PluginContext(
             database: database, settings: settings, reminders: ReminderCenter(),
             workCalendar: workCalendar, providers: AIProviderStore(settings: settings),
@@ -69,13 +106,21 @@ final class StandaloneCalendar {
             }
         )
         plugin.start(context: context)
-        // 和饭碗用同一个外观设置。
-        let mode = settings[SettingKey<String>("app.appearance", default: "system")]
-        NSApp?.appearance = mode == "light" ? NSAppearance(named: .aqua) : mode == "dark" ? NSAppearance(named: .darkAqua) : nil
+        applyAppearance()
+        settings.onExternalChange = { [weak self] in
+            guard let self else { return }
+            self.applyAppearance()
+            DS.fontScale = self.settings[AppSharedKeys.fontScale]
+            self.plugin.model?.syncExternalChanges()
+        }
         clock = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.now = Date() }
         }
         Task { await workCalendar.updateIfNeeded() }
+    }
+
+    func applyAppearance() {
+        NSApp?.appearance = settings[AppSharedKeys.appearance].nsAppearance
     }
 }
 
@@ -88,7 +133,10 @@ struct CalendarMenuLabel: View {
         Group {
             if let model = app.plugin.model { CalendarMenuBarLabel(model: model) } else { Text("万年历") }
         }
-        .onAppear { app.openWindow = { openWindow(id: $0) } }
+        .onAppear {
+            app.openWindow = { openWindow(id: $0) }
+            app.applyAppearance()
+        }
     }
 }
 
@@ -97,30 +145,33 @@ struct CalendarPanel: View {
     let app: StandaloneCalendar
 
     var body: some View {
-        VStack(spacing: 0) {
+        Group {
             if let model = app.plugin.model {
-                CalendarPopover(model: model)
+                CalendarPopover(model: model, onQuit: { NSApp.terminate(nil) })
             }
-            HStack {
-                Spacer()
-                Button("退出万年历") { NSApp.terminate(nil) }.buttonStyle(.dsGhost)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
         }
-        .background(DS.canvas)
         .id(app.fontScale)
         .environment(\.locale, CN.locale)
     }
 }
 
-/// 设置窗口：月历 + 天气两页。
+/// 设置窗口：月历 + 状态栏 + 外观 + 节假日 + 天气。
 struct StandaloneSettings: View {
     @Bindable var app: StandaloneCalendar
 
+    private var pages: [SettingsPage] {
+        app.plugin.settingsPages.map { page in
+            if page.id == CalendarPlugin.settingsAppearanceID, let model = app.plugin.model {
+                return SettingsPage(id: page.id, title: page.title, systemImage: page.systemImage) {
+                    AnyView(StandaloneAppearanceSettings(app: app, model: model))
+                }
+            }
+            return page
+        }
+    }
+
     var body: some View {
-        let pages = app.plugin.settingsPages
+        let pages = pages
         let current = pages.first { $0.id == app.settingsPage } ?? pages.first
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
@@ -145,7 +196,22 @@ struct StandaloneSettings: View {
             }
             .background(DS.groupBackground)
         }
-        .frame(width: DS.s(720), height: DS.s(520))
+        .frame(width: DS.s(760), height: DS.s(540))
+        .id(app.fontScale)
         .environment(\.locale, CN.locale)
+    }
+}
+
+private struct StandaloneAppearanceSettings: View {
+    let app: StandaloneCalendar
+    let model: CalendarModel
+
+    var body: some View {
+        CalendarAppearanceSettings(model: model, showGlobalAppearanceLink: false)
+        DSAppearanceSettingsView(
+            settings: app.settings,
+            onAppearanceChange: { app.applyAppearance() },
+            onFontScaleChange: { DS.fontScale = app.settings[AppSharedKeys.fontScale] }
+        )
     }
 }

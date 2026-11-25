@@ -1,3 +1,4 @@
+import AppKit
 import IronBowlKit
 import SwiftUI
 
@@ -9,14 +10,13 @@ public struct CalendarMainView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            DSPageHeader("万年历") {
+            DSPageHeader("万年历", topPadding: 8) {
                 EmptyView()
             } actions: {
                 if let w = model.weatherShort {
                     Label(w, systemImage: model.weather?.symbol ?? "cloud").font(DS.body).foregroundStyle(DS.textSecondary)
                 }
             }
-            .padding(.top, 8)
             ScrollView {
                 HStack(alignment: .top, spacing: 18) {
                     MonthCard(model: model, compact: false)
@@ -89,8 +89,14 @@ struct MonthCard: View {
     private var header: some View {
         HStack(spacing: 8) {
             if !compact {
-                DSPicker(selection: Binding<Date?>(get: { nil }, set: { if let d = $0 { model.select(d) } }),
-                         options: [(nil, "假期")] + model.workCalendar.holidays(inYear: model.year).map { (Date?.some($0.date), $0.name) })
+                let holidays = model.workCalendar.holidays(inYear: model.year)
+                DSPicker(
+                    selection: Binding<Date?>(get: { nil }, set: { if let d = $0 { model.select(d) } }),
+                    options: holidays.isEmpty
+                        ? [DSPickerOption(nil, title: "暂无节假日数据", triggerTitle: "假期")]
+                        : holidays.map { DSPickerOption(Date?.some($0.date), title: $0.name, subtitle: CN.monthDay($0.date)) },
+                    placeholder: "假期"
+                )
                 Spacer()
             }
             DSPicker(selection: Binding(get: { model.year }, set: { model.go(year: $0) }),
@@ -131,12 +137,17 @@ struct DayCellView: View {
                     .font(DS.font(compact ? 9.5 : 11))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .foregroundStyle(label.isSpecial ? DS.brand : DS.textSecondary)
+                    .foregroundStyle(label.isSpecial ? DS.danger : DS.textSecondary)
             }
+            .opacity(cell.inMonth ? 1 : 0.35)
             .frame(maxWidth: .infinity)
             .frame(height: DS.s(compact ? 40 : 58))
-            .opacity(cell.inMonth ? 1 : 0.35)
-            .background(isSelected || hovering ? DS.hover : .clear, in: .rect(cornerRadius: 8))
+            .background(statusBackground(info.kind, inMonth: cell.inMonth), in: .rect(cornerRadius: 8))
+            .overlay {
+                if isSelected || hovering {
+                    RoundedRectangle(cornerRadius: 8).fill(DS.hover)
+                }
+            }
             .overlay {
                 if isToday {
                     RoundedRectangle(cornerRadius: 8).strokeBorder(DS.brand, lineWidth: 1.5)
@@ -146,24 +157,45 @@ struct DayCellView: View {
             }
             .overlay(alignment: .topTrailing) {
                 if isToday {
-                    Text("今").font(DS.font(9, .semibold)).foregroundStyle(.white)
-                        .frame(width: 14, height: 14).background(DS.brand, in: .rect(cornerRadius: 4))
-                        .offset(x: -3, y: 3)
+                    Text("今").font(DS.font(9.5, .bold)).foregroundStyle(.white)
+                        .frame(width: 15, height: 15).background(DS.brand, in: .rect(cornerRadius: 4))
+                        .padding(3)
                 }
             }
             .overlay(alignment: .topLeading) {
-                if let badge, cell.inMonth || !compact {
-                    Text(badge).font(DS.font(9, .semibold))
-                        .foregroundStyle(badge == "休" ? DS.success : DS.textSecondary)
-                        .padding(.horizontal, 3)
-                        .background((badge == "休" ? DS.success : DS.textSecondary).opacity(0.12), in: .rect(cornerRadius: 3))
-                        .offset(x: 3, y: 3)
+                if let badge {
+                    let isHoliday = badge == "休"
+                    Text(badge).font(DS.font(9.5, .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 15, height: 15)
+                        .background(isHoliday ? Self.holidayBadgeColor : Self.makeupBadgeColor, in: .rect(cornerRadius: 4))
+                        .opacity(cell.inMonth ? 1 : 0.85)
+                        .padding(3)
                 }
             }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+    }
+
+    private static let holidayCellBg = Color(
+        light: NSColor(srgbRed: 0.992, green: 0.925, blue: 0.933, alpha: 1),
+        dark: NSColor(srgbRed: 0.898, green: 0.224, blue: 0.208, alpha: 0.22)
+    )
+    private static let makeupCellBg = Color(
+        light: NSColor(srgbRed: 0.937, green: 0.937, blue: 0.949, alpha: 1),
+        dark: NSColor(white: 1, alpha: 0.10)
+    )
+    private static let holidayBadgeColor = Color(.sRGB, red: 0.898, green: 0.224, blue: 0.208, opacity: 1)
+    private static let makeupBadgeColor = Color(.sRGB, red: 0.431, green: 0.455, blue: 0.502, opacity: 1)
+
+    private func statusBackground(_ kind: DayInfo.Kind, inMonth: Bool) -> Color {
+        switch kind {
+        case .holiday: Self.holidayCellBg.opacity(inMonth ? 1 : 0.72)
+        case .makeupWorkday: Self.makeupCellBg.opacity(inMonth ? 1 : 0.72)
+        default: .clear
+        }
     }
 }
 
@@ -240,7 +272,16 @@ struct WeatherCard: View {
                         Image(systemName: w.symbol).font(DS.font(30))
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(Int(w.temperature.rounded()))°").font(DS.font(26, .semibold)).monospacedDigit()
-                            Text("\(w.city) · \(w.text)").font(DS.caption).foregroundStyle(DS.textSecondary)
+                            let subtitle = if let aqi = w.aqi {
+                                if let cat = w.resolvedAQICategory {
+                                    "\(w.city) · \(w.text) · AQI \(aqi) \(cat)"
+                                } else {
+                                    "\(w.city) · \(w.text) · AQI \(aqi)"
+                                }
+                            } else {
+                                "\(w.city) · \(w.text)"
+                            }
+                            Text(subtitle).font(DS.caption).foregroundStyle(DS.textSecondary)
                         }
                     }
                     VStack(spacing: 6) {

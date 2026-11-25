@@ -6,8 +6,14 @@ public nonisolated enum WeatherSource: String, Codable, Sendable, CaseIterable, 
     public var id: String { rawValue }
     public var displayName: String {
         switch self {
-        case .openMeteo: "Open-Meteo（免费，无需注册）"
-        case .qweather: "和风天气（需要密钥）"
+        case .openMeteo: "Open-Meteo"
+        case .qweather: "和风天气"
+        }
+    }
+    public var detail: String {
+        switch self {
+        case .openMeteo: "免费、无需注册，直接获取全球天气预报。"
+        case .qweather: "数据更贴近国内天气预报，需填写和风密钥与 API Host。"
         }
     }
 }
@@ -27,8 +33,46 @@ public nonisolated struct WeatherSnapshot: Sendable, Codable, Hashable {
     public let symbol: String
     public let days: [WeatherDay]
     public let fetchedAt: Date
+    public let aqi: Int?
+    public let aqiCategory: String?
+
+    public init(
+        city: String,
+        temperature: Double,
+        text: String,
+        symbol: String,
+        days: [WeatherDay],
+        fetchedAt: Date,
+        aqi: Int? = nil,
+        aqiCategory: String? = nil
+    ) {
+        self.city = city
+        self.temperature = temperature
+        self.text = text
+        self.symbol = symbol
+        self.days = days
+        self.fetchedAt = fetchedAt
+        self.aqi = aqi
+        self.aqiCategory = aqiCategory
+    }
 
     public func day(_ key: String) -> WeatherDay? { days.first { $0.date == key } }
+
+    public var resolvedAQICategory: String? {
+        if let aqiCategory, !aqiCategory.isEmpty { return aqiCategory }
+        return aqi.map(Self.aqiCategory(for:))
+    }
+
+    public static func aqiCategory(for aqi: Int) -> String {
+        switch aqi {
+        case ..<51: "优"
+        case 51...100: "良"
+        case 101...150: "轻度"
+        case 151...200: "中度"
+        case 201...300: "重度"
+        default: "严重"
+        }
+    }
 }
 
 public nonisolated struct City: Sendable, Codable, Hashable, Identifiable {
@@ -102,7 +146,10 @@ public nonisolated enum WeatherService {
             let current: Current
             let daily: Daily
         }
-        let r = try JSONDecoder().decode(R.self, from: try await get(c.url!))
+        async let forecastData = get(c.url!)
+        async let aqiValue = fetchOpenMeteoAQI(city)
+        let r = try JSONDecoder().decode(R.self, from: try await forecastData)
+        let aqi = await aqiValue
         let now = wmo(r.current.weather_code)
         let days = r.daily.time.indices.map { i in
             let w = wmo(r.daily.weather_code[i])
@@ -110,7 +157,25 @@ public nonisolated enum WeatherService {
                               high: r.daily.temperature_2m_max[i], low: r.daily.temperature_2m_min[i])
         }
         return WeatherSnapshot(city: city.name, temperature: r.current.temperature_2m, text: now.text, symbol: now.symbol,
-                               days: days, fetchedAt: Date())
+                               days: days, fetchedAt: Date(), aqi: aqi, aqiCategory: aqi.map(WeatherSnapshot.aqiCategory(for:)))
+    }
+
+    static func fetchOpenMeteoAQI(_ city: City) async -> Int? {
+        var c = URLComponents(string: "https://air-quality-api.open-meteo.com/v1/air-quality")!
+        c.queryItems = [
+            .init(name: "latitude", value: String(city.latitude)),
+            .init(name: "longitude", value: String(city.longitude)),
+            .init(name: "current", value: "us_aqi"),
+        ]
+        struct R: Decodable {
+            struct Current: Decodable { let us_aqi: Double? }
+            let current: Current?
+        }
+        guard let url = c.url,
+              let data = try? await get(url),
+              let r = try? JSONDecoder().decode(R.self, from: data),
+              let value = r.current?.us_aqi else { return nil }
+        return Int(value.rounded())
     }
 
     static func qweather(_ city: City, key: String, host: String) async throws -> WeatherSnapshot {
@@ -124,8 +189,12 @@ public nonisolated enum WeatherService {
         }
         let nowURL = URL(string: "https://\(h)/v7/weather/now?location=\(loc)&key=\(key)")!
         let dailyURL = URL(string: "https://\(h)/v7/weather/7d?location=\(loc)&key=\(key)")!
-        let now = try JSONDecoder().decode(Now.self, from: try await get(nowURL))
-        let daily = try JSONDecoder().decode(Daily.self, from: try await get(dailyURL))
+        async let nowData = get(nowURL)
+        async let dailyData = get(dailyURL)
+        async let aqiResult = fetchQWeatherAQI(city, key: key, host: h)
+        let now = try JSONDecoder().decode(Now.self, from: try await nowData)
+        let daily = try JSONDecoder().decode(Daily.self, from: try await dailyData)
+        let aqi = await aqiResult
         guard now.code == "200", let n = now.now, daily.code == "200" else { throw WeatherError.bad("和风返回 \(now.code)/\(daily.code)") }
         return WeatherSnapshot(
             city: city.name, temperature: Double(n.temp) ?? 0, text: n.text, symbol: symbol(forText: n.text),
@@ -133,8 +202,67 @@ public nonisolated enum WeatherService {
                 WeatherDay(date: $0.fxDate, text: $0.textDay, symbol: symbol(forText: $0.textDay),
                            high: Double($0.tempMax) ?? 0, low: Double($0.tempMin) ?? 0)
             },
-            fetchedAt: Date()
+            fetchedAt: Date(),
+            aqi: aqi?.aqi,
+            aqiCategory: aqi?.category
         )
+    }
+
+    static func fetchQWeatherAQI(_ city: City, key: String, host: String) async -> (aqi: Int, category: String?)? {
+        let lat = String(format: "%.2f", city.latitude)
+        let lon = String(format: "%.2f", city.longitude)
+        if var v1 = URLComponents(string: "https://\(host)/airquality/v1/current/\(lat)/\(lon)") {
+            v1.queryItems = [
+                .init(name: "key", value: key),
+                .init(name: "lang", value: "zh"),
+            ]
+            struct V1: Decodable {
+                struct IndexItem: Decodable {
+                    let code: String
+                    let aqi: Double?
+                    let category: String?
+                }
+                let indexes: [IndexItem]?
+            }
+            if let url = v1.url,
+               let data = try? await get(url),
+               let r = try? JSONDecoder().decode(V1.self, from: data),
+               let indexes = r.indexes, !indexes.isEmpty {
+                let picked = indexes.first { $0.code == "cn-mee" }
+                    ?? indexes.first { $0.code == "us-epa" }
+                    ?? indexes.first { $0.code != "qaqi" }
+                    ?? indexes.first
+                if let picked, let value = picked.aqi {
+                    return (Int(value.rounded()), picked.category)
+                }
+            }
+        }
+
+        // 降级兼容旧版 /v7/air/now
+        if var v7 = URLComponents(string: "https://\(host)/v7/air/now") {
+            v7.queryItems = [
+                .init(name: "location", value: "\(lon),\(lat)"),
+                .init(name: "key", value: key),
+            ]
+            struct V7: Decodable {
+                struct AirNow: Decodable {
+                    let aqi: String?
+                    let category: String?
+                }
+                let code: String?
+                let now: AirNow?
+            }
+            if let url = v7.url,
+               let data = try? await get(url),
+               let r = try? JSONDecoder().decode(V7.self, from: data),
+               r.code == "200",
+               let aqiStr = r.now?.aqi,
+               let value = Double(aqiStr) {
+                return (Int(value.rounded()), r.now?.category)
+            }
+        }
+
+        return nil
     }
 
     /// WMO 天气代码 → 中文 + SF Symbol。

@@ -5,6 +5,10 @@ import SwiftUI
 /// 万年历插件：参照百度"今天"日历的布局，农历、节气、节日、休/班、倒计时、天气。
 public final class CalendarPlugin: IronBowlPlugin {
     public static let pluginID = "calendar"
+    public static let settingsDisplayID = "calendar.display"
+    public static let settingsStatusBarID = "calendar.statusBar"
+    public static let settingsAppearanceID = "calendar.appearance"
+    public static let settingsHolidaysID = "calendar.holidays"
     public static let settingsWeatherID = "calendar.weather"
     public let id = CalendarPlugin.pluginID
     public let title = "万年历"
@@ -18,6 +22,11 @@ public final class CalendarPlugin: IronBowlPlugin {
         let model = CalendarModel(context: context)
         self.model = model
         model.start()
+    }
+
+    public func stop() {
+        model?.stop()
+        model = nil
     }
 
     public func makeMainView() -> AnyView {
@@ -34,7 +43,10 @@ public final class CalendarPlugin: IronBowlPlugin {
     public var settingsPages: [SettingsPage] {
         guard let model else { return [] }
         return [
-            SettingsPage(id: "calendar.display", title: "月历", systemImage: "calendar") { AnyView(CalendarDisplaySettings(model: model)) },
+            SettingsPage(id: Self.settingsDisplayID, title: "月历", systemImage: "calendar") { AnyView(CalendarDisplaySettings(model: model)) },
+            SettingsPage(id: Self.settingsStatusBarID, title: "状态栏", systemImage: "menubar.rectangle") { AnyView(CalendarStatusBarSettings(model: model)) },
+            SettingsPage(id: Self.settingsAppearanceID, title: "外观", systemImage: "paintpalette") { AnyView(CalendarAppearanceSettings(model: model)) },
+            SettingsPage(id: Self.settingsHolidaysID, title: "节假日", systemImage: "calendar.badge.clock") { AnyView(CalendarHolidaySettings(model: model)) },
             SettingsPage(id: Self.settingsWeatherID, title: "天气", systemImage: "cloud.sun") { AnyView(WeatherSettings(model: model)) },
         ]
     }

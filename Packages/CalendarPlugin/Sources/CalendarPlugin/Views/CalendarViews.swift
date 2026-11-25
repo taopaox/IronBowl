@@ -56,9 +56,17 @@ public struct CalendarCompactView: View {
 struct MonthCard: View {
     let model: CalendarModel
     let compact: Bool
+    var bordered = true
 
     var body: some View {
-        DSCard(padding: compact ? 10 : 16) {
+        if bordered {
+            DSCard(padding: compact ? 10 : 16) { grid }
+        } else {
+            grid.padding(12)
+        }
+    }
+
+    private var grid: some View {
             VStack(spacing: compact ? 6 : 10) {
                 header
                 HStack(spacing: 0) {
@@ -76,7 +84,6 @@ struct MonthCard: View {
                     }
                 }
             }
-        }
     }
 
     private var header: some View {
@@ -106,7 +113,7 @@ struct DayCellView: View {
 
     var body: some View {
         let cal = CalendarModel.cal
-        let isToday = cal.isDateInToday(cell.date)
+        let isToday = cal.isDate(cell.date, inSameDayAs: model.now)
         let isSelected = cal.isDate(cell.date, inSameDayAs: model.selected)
         let info = model.workCalendar.dayInfo(cell.date)
         let weekday = cal.component(.weekday, from: cell.date)

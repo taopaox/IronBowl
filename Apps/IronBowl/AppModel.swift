@@ -156,6 +156,18 @@ final class AppModel {
 
     // MARK: 菜单栏
 
+    /// 万年历插件的状态（启用时才有）。
+    var calendarModel: CalendarModel? {
+        guard enabledIDs.contains(CalendarPlugin.pluginID) else { return nil }
+        return (plugin(CalendarPlugin.pluginID) as? CalendarPlugin)?.model
+    }
+
+    /// 菜单栏单独的日历图标。
+    var calendarMenuShown: Bool {
+        get { calendarModel?.menuBarEnabled ?? false }
+        set { calendarModel?.menuBarEnabled = newValue }
+    }
+
     /// 所有可选的菜单栏信息项（核心 + 已启用插件）。
     var availableMenuBarItems: [MenuBarItem] {
         let core = MenuBarItem(id: "core.offwork", title: "离下班还有多久") { [weak self] in

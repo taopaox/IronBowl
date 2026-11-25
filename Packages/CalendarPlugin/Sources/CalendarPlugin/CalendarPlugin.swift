@@ -25,6 +25,12 @@ public final class CalendarPlugin: IronBowlPlugin {
         return AnyView(CalendarMainView(model: model))
     }
 
+    /// 菜单栏日历是否显示（工作台和独立版都用）。
+    public var menuBarCalendarShown: Bool {
+        get { model?.menuBarEnabled ?? false }
+        set { model?.menuBarEnabled = newValue }
+    }
+
     public var settingsPages: [SettingsPage] {
         guard let model else { return [] }
         return [

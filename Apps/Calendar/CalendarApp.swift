@@ -16,6 +16,7 @@ struct CalendarApp: App {
         }
         .menuBarExtraStyle(.window)
 
+
         Window("饭碗万年历", id: "calendar") {
             if let model = app.plugin.model {
                 CalendarMainView(model: model)
@@ -77,36 +78,36 @@ final class StandaloneCalendar {
     }
 }
 
-/// 菜单栏：日期 + 农历。
+/// 菜单栏：天气 + 日期 + 星期 + 时间（和饭碗里的菜单栏日历同一个组件）。
 struct CalendarMenuLabel: View {
     let app: StandaloneCalendar
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        let _ = app.now
-        Text("\(Date().formatted(.dateTime.month().day().weekday(.abbreviated))) \(Lunar.lunar(Date()).dayName)")
-            .onAppear { app.openWindow = { openWindow(id: $0) } }
+        Group {
+            if let model = app.plugin.model { CalendarMenuBarLabel(model: model) } else { Text("万年历") }
+        }
+        .onAppear { app.openWindow = { openWindow(id: $0) } }
     }
 }
 
-/// 点菜单栏弹出的面板：紧凑月历 + 当天详情。
+/// 点菜单栏弹出的面板：左边月历，右边时间、日期、天气、农历。
 struct CalendarPanel: View {
     let app: StandaloneCalendar
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 0) {
             if let model = app.plugin.model {
-                CalendarCompactView(model: model)
+                CalendarPopover(model: model)
             }
             HStack {
-                Button("大窗口") { app.openWindow?("calendar"); NSApp.activate() }.buttonStyle(.dsGhost)
-                Button("设置") { app.openWindow?("settings"); NSApp.activate() }.buttonStyle(.dsGhost)
                 Spacer()
-                Button("退出") { NSApp.terminate(nil) }.buttonStyle(.dsGhost)
+                Button("退出万年历") { NSApp.terminate(nil) }.buttonStyle(.dsGhost)
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
         }
-        .padding(12)
-        .frame(width: DS.s(380))
         .background(DS.canvas)
         .id(app.fontScale)
     }

@@ -1,4 +1,5 @@
 import AppKit
+import CalendarPlugin
 import IronBowlKit
 import SwiftUI
 
@@ -32,6 +33,18 @@ struct IronBowlApp: App {
             MenuPanel(app: app)
         } label: {
             MenuBarLabel(app: app)
+        }
+        .menuBarExtraStyle(.window)
+
+        // 菜单栏日历：天气 + 日期 + 星期 + 时间，点开是月历。
+        MenuBarExtra(isInserted: Binding(get: { app.calendarMenuShown }, set: { app.calendarMenuShown = $0 })) {
+            if let model = app.calendarModel {
+                CalendarPopover(model: model).id(app.fontScale)
+            }
+        } label: {
+            if let model = app.calendarModel {
+                CalendarMenuBarLabel(model: model)
+            }
         }
         .menuBarExtraStyle(.window)
     }

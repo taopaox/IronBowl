@@ -11,6 +11,17 @@ struct CalendarDisplaySettings: View {
                 DSPicker(selection: s.binding(CalendarKeys.firstWeekday), options: [(2, "周一"), (1, "周日")])
             }
         }
+        DSSection("菜单栏日历", footer: "菜单栏单独显示一个日历，点开就是月历。按住 ⌘ 可以拖动调整它在菜单栏的位置。") {
+            DSRow("在菜单栏显示日历") { DSToggle(isOn: s.binding(CalendarKeys.menuBarEnabled)) }
+            if s[CalendarKeys.menuBarEnabled] {
+                DSRow("显示内容", description: "预览：\(model.menuBarText)") { EmptyView() }
+                DSRow("天气") { DSToggle(isOn: s.binding(CalendarKeys.menuBarWeather)) }
+                DSRow("日期") { DSToggle(isOn: s.binding(CalendarKeys.menuBarDate)) }
+                DSRow("星期") { DSToggle(isOn: s.binding(CalendarKeys.menuBarWeekday)) }
+                DSRow("农历") { DSToggle(isOn: s.binding(CalendarKeys.menuBarLunar)) }
+                DSRow("时间") { DSToggle(isOn: s.binding(CalendarKeys.menuBarTime)) }
+            }
+        }
     }
 }
 

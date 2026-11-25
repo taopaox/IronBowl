@@ -10,6 +10,13 @@ enum CalendarKeys {
     static let qweatherKey = SettingKey<String>("weather.qweatherKey", default: "")
     static let qweatherHost = SettingKey<String>("weather.qweatherHost", default: "devapi.qweather.com")
     static let refreshMinutes = SettingKey<Int>("weather.refreshMinutes", default: 30)
+    /// 菜单栏日历：是否显示，以及显示哪些内容。
+    static let menuBarEnabled = SettingKey<Bool>("calendar.menuBar.enabled", default: true)
+    static let menuBarWeather = SettingKey<Bool>("calendar.menuBar.weather", default: true)
+    static let menuBarDate = SettingKey<Bool>("calendar.menuBar.date", default: true)
+    static let menuBarWeekday = SettingKey<Bool>("calendar.menuBar.weekday", default: true)
+    static let menuBarTime = SettingKey<Bool>("calendar.menuBar.time", default: true)
+    static let menuBarLunar = SettingKey<Bool>("calendar.menuBar.lunar", default: false)
     /// 上次的天气，断网时也有东西看。
     static let lastWeather = SettingKey<WeatherSnapshot?>("weather.last", default: nil)
 }
@@ -33,7 +40,10 @@ public final class CalendarModel {
     var weather: WeatherSnapshot?
     var weatherError: String?
     var isLoadingWeather = false
+    /// 分钟级时钟：菜单栏时间、跨天后「今天」的刷新都靠它。
+    public private(set) var now = Date()
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var minuteTimer: Timer?
 
     static var cal: Calendar { Lunar.gregorian }
 
@@ -54,6 +64,38 @@ public final class CalendarModel {
             }
         }
         timer?.tolerance = 60
+        scheduleMinuteTick()
+    }
+
+    /// 对齐到整分钟刷新 `now`，菜单栏时间不会慢半拍，也不用每秒刷新。
+    private func scheduleMinuteTick() {
+        let next = Self.cal.nextDate(after: Date(), matching: DateComponents(second: 0), matchingPolicy: .nextTime) ?? Date().addingTimeInterval(60)
+        minuteTimer = Timer(fire: next, interval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.now = Date() }
+        }
+        minuteTimer?.tolerance = 0.5
+        RunLoop.main.add(minuteTimer!, forMode: .common)
+    }
+
+    /// 菜单栏文字，比如「11月25日 周三 12:25」（天气图标在视图里拼）。
+    public var menuBarText: String {
+        let d = now
+        var parts: [String] = []
+        if settings[CalendarKeys.menuBarWeather], let w = weather { parts.append("\(Int(w.temperature.rounded()))°") }
+        if settings[CalendarKeys.menuBarDate] { parts.append(d.formatted(.dateTime.month().day())) }
+        if settings[CalendarKeys.menuBarWeekday] { parts.append(d.formatted(.dateTime.weekday(.abbreviated))) }
+        if settings[CalendarKeys.menuBarLunar] { parts.append(Lunar.lunar(d).dayName) }
+        if settings[CalendarKeys.menuBarTime] { parts.append(d.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))) }
+        return parts.joined(separator: " ")
+    }
+
+    public var menuBarSymbol: String? {
+        settings[CalendarKeys.menuBarWeather] ? weather?.symbol : nil
+    }
+
+    public var menuBarEnabled: Bool {
+        get { settings[CalendarKeys.menuBarEnabled] }
+        set { settings[CalendarKeys.menuBarEnabled] = newValue }
     }
 
     // MARK: 月份与格子

@@ -16,6 +16,7 @@ git config core.hooksPath .githooks
 
 - **`dev` 为日常开发主分支**：新功能与修复均在 `dev`（或从 `dev` 切出的 `feat/*`、`fix/*` 分支）开发提交。
 - **`main` 仅接受合并或 PR**：启用 `.githooks` 后，本地会阻止在 `main` 上直接提交或直接推送非合并提交；只有合入 `main`（包括 PR 合并或分支合并推送）时才触发 GitHub Actions 自动升级版本号、编译双应用并发布 Release。
+- **发版合入支持自提自批**：从 `dev` 向 `main` 提 PR 后，可直接执行 `gh pr merge <PR号> --merge`（保留 `dev` 分支）完成合并并等待发版流水线同步回 `dev`。
 
 ## 自动版本升级与 GitHub Actions 发布
 

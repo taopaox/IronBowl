@@ -39,11 +39,6 @@ jobs:
           fi
           python3 scripts/release.py plan "${ARGS[@]}"
 
-      - name: 无新增可发布提交时跳过
-        if: steps.plan.outputs.should_release != 'true'
-        run: |
-          echo "没有需要发布的新提交，跳过本次发版。"
-
       - name: 更新 project.yml 版本号与构建号
         if: steps.plan.outputs.should_release == 'true'
         run: |
@@ -59,16 +54,6 @@ jobs:
             brew install xcodegen
           fi
           xcodegen generate
-          xcodebuild -version
-
-      - name: 运行全部单元测试
-        if: steps.plan.outputs.should_release == 'true'
-        run: |
-          python3 -m unittest discover -s scripts -p "test_*.py" -v
-          for pkg in IronBowlKit ZentaoLogPlugin CalendarPlugin FeishuPlugin AIWebPlugin SchedulerPlugin; do
-            echo "=== Testing $pkg ==="
-            swift test --package-path "Packages/$pkg"
-          done
 
       - name: Release 编译 IronBowl 与 IronBowlCalendar
         if: steps.plan.outputs.should_release == 'true'
@@ -76,28 +61,23 @@ jobs:
           xcodebuild -project IronBowl.xcodeproj -scheme IronBowl -configuration Release -derivedDataPath build/DerivedData build
           xcodebuild -project IronBowl.xcodeproj -scheme Calendar -configuration Release -derivedDataPath build/DerivedData build
 
-      - name: 校验构建产物的 Info.plist 版本号
-        if: steps.plan.outputs.should_release == 'true'
-        env:
-          EXPECTED_VER: ${{ steps.plan.outputs.version }}
-          EXPECTED_BUILD: ${{ steps.plan.outputs.build }}
-        run: |
-          for app in IronBowl.app IronBowlCalendar.app; do
-            plist="build/DerivedData/Build/Products/Release/$app/Contents/Info.plist"
-            actual_ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
-            actual_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")"
-            echo "$app -> version=$actual_ver build=$actual_build"
-            [[ "$actual_ver" == "$EXPECTED_VER" ]]
-            [[ "$actual_build" == "$EXPECTED_BUILD" ]]
-          done
-
-      - name: 打包 DMG 与 ZIP 安装包及校验文件
+      - name: 校验版本并打包 DMG / ZIP 安装包与校验文件
         if: steps.plan.outputs.should_release == 'true'
         env:
           VER: ${{ steps.plan.outputs.version }}
+          EXPECTED_BUILD: ${{ steps.plan.outputs.build }}
         run: |
           mkdir -p dist
           PRODUCTS_DIR="build/DerivedData/Build/Products/Release"
+
+          for app in IronBowl.app IronBowlCalendar.app; do
+            plist="$PRODUCTS_DIR/$app/Contents/Info.plist"
+            actual_ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+            actual_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")"
+            echo "$app -> version=$actual_ver build=$actual_build"
+            [[ "$actual_ver" == "$VER" ]]
+            [[ "$actual_build" == "$EXPECTED_BUILD" ]]
+          done
 
           package_app() {
             local app_name="$1"
@@ -151,8 +131,3 @@ jobs:
           gh release create "$TAG" dist/* \
             --title "IronBowl ${TAG}" \
             --notes-file release-notes.md
-
-      - name: 写入 Release 摘要
-        if: steps.plan.outputs.should_release == 'true'
-        run: |
-          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"

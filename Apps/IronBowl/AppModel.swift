@@ -1,9 +1,12 @@
+import AIWebPlugin
 import AppKit
+import CalendarPlugin
+import FeishuPlugin
 import IronBowlKit
 import Observation
+import SchedulerPlugin
 import ServiceManagement
 import SwiftUI
-import CalendarPlugin
 import ZentaoLogPlugin
 
 enum DockMode: String, Codable, Sendable, CaseIterable, Identifiable {
@@ -13,34 +16,23 @@ enum DockMode: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .always: "一直显示"
         case .whenWindowOpen: "只在主窗口打开时显示"
-        case .never: "从不显示（只留菜单栏图标）"
+        case .never: "从不显示"
         }
     }
-}
-
-enum AppearanceMode: String, Codable, Sendable, CaseIterable, Identifiable {
-    case system, light, dark
-    var id: String { rawValue }
-    var displayName: String {
+    var detail: String {
         switch self {
-        case .system: "跟随系统"
-        case .light: "日间"
-        case .dark: "夜间"
-        }
-    }
-    var nsAppearance: NSAppearance? {
-        switch self {
-        case .system: nil
-        case .light: NSAppearance(named: .aqua)
-        case .dark: NSAppearance(named: .darkAqua)
+        case .always: "无论主窗口是否关闭，程序坞图标始终保留。"
+        case .whenWindowOpen: "平时仅在菜单栏运行，打开主窗口时在程序坞显示。"
+        case .never: "只保留菜单栏图标，不在程序坞显示。"
         }
     }
 }
 
 enum AppKeys {
-    static let appearance = SettingKey<AppearanceMode>("app.appearance", default: .system)
-    static let fontScale = SettingKey<Double>("app.fontScale", default: 1.0)
+    static let appearance = AppSharedKeys.appearance
+    static let fontScale = AppSharedKeys.fontScale
     static let enabledPlugins = SettingKey<[String]?>("app.enabledPlugins", default: nil)
+    static let knownPlugins = SettingKey<[String]>("app.knownPlugins", default: [])
     static let menuBarItems = SettingKey<[String]>("app.menuBarItems", default: ["zentao.status"])
     static let dockMode = SettingKey<DockMode>("app.dockMode", default: .whenWindowOpen)
     static let lastPlugin = SettingKey<String>("app.lastPlugin", default: AppModel.homeID)
@@ -57,6 +49,9 @@ final class AppModel {
     let reminders = ReminderCenter()
     let workCalendar: WorkCalendar
     let providers: AIProviderStore
+    let webSessions: WebSessionManager
+    let scheduler: TaskScheduler
+    let systemMonitor: SystemMonitor
     let plugins: [IronBowlPlugin]
     var context: PluginContext!
 
@@ -73,7 +68,9 @@ final class AppModel {
         let plugins: [IronBowlPlugin] = [
             ZentaoLogPlugin(),
             CalendarPlugin(),
-            ComingSoonPlugin(id: "feishu", title: "飞书知识库", systemImage: "book.pages"),
+            FeishuPlugin(),
+            AIWebPlugin(),
+            SchedulerPlugin(),
             ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist"),
             ComingSoonPlugin(id: "report", title: "周报日报", systemImage: "doc.text"),
         ]
@@ -85,26 +82,77 @@ final class AppModel {
             fatalError("打开数据库失败：\(error)")
         }
         settings = SettingsStore(database: database)
+        if let existingEnabled = settings[AppKeys.enabledPlugins] {
+            let known = Set(settings[AppKeys.knownPlugins])
+            var nextEnabled = Set(existingEnabled)
+            var changed = false
+            for p in plugins where !known.contains(p.id) {
+                if !nextEnabled.contains(p.id) {
+                    nextEnabled.insert(p.id)
+                    changed = true
+                }
+            }
+            if changed {
+                settings[AppKeys.enabledPlugins] = plugins.map(\.id).filter { nextEnabled.contains($0) }
+            }
+        }
+        let allIDs = plugins.map(\.id)
+        if settings[AppKeys.knownPlugins] != allIDs {
+            settings[AppKeys.knownPlugins] = allIDs
+        }
         workCalendar = WorkCalendar(database: database, settings: settings)
         providers = AIProviderStore(settings: settings)
+        let webSessions = WebSessionManager(settings: settings)
+        self.webSessions = webSessions
+        let scheduler = TaskScheduler(
+            database: database,
+            settings: settings,
+            workCalendar: workCalendar,
+            reminders: reminders,
+            openPlugin: { id in AppModel.shared?.open(plugin: id) },
+            openSettings: { page in AppModel.shared?.openSettings(page: page) }
+        )
+        self.scheduler = scheduler
+        systemMonitor = SystemMonitor { [weak webSessions] in
+            webSessions?.activeWebProcessDescriptors() ?? []
+        }
         selection = settings[AppKeys.lastPlugin]
         context = PluginContext(
             database: database, settings: settings, reminders: reminders,
-            workCalendar: workCalendar, providers: providers,
+            workCalendar: workCalendar, providers: providers, webSessions: webSessions,
+            scheduler: scheduler,
             openPlugin: { [weak self] id in self?.open(plugin: id) },
             openSettings: { [weak self] page in self?.openSettings(page: page) }
         )
-        startEnabledPlugins()
+        syncPlugins()
         applyDockMode()
         applyAppearance()
         DS.fontScale = settings[AppKeys.fontScale]
+        settings.onExternalChange = { [weak self] in
+            guard let self else { return }
+            self.applyAppearance()
+            DS.fontScale = self.settings[AppKeys.fontScale]
+            self.calendarModel?.syncExternalChanges()
+            self.scheduler.recomputeNextRuns()
+        }
+        workCalendar.onChange = { [weak self] in
+            self?.scheduler.recomputeNextRuns()
+        }
+        workCalendar.onAttendanceIssue = { [weak self] issue in
+            self?.showAttendanceIssue(issue)
+        }
         clock = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.now = Date() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.now = Date()
+                Task { await self.workCalendar.syncAttendanceIfNeeded() }
+            }
         }
         clock?.tolerance = 5
         Task {
             await providers.autodetectMissingPaths()
             await workCalendar.updateIfNeeded()
+            await workCalendar.syncAttendanceIfNeeded()
         }
     }
 
@@ -120,13 +168,23 @@ final class AppModel {
         var ids = enabledIDs
         if enabled { ids.insert(id) } else { ids.remove(id) }
         settings[AppKeys.enabledPlugins] = plugins.map(\.id).filter { ids.contains($0) }
-        startEnabledPlugins()
+        syncPlugins()
+        if !enabled, selection == id {
+            select(Self.homeID)
+        }
     }
 
-    private func startEnabledPlugins() {
-        for p in enabledPlugins where !started.contains(p.id) {
-            p.start(context: context)
-            started.insert(p.id)
+    private func syncPlugins() {
+        let enabled = enabledIDs
+        for p in plugins {
+            let isRunning = started.contains(p.id)
+            if enabled.contains(p.id), !isRunning {
+                p.start(context: context)
+                started.insert(p.id)
+            } else if !enabled.contains(p.id), isRunning {
+                p.stop()
+                started.remove(p.id)
+            }
         }
     }
 
@@ -144,6 +202,34 @@ final class AppModel {
     }
 
     // MARK: 设置窗口
+
+    /// 钉钉考勤自动同步遇到没安装 / 没登录 / 没权限时，右上角提醒一次（同一天同类问题只提醒一次）。
+    private func showAttendanceIssue(_ issue: DingTalkAttendanceError) {
+        var actions = [
+            ReminderAction(id: "off", title: "关闭同步") { [weak self] in
+                self?.settings[WorkCalendar.dingtalkEnabledKey] = false
+            },
+            ReminderAction(id: "settings", title: "查看设置") { [weak self] in
+                self?.openSettings(page: "worktime")
+            },
+        ]
+        switch issue {
+        case .missingExecutable, .notLoggedIn:
+            actions.append(ReminderAction(id: "setup", title: issue == .notLoggedIn ? "去登录" : "去安装", isPrimary: true) {
+                DingTalkAttendance.openSetupInTerminal()
+            })
+        default:
+            break
+        }
+        let content = ReminderContent(
+            id: "core.attendance.issue",
+            title: "钉钉考勤同步不可用",
+            message: "\(issue.localizedDescription)。今天先按固定的 \(settings[WorkCalendar.startKey])–\(settings[WorkCalendar.endKey]) 计算下班时间。",
+            systemImage: "exclamationmark.triangle.fill",
+            actions: actions
+        )
+        reminders.show(content, style: .cornerCard)
+    }
 
     var settingsSelection = "general"
     @ObservationIgnored var openSettingsWindow: (() -> Void)?
@@ -174,8 +260,9 @@ final class AppModel {
     /// 所有可选的菜单栏信息项（核心 + 已启用插件）。
     var availableMenuBarItems: [MenuBarItem] {
         let core = MenuBarItem(id: "core.offwork", title: "离下班还有多久") { [weak self] in
-            guard let self, workCalendar.isWorkday(Date()), let end = workCalendar.workEnd(), end > Date() else { return nil }
-            return "下班 " + countdown(to: end)
+            let now = Date()
+            guard let self, workCalendar.isWorkday(now), let end = workCalendar.effectiveWorkEnd(on: now), end > now else { return nil }
+            return "下班 " + countdown(to: end, from: now)
         }
         return [core] + enabledPlugins.flatMap(\.menuBarItems)
     }
@@ -197,7 +284,7 @@ final class AppModel {
     }
 
     /// 字体缩放档位。
-    static let fontScales: [Double] = [0.9, 1.0, 1.1, 1.2, 1.3, 1.4]
+    static let fontScales: [Double] = AppSharedKeys.fontScales
 
     /// 字体缩放。根视图用 `.id(app.fontScale)` 重建，所有界面一起变大变小。
     var fontScale: Double {
@@ -227,6 +314,9 @@ final class AppModel {
 
     func mainWindow(isOpen: Bool) {
         isMainWindowOpen = isOpen
+        if !isOpen {
+            webSessions.detachAllDisplays()
+        }
         applyDockMode()
         if isOpen { NSApp.activate() }
     }

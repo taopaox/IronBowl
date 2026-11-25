@@ -11,9 +11,11 @@ struct MenuBarLabel: View {
         let text = app.menuBarText
         Text(text.isEmpty ? "🍚" : "🍚 \(text)")
             .onAppear {
-                // 菜单栏标签启动时就会渲染，这里拿到 openWindow 给全局用。
+                // 菜单栏标签启动时就会渲染，这里拿到 openWindow 给全局用，并确保 NSApp 就绪后应用外观和 Dock 策略。
                 app.openMainWindow = { openWindow(id: "main") }
                 app.openSettingsWindow = { openWindow(id: "settings") }
+                app.applyDockMode()
+                app.applyAppearance()
             }
     }
 }
@@ -21,16 +23,24 @@ struct MenuBarLabel: View {
 /// 点菜单栏图标弹出的面板。
 struct MenuPanel: View {
     let app: AppModel
+    @Environment(\.dismissMenuBarPopover) private var dismissMenuBarPopover
+
+    private func runAndDismiss(_ action: () -> Void) {
+        dismissMenuBarPopover()
+        action()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
 
             VStack(spacing: 2) {
-                DSSidebarItem("今天", systemImage: "house", selected: false) { app.open(plugin: AppModel.homeID) }
+                DSSidebarItem("今天", systemImage: "house", selected: false) {
+                    runAndDismiss { app.open(plugin: AppModel.homeID) }
+                }
                 ForEach(app.enabledPlugins.filter { !$0.isComingSoon }, id: \.id) { plugin in
                     DSSidebarItem(plugin.title, systemImage: plugin.systemImage, selected: false) {
-                        app.open(plugin: plugin.id)
+                        runAndDismiss { app.open(plugin: plugin.id) }
                     }
                 }
             }
@@ -55,9 +65,9 @@ struct MenuPanel: View {
             }
 
             HStack(spacing: 4) {
-                Button("设置") { app.openSettings() }.buttonStyle(.dsGhost)
+                Button("设置") { runAndDismiss { app.openSettings() } }.buttonStyle(.dsGhost)
                 Spacer()
-                Button("退出饭碗") { NSApp.terminate(nil) }.buttonStyle(.dsGhost)
+                Button("退出饭碗") { runAndDismiss { NSApp.terminate(nil) } }.buttonStyle(.dsGhost)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 8)

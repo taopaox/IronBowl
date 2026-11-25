@@ -17,6 +17,7 @@ struct SettingsView: View {
             SettingsPage(id: "general", title: "通用", systemImage: "gearshape") { AnyView(GeneralSettings(app: app)) },
             SettingsPage(id: "appearance", title: "外观", systemImage: "paintpalette") { AnyView(AppearanceSettings(app: app)) },
             SettingsPage(id: "worktime", title: "工作时间", systemImage: "clock") { AnyView(WorkTimeSettings(app: app)) },
+            SettingsPage(id: "web", title: "网页与内存", systemImage: "globe") { AnyView(WebSettings(app: app)) },
             SettingsPage(id: "ai", title: "AI 提供者", systemImage: "sparkles") { AnyView(ProviderSettings(app: app)) },
         ])
         let plugins = app.enabledPlugins.compactMap { p -> NavGroup? in
@@ -81,6 +82,7 @@ struct SettingsView: View {
             }
             .background(DS.groupBackground)
         }
+        .overlay(alignment: .top) { WindowTitleBarArea(height: 40) }
         .ignoresSafeArea()
         .frame(width: DS.s(900), height: DS.s(660))
         .id(app.fontScale)
@@ -100,8 +102,10 @@ struct GeneralSettings: View {
                 DSToggle(isOn: $app.launchAtLogin)
             }
             DSRow("程序坞图标", description: "饭碗平时只在菜单栏，这里决定要不要在程序坞里出现。") {
-                DSPicker(selection: Binding(get: { s[AppKeys.dockMode] }, set: { s[AppKeys.dockMode] = $0; app.applyDockMode() }),
-                         options: DockMode.allCases.map { ($0, $0.displayName) })
+                DSPicker(
+                    selection: Binding(get: { s[AppKeys.dockMode] }, set: { s[AppKeys.dockMode] = $0; app.applyDockMode() }),
+                    options: DockMode.allCases.map { DSPickerOption($0, title: $0.displayName, subtitle: $0.detail) }
+                )
             }
         }
         DSSection("菜单栏显示", footer: "🍚 图标一直显示；打开的信息按顺序跟在后面，用箭头调整顺序。") {
@@ -162,121 +166,85 @@ struct AppearanceSettings: View {
     @Bindable var app: AppModel
 
     var body: some View {
-        DSSection("主题", footer: "主窗口、设置、菜单栏面板和提醒卡片都会一起切换。") {
-            DSBlockRow {
-                HStack(spacing: 14) {
-                    ForEach(AppearanceMode.allCases) { mode in
-                        ThemeCard(mode: mode, selected: app.appearance == mode) { app.appearance = mode }
+        DSAppearanceSettingsView(
+            settings: app.settings,
+            onAppearanceChange: { app.applyAppearance() },
+            onFontScaleChange: { DS.fontScale = app.settings[AppKeys.fontScale] }
+        )
+    }
+}
+
+// MARK: 网页与内存
+
+struct WebSettings: View {
+    @Bindable var app: AppModel
+    @State private var confirmClearCache = false
+    @State private var statusNotice: String?
+
+    private let idleOptions: [DSPickerOption<Int>] = [
+        DSPickerOption(5, title: "5 分钟", subtitle: "更快回收后台网页内存，适合内存紧张时。"),
+        DSPickerOption(15, title: "15 分钟（推荐）", subtitle: "兼顾内存节省与切换流畅度。", triggerTitle: "15 分钟（推荐）"),
+        DSPickerOption(30, title: "30 分钟", subtitle: "短时间切走仍保持网页活跃。"),
+        DSPickerOption(60, title: "60 分钟", subtitle: "长时间保留后台网页状态，减少恢复等待。"),
+        DSPickerOption(0, title: "不按时间（仅按上限）", subtitle: "后台网页不按闲置时间休眠，仅受同时保活数量限制。"),
+    ]
+
+    var body: some View {
+        let web = app.webSessions
+        DSSection("内存节省（墓碑机制）", footer: "仿 Chrome 内存节省：后台页面进入休眠后释放渲染进程，点击切回自动恢复登录态与访问历史；正在播放音视频或开会的网页会自动跳过。") {
+            DSRow("自动休眠后台网页", description: "所有内嵌网页的插件统一启用墓碑机制。") {
+                DSToggle(isOn: Binding(get: { web.tombstoneEnabled }, set: { web.tombstoneEnabled = $0 }))
+            }
+            DSRow("后台闲置休眠时长", description: "切到别的页面后，超过该时间自动释放内存。") {
+                DSPicker(
+                    selection: Binding(get: { web.idleMinutes }, set: { web.idleMinutes = $0 }),
+                    options: idleOptions
+                )
+                .disabled(!web.tombstoneEnabled)
+            }
+            DSRow("最多同时保活页数", description: "超出后优先休眠最久未访问的后台网页。") {
+                DSStepper(
+                    intValue: Binding(get: { web.maxLiveCount }, set: { web.maxLiveCount = $0 }),
+                    in: 0...12,
+                    step: 1
+                ) { $0 == 0 ? "不限" : "\($0) 页" }
+                .disabled(!web.tombstoneEnabled)
+            }
+        }
+
+        DSSection("当前会话状态") {
+            DSRow("网页进程统计", description: statusNotice ?? "正在保活 \(web.liveCount) 个 · 已休眠 \(web.tombstonedCount) 个") {
+                HStack(spacing: 8) {
+                    Button("立即休眠后台网页") {
+                        Task {
+                            let n = await web.suspendAllInactive()
+                            statusNotice = n > 0 ? "已休眠 \(n) 个后台网页" : "没有可休眠的后台网页"
+                        }
                     }
-                }
-            }
-        }
-        DSSection("文字") {
-            DSRow("字体大小", description: "所有界面的文字和控件一起缩放，松手后生效。") {
-                FontScaleSlider(app: app)
-            }
-        }
-    }
-}
+                    .buttonStyle(.dsSecondary)
 
-/// 字体大小滑块：小 · 默认 · 大，拖动松手后才应用（应用时界面会重建）。
-private struct FontScaleSlider: View {
-    let app: AppModel
-    @State private var index: Double = 1
-
-    var body: some View {
-        let scales = AppModel.fontScales
-        VStack(spacing: 4) {
-            Slider(value: $index, in: 0...Double(scales.count - 1), step: 1) { editing in
-                if !editing { app.fontScale = scales[Int(index)] }
-            }
-            .tint(DS.primaryFill)
-            // 「默认」对准第 2 档刻度：滑块两端各留约 10pt。
-            ZStack(alignment: .leading) {
-                Text("小")
-                Text("默认").fixedSize().position(x: 10 + (300 - 20) / Double(scales.count - 1), y: 8)
-                Text("大").frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .frame(height: 16)
-            .font(DS.caption)
-            .foregroundStyle(DS.textSecondary)
-        }
-        .frame(width: 300)
-        .onAppear { index = Double(scales.firstIndex(of: app.fontScale) ?? 1) }
-    }
-}
-
-/// 主题选择卡：上面是缩略预览，下面是名字。
-private struct ThemeCard: View {
-    let mode: AppearanceMode
-    let selected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                preview
-                    .frame(height: 84)
-                    .clipShape(.rect(cornerRadius: 10))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 10)
-                            .strokeBorder(selected ? DS.toggle : DS.border, lineWidth: selected ? 2 : 1)
+                    Button("全部刷新") {
+                        web.reloadAllActive()
+                        statusNotice = "已刷新所有活跃网页"
                     }
-                HStack(spacing: 5) {
-                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(selected ? DS.toggle : DS.textTertiary)
-                    Text(mode.displayName).font(DS.body)
+                    .buttonStyle(.dsSecondary)
                 }
             }
-            .frame(maxWidth: .infinity)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private var preview: some View {
-        switch mode {
-        case .light: MiniWindow(dark: false)
-        case .dark: MiniWindow(dark: true)
-        case .system:
-            HStack(spacing: 0) {
-                MiniWindow(dark: false)
-                MiniWindow(dark: true)
+            DSRow("清除全部网页缓存", description: "清空所有内嵌网页的 Cookie 与本地存储（需重新登录）。") {
+                Button("清除登录缓存") { confirmClearCache = true }
+                    .buttonStyle(.dsSecondary)
             }
         }
-    }
-}
-
-/// 缩略窗口：侧栏 + 内容 + 几条线。用固定颜色，不受当前外观影响。
-private struct MiniWindow: View {
-    let dark: Bool
-
-    var body: some View {
-        let side = dark ? Color(white: 0.11) : Color(white: 0.965)
-        let main = dark ? Color(white: 0.08) : .white
-        let line = dark ? Color(white: 0.28) : Color(white: 0.86)
-        let ink = dark ? Color(white: 0.92) : Color(white: 0.1)
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(0..<4) { i in
-                    RoundedRectangle(cornerRadius: 2).fill(i == 0 ? line : line.opacity(0.6)).frame(height: 5)
+        .alert("清除全部网页缓存？", isPresented: $confirmClearCache) {
+            Button("清除", role: .destructive) {
+                Task {
+                    await web.clearWebsiteData()
+                    statusNotice = "已清除全部网页缓存并刷新"
                 }
-                Spacer()
             }
-            .padding(7)
-            .frame(width: 34)
-            .frame(maxHeight: .infinity)
-            .background(side)
-            VStack(alignment: .leading, spacing: 6) {
-                RoundedRectangle(cornerRadius: 2).fill(ink).frame(width: 34, height: 6)
-                RoundedRectangle(cornerRadius: 4).stroke(line).frame(height: 20)
-                RoundedRectangle(cornerRadius: 2).fill(line).frame(width: 50, height: 5)
-                Spacer()
-            }
-            .padding(8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(main)
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("这会清空所有内嵌网页的 Cookie 与本地存储，飞书等网站需要重新登录。")
         }
     }
 }
@@ -285,7 +253,6 @@ private struct MiniWindow: View {
 
 struct WorkTimeSettings: View {
     let app: AppModel
-    @State private var markDate = Date()
 
     private let weekdays = [(2, "一"), (3, "二"), (4, "三"), (5, "四"), (6, "五"), (7, "六"), (1, "日")]
 
@@ -301,6 +268,7 @@ struct WorkTimeSettings: View {
                             var list = s[WorkCalendar.weekdaysKey]
                             if on { list.removeAll { $0 == day } } else { list.append(day) }
                             s[WorkCalendar.weekdaysKey] = list.sorted()
+                            app.scheduler.recomputeNextRuns()
                         }
                         .buttonStyle(.plain)
                         .font(DS.font(13.5, on ? .semibold : .regular))
@@ -315,55 +283,74 @@ struct WorkTimeSettings: View {
             DSRow("午休", description: "每天默认工时 = 下班 − 上班 − 午休，现在是 \(String(format: "%g", cal.defaultWorkHours)) 小时。") {
                 DSStepper(intValue: s.binding(WorkCalendar.lunchMinutesKey), in: 0...180, step: 15) { "\($0) 分钟" }
             }
+            DSRow("弹性时间", description: "上班早到几分钟就早走几分钟，晚到几分钟就晚走几分钟，最多这么多。需要拿到当天的上班打卡时间才生效。") {
+                DSStepper(intValue: s.binding(WorkCalendar.flexMinutesKey), in: 0...120, step: 5) { $0 == 0 ? "不弹性" : "\($0) 分钟" }
+            }
         }
 
-        DSSection("法定节假日与调休", footer: "holiday-cn 根据国务院放假通知自动更新，免费、无需注册。手动标记优先于联网数据。") {
-            DSRow("数据源") {
-                DSPicker(selection: s.binding(WorkCalendar.sourceKey), options: HolidaySource.allCases.map { ($0, $0.displayName) })
+        DingTalkAttendanceSettings(app: app)
+
+        DSHolidaySettingsView(workCalendar: cal, settings: s)
+    }
+}
+
+/// 钉钉考勤：用 dws 读取每天的上班打卡时间，按弹性规则算下班时间。
+struct DingTalkAttendanceSettings: View {
+    let app: AppModel
+
+    var body: some View {
+        let s = app.settings
+        let cal = app.workCalendar
+        let enabled = s[WorkCalendar.dingtalkEnabledKey]
+        DSSection("钉钉考勤", footer: "通过钉钉官方命令行工具 dws（npm install -g dingtalk-workspace-cli）只读查询本人打卡记录，需要先在终端运行 dws auth login 登录。开启后，上班时段内每 5 分钟检查一次，拿到当天打卡后不再查询。") {
+            DSRow("自动同步上班打卡", description: "用当天第一次上班打卡时间折算下班时间，首页、侧栏、菜单栏倒计时与禅道日志的加班分界都会跟着变。") {
+                DSToggle(isOn: Binding(get: { enabled }, set: { on in
+                    s[WorkCalendar.dingtalkEnabledKey] = on
+                    if on { Task { await cal.syncAttendance() } }
+                }))
             }
-            DSRow("更新频率") {
-                DSPicker(selection: s.binding(WorkCalendar.frequencyKey), options: HolidayUpdateFrequency.allCases.map { ($0, $0.displayName) })
-            }
-            DSRow("已缓存数据", description: cachedText(cal: cal, s: s)) {
-                Button {
-                    Task { await cal.updateNow() }
-                } label: {
-                    if cal.isUpdating { ProgressView().controlSize(.small) } else { Text("立即更新") }
+            if enabled {
+                DSRow("dws 路径", description: "留空会用登录 shell 自动查找。") {
+                    HStack(spacing: 6) {
+                        TextField("", text: s.binding(WorkCalendar.dingtalkPathKey), prompt: Text("自动查找")).textFieldStyle(.ds).frame(width: 300)
+                        Button("查找") {
+                            Task { if let p = await DingTalkAttendance.locateExecutable() { s[WorkCalendar.dingtalkPathKey] = p } }
+                        }
+                        .buttonStyle(.dsSecondary)
+                    }
                 }
-                .buttonStyle(.dsSecondary)
-                .disabled(s[WorkCalendar.sourceKey] == .manual)
-            }
-        }
-
-        DSSection("手动标记某一天") {
-            DSRow("日期", description: label(cal.dayInfo(markDate)) + (cal.override(for: markDate) != nil ? "（手动标记）" : "")) {
-                DatePicker("", selection: $markDate, displayedComponents: .date).labelsHidden().datePickerStyle(.field)
-            }
-            DSBlockRow {
-                HStack(spacing: 8) {
-                    Button("标为放假") { cal.setOverride(markDate, isOffDay: true, note: "手动放假") }.buttonStyle(.dsSecondary)
-                    Button("标为上班") { cal.setOverride(markDate, isOffDay: false, note: "手动补班") }.buttonStyle(.dsSecondary)
-                    Button("清除手动标记") { cal.setOverride(markDate, isOffDay: nil) }.buttonStyle(.dsGhost)
-                        .disabled(cal.override(for: markDate) == nil)
+                DSRow("今天", description: statusText) {
+                    HStack(spacing: 6) {
+                        switch cal.attendanceIssue {
+                        case .missingExecutable?:
+                            Button("在终端安装并登录") { DingTalkAttendance.openSetupInTerminal() }
+                                .buttonStyle(.dsSecondary)
+                        case .notLoggedIn?:
+                            Button("在终端登录") { DingTalkAttendance.openSetupInTerminal() }
+                                .buttonStyle(.dsSecondary)
+                        default:
+                            EmptyView()
+                        }
+                        Button {
+                            Task { await cal.syncAttendance() }
+                        } label: {
+                            if cal.isSyncingAttendance { ProgressView().controlSize(.small) } else { Text(cal.attendanceIssue == nil ? "立即同步" : "重试") }
+                        }
+                        .buttonStyle(.dsSecondary)
+                        .disabled(cal.isSyncingAttendance)
+                    }
                 }
             }
         }
     }
 
-    func cachedText(cal: WorkCalendar, s: SettingsStore) -> String {
-        var t = cal.cachedYears.isEmpty ? "还没有节假日数据" : "已缓存 \(cal.cachedYears.map(String.init).joined(separator: "、")) 年"
-        if let last = s[WorkCalendar.lastFetchKey] { t += "，更新于 \(CN.dateTime(last))" }
-        if let e = cal.lastError { t += "。\(e)" }
-        return t
-    }
-
-    func label(_ info: DayInfo) -> String {
-        switch info.kind {
-        case .workday: "工作日"
-        case .makeupWorkday: "调休上班" + (info.name.map { "（\($0)）" } ?? "")
-        case .weekend: "休息日"
-        case .holiday: "放假" + (info.name.map { "（\($0)）" } ?? "")
-        }
+    private var statusText: String {
+        let cal = app.workCalendar
+        let today = app.now
+        if let error = cal.attendanceError { return "❌ \(error)。现在按 \(cal.scheduleText(on: today)) 计算。" }
+        if cal.clockIn(on: today) != nil { return cal.scheduleText(on: today) }
+        if cal.attendanceLastSync != nil { return "钉钉上还没有今天的上班打卡，按 \(cal.scheduleText(on: today)) 计算。" }
+        return "还没同步，按 \(cal.scheduleText(on: today)) 计算。"
     }
 }
 
@@ -396,8 +383,10 @@ struct ProviderSettings: View {
         let store = app.providers
         DSSection(footer: "日志页可以临时换别的。所有提供者都以只读方式运行，碰不到你的仓库。") {
             DSRow("默认提供者") {
-                DSPicker(selection: Binding(get: { store.defaultKind }, set: { store.defaultKind = $0 }),
-                         options: AIProviderKind.allCases.map { ($0, $0.displayName) })
+                DSPicker(
+                    selection: Binding(get: { store.defaultKind }, set: { store.defaultKind = $0 }),
+                    options: AIProviderKind.allCases.map { DSPickerOption($0, title: $0.displayName, subtitle: $0.detail) }
+                )
             }
         }
         ForEach(store.configs) { config in
@@ -428,13 +417,23 @@ struct ProviderEditor: View {
                 HStack(spacing: 6) {
                     TextField("", text: bind(\.model), prompt: Text("默认")).textFieldStyle(.ds).frame(width: 220)
                     if config.kind == .agy {
-                        DSPicker(selection: bind(\.model), options: [("", "默认")] + models.map { ($0.id, $0.name) })
+                        DSPicker(
+                            selection: bind(\.model),
+                            options: [DSPickerOption("", title: "默认", subtitle: "使用 CLI 默认模型。")] + models.map {
+                                DSPickerOption($0.id, title: $0.name, subtitle: $0.id == $0.name ? nil : $0.id)
+                            }
+                        )
                             .task { if models.isEmpty { models = await AIRunner.listModels(config: config) } }
                     }
                 }
             }
             DSRow("思考深度") {
-                DSPicker(selection: bind(\.effort), options: config.kind.effortOptions.map { ($0, $0.isEmpty ? "默认" : $0) })
+                DSPicker(
+                    selection: bind(\.effort),
+                    options: config.kind.effortOptions.map {
+                        DSPickerOption($0, title: AIProviderKind.effortTitle($0), subtitle: AIProviderKind.effortDetail($0))
+                    }
+                )
             }
             DSRow("超时") {
                 DSStepper(intValue: bind(\.timeoutSeconds), in: 15...600, step: 15) { "\($0) 秒" }

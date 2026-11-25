@@ -31,6 +31,7 @@ struct IronBowlApp: App {
 
         MenuBarExtra {
             MenuPanel(app: app)
+                .menuBarPopoverDismissable()
         } label: {
             MenuBarLabel(app: app)
         }
@@ -39,7 +40,10 @@ struct IronBowlApp: App {
         // 菜单栏日历：天气 + 日期 + 星期 + 时间，点开是月历。
         MenuBarExtra(isInserted: Binding(get: { app.calendarMenuShown }, set: { app.calendarMenuShown = $0 })) {
             if let model = app.calendarModel {
-                CalendarPopover(model: model).id(app.fontScale).environment(\.locale, CN.locale)
+                CalendarPopover(model: model)
+                    .id(app.fontScale)
+                    .environment(\.locale, CN.locale)
+                    .menuBarPopoverDismissable()
             }
         } label: {
             if let model = app.calendarModel {
@@ -66,6 +70,11 @@ private struct SettingsCommand: View {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var app: AppModel? { AppModel.shared }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        app?.applyDockMode()
+        app?.applyAppearance()
+    }
 
     /// 点程序坞图标时打开主窗口。
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

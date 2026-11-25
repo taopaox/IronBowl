@@ -22,6 +22,12 @@ packages:
     path: Packages/ZentaoLogPlugin
   CalendarPlugin:
     path: Packages/CalendarPlugin
+  FeishuPlugin:
+    path: Packages/FeishuPlugin
+  AIWebPlugin:
+    path: Packages/AIWebPlugin
+  SchedulerPlugin:
+    path: Packages/SchedulerPlugin
 targets:
   IronBowl:
     type: application
@@ -32,6 +38,9 @@ targets:
       - package: IronBowlKit
       - package: ZentaoLogPlugin
       - package: CalendarPlugin
+      - package: FeishuPlugin
+      - package: AIWebPlugin
+      - package: SchedulerPlugin
     info:
       path: Apps/IronBowl/Info.plist
       properties:

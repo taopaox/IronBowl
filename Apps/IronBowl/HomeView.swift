@@ -48,11 +48,11 @@ struct HomeView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollIndicators(.never)
+        .overlay(alignment: .top) { WindowTitleBarArea(height: 52) }
     }
 
     private var greeting: String {
-        let _ = app.now
-        let h = Calendar.current.component(.hour, from: Date())
+        let h = Calendar.current.component(.hour, from: app.now)
         let part = switch h {
         case 5..<11: "早上好"
         case 11..<13: "中午好"
@@ -85,8 +85,10 @@ struct HomeView: View {
             HStack(spacing: 10) {
                 Text("Enter 发送 · Shift+Enter 换行").font(DS.caption).foregroundStyle(DS.textTertiary)
                 Spacer()
-                DSPicker(selection: Binding(get: { app.providers.defaultKind }, set: { app.providers.defaultKind = $0 }),
-                         options: AIProviderKind.allCases.map { ($0, $0.displayName) })
+                DSPicker(
+                    selection: Binding(get: { app.providers.defaultKind }, set: { app.providers.defaultKind = $0 }),
+                    options: AIProviderKind.allCases.map { DSPickerOption($0, title: $0.displayName, subtitle: $0.detail) }
+                )
                 Button {
                     Task { await send() }
                 } label: {
@@ -123,21 +125,42 @@ struct HomeView: View {
 
     private var coreCards: [HomeCard] {
         let cal = app.workCalendar
+        let now = app.now
         return [
-            HomeCard(id: "core.lunar", label: CN.monthDay(Date()) + " " + CN.weekday(Date()),
-                     value: { WorkCalendar.lunarString(Date()) },
+            HomeCard(id: "core.lunar", label: CN.monthDay(now) + " " + CN.weekday(now),
+                     value: { WorkCalendar.lunarString(app.now) },
                      detail: {
-                         guard let h = cal.nextHoliday() else { return nil }
-                         let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: h.date).day ?? 0
+                         let today = app.now
+                         guard let h = cal.nextHoliday(after: today) else { return nil }
+                         let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: today), to: h.date).day ?? 0
                          return "距\(h.name) \(days) 天"
                      }),
             HomeCard(id: "core.offwork", label: "下班",
                      value: {
                          let _ = app.now
-                         guard cal.isWorkday(Date()), let end = cal.workEnd(), end > Date() else { return "已下班" }
-                         return countdown(to: end) + " 后"
+                         let today = Date()
+                         if cal.isWorkday(today) {
+                             guard let end = cal.effectiveWorkEnd(on: today), end > today else { return "已下班" }
+                             return countdown(to: end, from: today) + " 后"
+                         }
+                         let ot = cal.overtimeHours(on: today)
+                         return ot > 0 ? "加班 \(WorkCalendar.hoursText(ot))h" : "已下班"
                      },
-                     detail: { "\(app.settings[WorkCalendar.startKey])–\(app.settings[WorkCalendar.endKey])" }),
+                     detail: {
+                         let _ = app.now
+                         let today = Date()
+                         let text: String
+                         if cal.isWorkday(today) {
+                             text = cal.scheduleText(on: today)
+                         } else if cal.overtimeHours(on: today) > 0 {
+                             text = "休息日加班"
+                         } else {
+                             text = cal.scheduleText(on: today)
+                         }
+                         guard app.settings[WorkCalendar.dingtalkEnabledKey], cal.clockIn(on: today) == nil,
+                               cal.attendanceIssue?.needsUserAction == true else { return text }
+                         return text + " · 钉钉同步不可用"
+                     }),
         ]
     }
 }

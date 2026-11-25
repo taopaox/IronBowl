@@ -11,7 +11,7 @@
 | `Model/WeekRange.swift` | `WeekRange` | 按中国工作周（周一至周日）与 ISO 周历计算起止日期、周次标题、上下周偏移及「本周 / 上周」标签 |
 | `Store/ReportStore.swift` | `WeeklyReportStyle`, `ReportKeys`, `WeeklyReportRecord`, `ReportMigrations`, `ReportStore` | 设置键、数据库迁移 `report.v1`（表 `weeklyReport`）及按周持久化读写 |
 | `Generator/WeeklyReportGenerator.swift` | `DailyReportDay`, `WeeklyReportInput`, `WeeklyReportOutput`, `WeeklyReportGenerator` | 提示词模板渲染、只读 JSON Schema AI 生成与 3 种风格的规则兜底汇总 |
-| `Views/ReportView.swift` | `ReportView` | 周报主页面：周切换顶栏、历史周报弹层、概览指标、7 天日报状态条与明细卡片、周报预览/编辑区、补充说明与导出 |
+| `Views/ReportView.swift` | `ReportView` | 响应式双栏周报工作区：左侧汇总本周 7 天每日日报与工时覆盖，右侧常驻展示补充说明与文档纸张式周报预览/编辑区，支持历史弹层、复制与导出 |
 | `Views/ReportSettingsView.swift` | `ReportSettingsView` | 设置页「周报 → 周报生成」：默认周报风格、草稿/工时开关与自定义提示词编辑 |
 
 ## 本周每日日报查询机制

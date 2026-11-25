@@ -91,6 +91,15 @@ final class WeeklyReportModel {
         days.filter { !$0.isEmpty }.count
     }
 
+    var workdayCount: Int {
+        days.filter(\.isWorkday).count
+    }
+
+    func clearFeedback() {
+        message = nil
+        errorMessage = nil
+    }
+
     var involvedProjects: [String] {
         var seen = Set<String>()
         var result: [String] = []

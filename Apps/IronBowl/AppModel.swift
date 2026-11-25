@@ -4,6 +4,7 @@ import CalendarPlugin
 import FeishuPlugin
 import IronBowlKit
 import Observation
+import ReportPlugin
 import SchedulerPlugin
 import ServiceManagement
 import SwiftUI
@@ -71,8 +72,8 @@ final class AppModel {
             FeishuPlugin(),
             AIWebPlugin(),
             SchedulerPlugin(),
+            ReportPlugin(),
             ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist"),
-            ComingSoonPlugin(id: "report", title: "周报日报", systemImage: "doc.text"),
         ]
         self.plugins = plugins
         defer { AppModel.shared = self }

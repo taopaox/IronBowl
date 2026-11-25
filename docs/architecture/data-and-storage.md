@@ -42,6 +42,14 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `zentao.v2` | `zentaoPendingDraft` | `date` (TEXT) | `payload` (JSON `[DraftEntry]`), `updatedAt` | 按天持久化的未提交待修改草稿 |
 | `zentao.v3` | `zentaoDailyOvertime` | `date` (TEXT) | `hours` (DOUBLE), `updatedAt` | 历史按天加班表（保留迁移号兼容旧库，数据已由 `core.v4` 迁移至核心表 `dailyOvertime`） |
 
+### 周报插件迁移（`ReportMigrations`）
+
+定义于 [`ReportStore.swift`](../../Packages/ReportPlugin/Sources/ReportPlugin/Store/ReportStore.swift)：
+
+| 迁移版本 | 表名 | 主键 | 主要字段 | 用途 |
+| :--- | :--- | :--- | :--- | :--- |
+| `report.v1` | `weeklyReport` | `weekStart` (TEXT) | `weekEnd`, `title`, `content`, `extraNotes`, `style`, `providerName`, `totalHours`, `generatedAt`, `updatedAt`（索引） | 按周（周一日期 `yyyy-MM-dd`）持久化已生成或手动编辑的周报内容 |
+
 > 独立版万年历（`Apps/Calendar`）在启动时只传入 `CalendarPlugin.migrations`（当前为空），若库中已有其他插件的数据表也不会冲突；若首次由独立版万年历建库，之后主应用打开时会补跑新增的插件迁移。
 
 ## 设置存储与跨进程同步（`SettingsStore`）
@@ -77,6 +85,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `WebKeys` | `web.tombstone.maxLiveCount` | `4` | 最多同时保活网页数（0 表示不限） |
 | `SchedulerKeys` | `scheduler.seededIDs` | `[]` | 已初始化写入过的内置定时任务 ID 列表（防用户删除后重建） |
 | `LogKeys` | `zentao.*` / `git.*` / `scan.*` / `log.*` / `reminder.*` | 见 [禅道日志文档](../plugins/zentao-log.md) | 禅道账号、Git 扫描、AI 提示词与工时提醒配置 |
+| `ReportKeys` | `report.prompt` / `report.style` / `report.includeDrafts` / `report.includeHours` | 见 [周报文档](../plugins/report.md) | 周报生成提示词、周报风格、是否包含草稿及工时统计 |
 | `CalendarKeys` | `calendar.*` / `weather.*` | 见 [万年历文档](../plugins/calendar.md) | 周起始日、天气源、城市、菜单栏日历与弹层样式 |
 | `FeishuKeys` | `feishu.*` | 见 [飞书文档](../plugins/feishu.md) | 飞书主页、固定网页列表与上次打开页 |
 | `AIWebKeys` | `aiweb.apps` / `aiweb.activeAppID` | `nil` / `nil` | AI 目录应用列表与当前选中 AI |

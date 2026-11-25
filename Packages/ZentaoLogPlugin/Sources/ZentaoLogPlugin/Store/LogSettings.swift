@@ -130,6 +130,15 @@ struct LogStore {
         (try? db.pool.read { try Submission.filter(Column("date") >= minDate).fetchAll($0) }) ?? []
     }
 
+    func submissions(from startDate: String, to endDate: String) -> [Submission] {
+        (try? db.pool.read {
+            try Submission
+                .filter(Column("date") >= startDate && Column("date") <= endDate)
+                .order(Column("date").asc, Column("id").asc)
+                .fetchAll($0)
+        }) ?? []
+    }
+
     func add(_ submission: Submission) {
         try? db.pool.write { try submission.insert($0) }
     }
@@ -151,6 +160,21 @@ struct LogStore {
         let rows = (try? db.pool.read { db in
             try Row.fetchAll(db, sql: "SELECT date, payload FROM zentaoPendingDraft WHERE date >= ?", arguments: [minDate])
         }) ?? []
+        return Self.decodePendingRows(rows)
+    }
+
+    func pendingDrafts(from startDate: String, to endDate: String) -> [String: [DraftEntry]] {
+        let rows = (try? db.pool.read { db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT date, payload FROM zentaoPendingDraft WHERE date >= ? AND date <= ?",
+                arguments: [startDate, endDate]
+            )
+        }) ?? []
+        return Self.decodePendingRows(rows)
+    }
+
+    private static func decodePendingRows(_ rows: [Row]) -> [String: [DraftEntry]] {
         let decoder = JSONDecoder()
         var out: [String: [DraftEntry]] = [:]
         for row in rows {

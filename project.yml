@@ -28,6 +28,8 @@ packages:
     path: Packages/AIWebPlugin
   SchedulerPlugin:
     path: Packages/SchedulerPlugin
+  ReportPlugin:
+    path: Packages/ReportPlugin
 targets:
   IronBowl:
     type: application
@@ -41,6 +43,7 @@ targets:
       - package: FeishuPlugin
       - package: AIWebPlugin
       - package: SchedulerPlugin
+      - package: ReportPlugin
     info:
       path: Apps/IronBowl/Info.plist
       properties:

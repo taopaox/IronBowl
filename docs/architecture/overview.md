@@ -23,6 +23,7 @@ flowchart LR
     IronBowl --> FeishuPlugin["Packages/FeishuPlugin<br/>(飞书知识库)"]
     IronBowl --> AIWebPlugin["Packages/AIWebPlugin<br/>(AI 网页目录)"]
     IronBowl --> SchedulerPlugin["Packages/SchedulerPlugin<br/>(定时任务)"]
+    IronBowl --> ReportPlugin["Packages/ReportPlugin<br/>(周报)"]
 
     CalendarApp["Apps/Calendar<br/>(独立版万年历)"] --> IronBowlKit
     CalendarApp --> CalendarPlugin
@@ -32,6 +33,8 @@ flowchart LR
     FeishuPlugin --> IronBowlKit
     AIWebPlugin --> IronBowlKit
     SchedulerPlugin --> IronBowlKit
+    ReportPlugin --> IronBowlKit
+    ReportPlugin --> ZentaoLogPlugin
 ```
 
 ## 目录职责划分
@@ -46,6 +49,7 @@ flowchart LR
 | `Packages/FeishuPlugin` | Swift Package | 内嵌飞书网页浏览、上传下载、自定义主页与固定网页到主窗口侧边栏 |
 | `Packages/AIWebPlugin` | Swift Package | 20 个内置 AI 网站目录、可折叠侧栏子项、官方 Logo 与自定义图标抓取 |
 | `Packages/SchedulerPlugin` | Swift Package | 定时任务管理页面、任务编辑弹窗、执行日志审计与调度引擎生命周期控制 |
+| `Packages/ReportPlugin` | Swift Package | 按周查询每日日报（禅道/本地提交/草稿）、AI 与规则汇总生成周报、预览编辑及 Markdown 导出 |
 
 ## 插件协议与生命周期
 
@@ -90,7 +94,7 @@ flowchart LR
 3. `FeishuPlugin`（`feishu`）
 4. `AIWebPlugin`（`aiweb`）
 5. `SchedulerPlugin`（`scheduler`）
-6. `ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist")`
-7. `ComingSoonPlugin(id: "report", title: "周报日报", systemImage: "doc.text")`
+6. `ReportPlugin`（`report`）
+7. `ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist")`
 
 当应用版本升级引入新插件 ID 时，`AppModel` 会比对 `app.knownPlugins` 与 `app.enabledPlugins`，自动将新增插件加入已启用列表，避免老用户升级后看不到新插件。

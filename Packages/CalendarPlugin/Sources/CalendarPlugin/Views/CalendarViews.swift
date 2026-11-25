@@ -187,7 +187,7 @@ struct DayDetailCard: View {
                     statusTag(info)
                 }
                 if !compact {
-                    Text(d.formatted(.dateTime.year().month().day().weekday(.wide)))
+                    Text(CN.full(d))
                         .font(DS.body).foregroundStyle(DS.textSecondary)
                 }
                 if !extra.isEmpty {
@@ -255,7 +255,7 @@ struct WeatherCard: View {
                             .font(DS.caption)
                         }
                     }
-                    Text("更新于 \(w.fetchedAt.formatted(date: .omitted, time: .shortened))").font(DS.font(11)).foregroundStyle(DS.textTertiary)
+                    Text("更新于 \(CN.time(w.fetchedAt))").font(DS.font(11)).foregroundStyle(DS.textTertiary)
                 } else {
                     Text(model.weatherError ?? "还没选城市，选好后显示未来 7 天天气。").font(DS.body).foregroundStyle(DS.textSecondary)
                     Button("选择城市") { model.context.openSettings(CalendarPlugin.settingsWeatherID) }.buttonStyle(.dsSecondary)
@@ -271,7 +271,7 @@ struct WeatherCard: View {
         guard let d = WorkCalendar.dayFormatterDate(key) else { return key }
         if CalendarModel.cal.isDateInToday(d) { return "今天" }
         if CalendarModel.cal.isDateInTomorrow(d) { return "明天" }
-        return d.formatted(.dateTime.weekday(.abbreviated))
+        return CN.weekdayShort(d)
     }
 }
 

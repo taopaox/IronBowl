@@ -82,10 +82,10 @@ public final class CalendarModel {
         let d = now
         var parts: [String] = []
         if settings[CalendarKeys.menuBarWeather], let w = weather { parts.append("\(Int(w.temperature.rounded()))°") }
-        if settings[CalendarKeys.menuBarDate] { parts.append(d.formatted(.dateTime.month().day())) }
-        if settings[CalendarKeys.menuBarWeekday] { parts.append(d.formatted(.dateTime.weekday(.abbreviated))) }
+        if settings[CalendarKeys.menuBarDate] { parts.append(CN.monthDay(d)) }
+        if settings[CalendarKeys.menuBarWeekday] { parts.append(CN.weekdayShort(d)) }
         if settings[CalendarKeys.menuBarLunar] { parts.append(Lunar.lunar(d).dayName) }
-        if settings[CalendarKeys.menuBarTime] { parts.append(d.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))) }
+        if settings[CalendarKeys.menuBarTime] { parts.append(CN.time(d)) }
         return parts.joined(separator: " ")
     }
 

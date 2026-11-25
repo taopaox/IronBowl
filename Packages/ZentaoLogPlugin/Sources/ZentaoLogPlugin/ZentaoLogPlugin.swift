@@ -50,7 +50,7 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
             let subs = model.store.submissions(on: WorkCalendar.dayString(day))
             let info = model.context.workCalendar.dayInfo(day)
             let status = subs.isEmpty ? (info.isWorkday ? "待提交" : "休息") : "\(hoursText(subs.reduce(0) { $0 + $1.hours }))h"
-            let trailing = Calendar.current.isDateInToday(day) ? "今天" : day.formatted(.dateTime.weekday(.abbreviated))
+            let trailing = Calendar.current.isDateInToday(day) ? "今天" : CN.weekdayShort(day)
             return SidebarRecent(id: "zentao.day.\(WorkCalendar.dayString(day))", title: "\(f.string(from: day)) \(status)", trailing: trailing) {
                 model.context.openPlugin(ZentaoLogPlugin.pluginID)
                 Task { await model.select(date: day) }

@@ -30,6 +30,7 @@ struct MainView: View {
         .ignoresSafeArea()
         .frame(minWidth: 860, minHeight: 600)
         .id(app.fontScale)
+        .environment(\.locale, CN.locale)
         .onAppear { app.mainWindow(isOpen: true) }
         .onDisappear { app.mainWindow(isOpen: false) }
     }

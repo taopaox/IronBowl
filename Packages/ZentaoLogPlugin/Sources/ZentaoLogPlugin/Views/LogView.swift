@@ -165,10 +165,10 @@ struct DayTabs: View {
                     Task { await model.select(date: day) }
                 } label: {
                     VStack(spacing: 2) {
-                        Text(Calendar.current.isDateInToday(day) ? "今天" : day.formatted(.dateTime.weekday(.abbreviated)))
+                        Text(Calendar.current.isDateInToday(day) ? "今天" : CN.weekdayShort(day))
                             .font(DS.font(13.5, selected ? .semibold : .regular))
                         HStack(spacing: 3) {
-                            Text(day.formatted(.dateTime.month(.defaultDigits).day())).monospacedDigit()
+                            Text(CN.slash(day)).monospacedDigit()
                             if submitted { Image(systemName: "checkmark").foregroundStyle(DS.toggle) }
                             else if !info.isWorkday { Text(info.name.map { String($0.prefix(2)) } ?? "休").foregroundStyle(DS.danger) }
                         }
@@ -196,7 +196,7 @@ struct Metrics: View {
             DSMetric("草稿工时", value: "\(hoursText(model.totalHours)) h", detail: "默认 \(hoursText(model.defaultHours)) h")
             DSMetric("未关闭任务", value: "\(model.openTasks.count)", detail: "\(model.projects.count) 个项目")
             DSMetric("状态", value: model.pendingDrafts.isEmpty && model.drafts.contains(where: \.isRecorded) ? "已提交" : model.drafts.isEmpty ? "未生成" : "待提交",
-                     detail: model.lastScan.map { "扫描于 \($0.formatted(date: .omitted, time: .shortened))" })
+                     detail: model.lastScan.map { "扫描于 \(CN.time($0))" })
         }
     }
 }
@@ -227,7 +227,7 @@ struct ActivityList: View {
                         }
                         ForEach(act.commits) { c in
                             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                Text(c.date.formatted(date: .omitted, time: .shortened))
+                                Text(CN.time(c.date))
                                     .font(DS.caption.monospacedDigit()).foregroundStyle(DS.textTertiary)
                                     .frame(width: 40, alignment: .leading)
                                 Text(c.subject).font(DS.body).lineLimit(1)

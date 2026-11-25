@@ -67,6 +67,7 @@ struct MenuPanel: View {
         .frame(width: DS.s(290))
         .background(DS.canvas)
         .id(app.fontScale)
+        .environment(\.locale, CN.locale)
     }
 
     private var header: some View {
@@ -75,7 +76,7 @@ struct MenuPanel: View {
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text("饭碗").font(DS.font(15, .semibold))
             Spacer()
-            Text(Date().formatted(.dateTime.month().day().weekday(.wide)) + " · " + WorkCalendar.lunarString(Date()))
+            Text(CN.monthDay(Date()) + " " + CN.weekday(Date()) + " · " + WorkCalendar.lunarString(Date()))
                 .font(DS.caption).foregroundStyle(DS.textSecondary)
             if !info.isWorkday { Tag(info.name ?? "休", color: DS.danger) }
             if info.kind == .makeupWorkday { Tag("补班", color: DS.warning) }

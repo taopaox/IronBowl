@@ -124,7 +124,7 @@ struct HomeView: View {
     private var coreCards: [HomeCard] {
         let cal = app.workCalendar
         return [
-            HomeCard(id: "core.lunar", label: Date().formatted(.dateTime.month().day().weekday(.wide)),
+            HomeCard(id: "core.lunar", label: CN.monthDay(Date()) + " " + CN.weekday(Date()),
                      value: { WorkCalendar.lunarString(Date()) },
                      detail: {
                          guard let h = cal.nextHoliday() else { return nil }

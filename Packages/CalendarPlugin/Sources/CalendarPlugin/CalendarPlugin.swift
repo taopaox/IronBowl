@@ -43,7 +43,7 @@ public final class CalendarPlugin: IronBowlPlugin {
         guard let model else { return [] }
         return [
             MenuBarItem(id: "calendar.date", title: "日期（11月25日 周三）") {
-                Date().formatted(.dateTime.month().day().weekday(.abbreviated))
+                CN.monthDay(Date()) + " " + CN.weekdayShort(Date())
             },
             MenuBarItem(id: "calendar.lunar", title: "农历（十月十七）") { Lunar.lunar(Date()).text },
             MenuBarItem(id: "calendar.weather", title: "天气（晴 12°）") { model.weatherShort },

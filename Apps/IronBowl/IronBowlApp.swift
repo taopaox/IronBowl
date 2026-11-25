@@ -39,7 +39,7 @@ struct IronBowlApp: App {
         // 菜单栏日历：天气 + 日期 + 星期 + 时间，点开是月历。
         MenuBarExtra(isInserted: Binding(get: { app.calendarMenuShown }, set: { app.calendarMenuShown = $0 })) {
             if let model = app.calendarModel {
-                CalendarPopover(model: model).id(app.fontScale)
+                CalendarPopover(model: model).id(app.fontScale).environment(\.locale, CN.locale)
             }
         } label: {
             if let model = app.calendarModel {

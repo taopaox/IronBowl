@@ -84,6 +84,7 @@ struct SettingsView: View {
         .ignoresSafeArea()
         .frame(width: DS.s(900), height: DS.s(660))
         .id(app.fontScale)
+        .environment(\.locale, CN.locale)
     }
 }
 
@@ -351,7 +352,7 @@ struct WorkTimeSettings: View {
 
     func cachedText(cal: WorkCalendar, s: SettingsStore) -> String {
         var t = cal.cachedYears.isEmpty ? "还没有节假日数据" : "已缓存 \(cal.cachedYears.map(String.init).joined(separator: "、")) 年"
-        if let last = s[WorkCalendar.lastFetchKey] { t += "，更新于 \(last.formatted(date: .abbreviated, time: .shortened))" }
+        if let last = s[WorkCalendar.lastFetchKey] { t += "，更新于 \(CN.dateTime(last))" }
         if let e = cal.lastError { t += "。\(e)" }
         return t
     }

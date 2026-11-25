@@ -22,6 +22,7 @@ struct CalendarApp: App {
                 CalendarMainView(model: model)
                     .frame(minWidth: 860, minHeight: 620)
                     .id(app.fontScale)
+                    .environment(\.locale, CN.locale)
             }
         }
         .defaultSize(width: 1000, height: 700)
@@ -110,6 +111,7 @@ struct CalendarPanel: View {
         }
         .background(DS.canvas)
         .id(app.fontScale)
+        .environment(\.locale, CN.locale)
     }
 }
 
@@ -144,5 +146,6 @@ struct StandaloneSettings: View {
             .background(DS.groupBackground)
         }
         .frame(width: DS.s(720), height: DS.s(520))
+        .environment(\.locale, CN.locale)
     }
 }

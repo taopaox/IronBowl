@@ -45,10 +45,10 @@ private struct SidePanel: View {
         let l = Lunar.lunar(d)
         let extra = [Lunar.festival(d), Lunar.solarTerm(d)].compactMap { $0 }
         VStack(spacing: 10) {
-            Text(model.now.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)))
+            Text(CN.time(model.now))
                 .font(DS.font(28, .medium)).monospacedDigit()
                 .padding(.top, 6)
-            Text(d.formatted(.dateTime.weekday(.wide))).font(DS.font(14, .medium))
+            Text(CN.weekday(d)).font(DS.font(14, .medium))
             Text("\(CalendarModel.cal.component(.day, from: d))")
                 .font(DS.font(34, .semibold)).monospacedDigit()
                 .foregroundStyle(.white)

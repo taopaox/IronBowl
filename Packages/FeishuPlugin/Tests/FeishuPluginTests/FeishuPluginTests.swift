@@ -1,0 +1,76 @@
+import Foundation
+import IronBowlKit
+import Testing
+@testable import FeishuPlugin
+
+@Test func urlNormalizeAndCleanTitle() {
+    #expect(FeishuURL.normalize("my.feishu.cn/wiki/abc")?.absoluteString == "https://my.feishu.cn/wiki/abc")
+    #expect(FeishuURL.normalize("  https://example.feishu.cn/docx/123  ")?.absoluteString == "https://example.feishu.cn/docx/123")
+    #expect(FeishuURL.normalize("javascript:alert(1)") == nil)
+    #expect(FeishuURL.normalize("   ") == nil)
+
+    #expect(FeishuURL.cleanTitle("产品周报 - 飞书云文档", fallbackURL: "https://my.feishu.cn/") == "产品周报")
+    #expect(FeishuURL.cleanTitle("架构规范 - 飞书知识库", fallbackURL: "https://my.feishu.cn/") == "架构规范")
+    #expect(FeishuURL.cleanTitle("", fallbackURL: "https://my.feishu.cn/wiki/abc") == "abc")
+    #expect(FeishuURL.cleanTitle(nil, fallbackURL: "https://my.feishu.cn/") == "my.feishu.cn")
+
+    #expect(FeishuURL.isSamePage("https://my.feishu.cn/", "https://my.feishu.cn"))
+    #expect(FeishuURL.isSamePage("HTTPS://MY.FEISHU.CN/wiki/1/", "https://my.feishu.cn/wiki/1"))
+    #expect(!FeishuURL.isSamePage("https://my.feishu.cn/wiki/1", "https://my.feishu.cn/wiki/2"))
+}
+
+@MainActor @Test func pinRenameReorderUnpinAndPersistence() throws {
+    let dbURL = FileManager.default.temporaryDirectory.appending(path: "ib-feishu-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: dbURL) }
+
+    let db1 = try AppDatabase(url: dbURL, migrations: [])
+    let settings1 = SettingsStore(database: db1)
+    let web1 = WebSessionManager(settings: settings1, startTimer: false, headlessForTesting: true)
+    let model1 = FeishuModel(settings: settings1, webSessions: web1)
+    #expect(model1.homeURL == "https://my.feishu.cn/")
+    #expect(model1.activePageID == FeishuModel.homePageID)
+    #expect(model1.pinnedPages.isEmpty)
+
+    let first = model1.pin(title: "研发规范", url: "my.feishu.cn/wiki/spec", systemImage: "book.pages")
+    let second = model1.pin(title: "值班表", url: "https://my.feishu.cn/sheets/duty", systemImage: "tablecells", neverSuspend: true)
+    #expect(first != nil)
+    #expect(second != nil)
+    #expect(model1.pinnedPages.count == 2)
+    #expect(model1.pinnedPages[0].url == "https://my.feishu.cn/wiki/spec")
+    #expect(model1.pinnedPages[1].neverSuspend == true)
+
+    // 重命名、免休眠开关与移动排序
+    model1.renamePin(id: first!.id, title: "前端研发规范")
+    model1.setNeverSuspend(true, id: first!.id)
+    #expect(model1.pinnedPages[0].title == "前端研发规范")
+    #expect(model1.pinnedPages[0].neverSuspend == true)
+
+    model1.movePin(id: second!.id, delta: -1)
+    #expect(model1.pinnedPages.map(\.id) == [second!.id, first!.id])
+
+    // 选中第二个固定页并检查持久化恢复
+    model1.selectPage(second!.id)
+    #expect(model1.activePageID == second!.id)
+
+    let db2 = try AppDatabase(url: dbURL, migrations: [])
+    let settings2 = SettingsStore(database: db2)
+    let web2 = WebSessionManager(settings: settings2, startTimer: false, headlessForTesting: true)
+    let model2 = FeishuModel(settings: settings2, webSessions: web2)
+    #expect(model2.pinnedPages.count == 2)
+    #expect(model2.pinnedPages.map(\.title) == ["值班表", "前端研发规范"])
+    #expect(model2.pinnedPages.map(\.neverSuspend) == [true, true])
+    #expect(model2.activePageID == second!.id)
+
+    // 取消当前激活的固定页会回退到飞书主页
+    model2.unpin(id: second!.id)
+    #expect(model2.pinnedPages.count == 1)
+    #expect(model2.activePageID == FeishuModel.homePageID)
+}
+
+@Test func pinnedPageDecodesLegacyJSONWithoutNeverSuspend() throws {
+    let legacyJSON = #"{"id":"p1","title":"旧文档","url":"https://my.feishu.cn/wiki/1","systemImage":"doc.text"}"#
+    let decoded = try JSONDecoder().decode(FeishuPinnedPage.self, from: Data(legacyJSON.utf8))
+    #expect(decoded.id == "p1")
+    #expect(decoded.title == "旧文档")
+    #expect(decoded.neverSuspend == false)
+}

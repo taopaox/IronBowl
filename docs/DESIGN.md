@@ -27,6 +27,8 @@
 Packages/IronBowlKit       公共底座：插件协议、玻璃组件、数据库、设置、提醒、工作日历、AI 提供者、Shell
 Packages/ZentaoLogPlugin   禅道日志
 Packages/CalendarPlugin    万年历（阶段二）
+Packages/FeishuPlugin      飞书知识库（阶段三）
+Packages/AIWebPlugin       AI 网页目录（仿 Cherry Studio 左侧 AI 菜单，内置主流 AI 预设与官方 Logo，支持增删改查）
 Apps/IronBowl              工作台（引入全部插件，设置里启用/停用）
 Apps/Calendar              独立万年历（阶段二，只引入底座 + CalendarPlugin）
 ```
@@ -58,6 +60,15 @@ Apps/Calendar              独立万年历（阶段二，只引入底座 + Calen
 - 备忘/提醒/任务与工作台待办合并为一套数据。
 - 用户另提供 `/Applications/万年历.app` 截图补充特有功能。
 
+## 阶段三：飞书知识库插件 & 通用网页墓碑机制
+
+- **通用网页与墓碑底座（`IronBowlKit/Web`）**：`WebSessionManager` + `WebSession` + `WebContainerView` 供所有内嵌网页插件共用，实现仿 Chrome 内存节省（墓碑机制）：
+  - 默认策略：开启自动休眠，后台闲置 **15 分钟**或同时保活超过 **4 页**（LRU）时自动进入墓碑状态。
+  - 进入墓碑前自动保存 `WKWebView.interactionState`（完整历史栈）与视口快照并销毁 `WKWebView` 释放 WebContent 进程内存；正在播放音视频、使用摄像头/麦克风或标为「免休眠」的页面自动跳过；系统主动杀掉 WebContent 进程时自动兜底恢复。
+  - 点击休眠页瞬间唤醒并叠加快照防白屏，全站共享 `WKWebsiteDataStore.default()` 登录态；全局参数在「设置 → 网页与内存」统一配置。
+- **飞书知识库（`Packages/FeishuPlugin`）**：默认主页 `https://my.feishu.cn/`（可在设置修改）；拦截 `feishu://` / `lark://` 唤起桌面端跳转，支持页内下载（`NSSavePanel`）与文件上传（`NSOpenPanel`）。
+- **固定网页到左侧**：顶部工具栏支持一键「固定到左侧」，固定条目直接显示在主窗口左侧栏「固定网页」分组，支持重命名、上移/下移排序、图标选择、免休眠/立即休眠、在外部浏览器打开、取消固定，并持久化到 SQLite 设置表。
+
 ## 之后
 
-飞书知识库（WKWebView 内嵌）、笔记、待办、周报日报：阶段一用几天后再逐个细化。
+笔记、待办、周报日报：按需逐个细化。

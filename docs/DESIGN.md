@@ -4,10 +4,22 @@
 
 ## 技术与形态
 
-- SwiftUI 原生，仅 macOS 26；液态玻璃（系统 Liquid Glass），主题色琥珀，跟随系统深浅色。
+- SwiftUI 原生，仅 macOS 26；视觉风格参照 WorkBuddy（见下方「视觉规范」），跟随系统深浅色。
 - 主窗口（侧边栏 + 插件页）+ 菜单栏图标。开机自启、是否占程序坞、菜单栏显示项（多选可排序）都在设置里。
 - 数据：`~/Library/Application Support/IronBowl/ironbowl.sqlite`（GRDB，WAL）。禅道账号密码明文存库（用户决定）。独立版万年历共用此库。
 - 工程：XcodeGen（`project.yml`），不提交 `.xcodeproj`。
+
+## 视觉规范（参照 WorkBuddy）
+
+组件都在 `Packages/IronBowlKit/Sources/IronBowlKit/UI/DesignSystem.swift`，新页面只用 `DS*` 组件，不直接写颜色。
+
+- **配色**：浅灰侧栏 `DS.sidebar` + 纯白内容区 `DS.canvas`；设置页灰底 `DS.groupBackground` 上放白卡。没有玻璃、渐变，只用 1px 细边框 `DS.border`。
+- **按钮**：主按钮黑底白字 `.dsPrimary`（每页最多一个），次按钮白底细边 `.dsSecondary`，图标或轻按钮 `.dsGhost`，首页快捷标签 `.dsChip`。
+- **控件**：开关为绿色 `DSToggle`；下拉为带边框的 `DSPicker`；输入框 `.textFieldStyle(.ds)`；数字用 `DSStepper`。
+- **结构**：页面顶部 `DSPageHeader`（左标题、右操作）；设置用 `DSSection` + `DSRow`（左边粗体标题加灰色说明，右边控件）；指标用 `DSMetric`；提示用 `DSBanner`；卡片用 `DSCard`。
+- **主窗口**：自绘侧栏（今天 + 各插件 + 「最近日志」 + 底部今日卡片 + 设置），首页「今天」包括居中问候、快捷标签、一句话记日志的输入框和小卡片。
+- **设置窗口**：左侧搜索框加分组导航（「设置」和各插件分组），右侧是灰底白卡。
+- **浮层**：菜单栏面板和提醒卡片同样是白卡、细边、黑色主按钮。
 
 ## 插件架构
 

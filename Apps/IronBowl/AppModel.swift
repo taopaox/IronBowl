@@ -21,12 +21,15 @@ enum AppKeys {
     static let enabledPlugins = SettingKey<[String]?>("app.enabledPlugins", default: nil)
     static let menuBarItems = SettingKey<[String]>("app.menuBarItems", default: ["zentao.status"])
     static let dockMode = SettingKey<DockMode>("app.dockMode", default: .whenWindowOpen)
-    static let lastPlugin = SettingKey<String>("app.lastPlugin", default: ZentaoLogPlugin.pluginID)
+    static let lastPlugin = SettingKey<String>("app.lastPlugin", default: AppModel.homeID)
 }
 
 /// 应用级状态：共享服务 + 插件列表。
 @Observable
 final class AppModel {
+    static let homeID = "home"
+    /// 给 AppDelegate 用（程序坞点击重新打开窗口）。
+    nonisolated(unsafe) static weak var shared: AppModel?
     let database: AppDatabase
     let settings: SettingsStore
     let reminders = ReminderCenter()
@@ -53,6 +56,7 @@ final class AppModel {
             ComingSoonPlugin(id: "report", title: "周报日报", systemImage: "doc.text"),
         ]
         self.plugins = plugins
+        defer { AppModel.shared = self }
         do {
             database = try AppDatabase(migrations: plugins.flatMap(\.migrations))
         } catch {
@@ -65,7 +69,8 @@ final class AppModel {
         context = PluginContext(
             database: database, settings: settings, reminders: reminders,
             workCalendar: workCalendar, providers: providers,
-            openPlugin: { [weak self] id in self?.open(plugin: id) }
+            openPlugin: { [weak self] id in self?.open(plugin: id) },
+            openSettings: { [weak self] page in self?.openSettings(page: page) }
         )
         startEnabledPlugins()
         applyDockMode()
@@ -103,10 +108,25 @@ final class AppModel {
 
     func plugin(_ id: String?) -> IronBowlPlugin? { plugins.first { $0.id == id } }
 
-    func open(plugin id: String) {
+    func select(_ id: String) {
         selection = id
         settings[AppKeys.lastPlugin] = id
+    }
+
+    func open(plugin id: String) {
+        select(id)
         openMainWindow?()
+        NSApp.activate()
+    }
+
+    // MARK: 设置窗口
+
+    var settingsSelection = "general"
+    @ObservationIgnored var openSettingsWindow: (() -> Void)?
+
+    func openSettings(page: String? = nil) {
+        if let page { settingsSelection = page }
+        openSettingsWindow?()
         NSApp.activate()
     }
 

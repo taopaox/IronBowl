@@ -3,26 +3,43 @@ import SwiftUI
 
 struct LogView: View {
     @Bindable var model: LogModel
-    @Environment(\.openSettings) private var openSettings
     @State private var showOvertime = false
     @State private var confirmSubmit = false
 
     var body: some View {
-        Group {
-            if !model.isConfigured {
-                ContentUnavailableView {
-                    Label("先连上禅道", systemImage: "link.badge.plus")
-                } description: {
-                    Text("在设置 → 禅道日志里填写禅道地址、账号和密码。")
-                } actions: {
-                    Button("打开设置") { openSettings() }.buttonStyle(.glassProminent)
+        VStack(spacing: 0) {
+            DSPageHeader("禅道日志") {
+                EmptyView()
+            } actions: {
+                Button { Task { await model.refresh() } } label: {
+                    if model.isScanning || model.isLoadingTasks { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.clockwise") }
                 }
-            } else {
+                .buttonStyle(.dsGhost)
+                .help("重新扫描提交、拉取禅道任务")
+                DSPicker(selection: $model.providerKind, options: AIProviderKind.allCases.map { ($0, $0.displayName) })
+                    .help("这次用哪个 AI 生成")
+                Button("记加班") { showOvertime = true }.buttonStyle(.dsSecondary)
+                Button {
+                    Task { await model.generate() }
+                } label: {
+                    if model.isGenerating {
+                        HStack(spacing: 6) { ProgressView().controlSize(.small).tint(DS.onPrimary); Text("生成中") }
+                    } else {
+                        Label("生成草稿", systemImage: "sparkles")
+                    }
+                }
+                .buttonStyle(.dsPrimary)
+                .disabled(model.isGenerating || !model.isConfigured)
+            }
+            .padding(.top, 8)
+
+            if model.isConfigured {
                 content
+            } else {
+                notConfigured
             }
         }
-        .navigationTitle("禅道日志")
-        .toolbar { toolbar }
+        .background(DS.canvas)
         .task {
             if model.lastScan == nil || model.settings[LogKeys.scanMode] != .manualOnly {
                 await model.refresh()
@@ -37,91 +54,96 @@ struct LogView: View {
         }
     }
 
+    private var notConfigured: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "link").font(.system(size: 28)).foregroundStyle(DS.textTertiary)
+            Text("先连上禅道").font(DS.pageTitle)
+            Text("填写禅道地址、账号和密码后，就能从 git 提交生成工作日志。").font(DS.body).foregroundStyle(DS.textSecondary)
+            Button("去填写禅道账号") { model.context.openSettings(ZentaoLogPlugin.settingsAccountID) }
+                .buttonStyle(.dsPrimary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var content: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                DayStrip(model: model)
-                SummaryCard(model: model)
-                if let error = model.errorMessage {
-                    GlassCard(tint: .red) {
-                        Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
-                            .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 18) {
+                DayTabs(model: model)
+                Metrics(model: model)
+
+                if let error = model.errorMessage { DSBanner(.danger, error) }
+                if let message = model.message { DSBanner(.success, message) }
+                let unmapped = model.activities.filter { model.mappings[$0.repoPath]?.projectID == nil }
+                if !unmapped.isEmpty {
+                    HStack {
+                        DSBanner(.warning, "\(unmapped.map(\.repoName).joined(separator: "、")) 还没对应禅道项目，AI 只能记到兜底任务")
+                        Button("去关联") { model.context.openSettings(ZentaoLogPlugin.settingsReposID) }.buttonStyle(.dsSecondary)
                     }
                 }
-                if let message = model.message {
-                    GlassCard(tint: .green) { Label(message, systemImage: "checkmark.circle.fill") }
-                }
+
                 if model.drafts.isEmpty {
+                    sectionTitle("当天的提交")
                     ActivityList(model: model)
                 } else {
-                    ForEach($model.drafts) { $entry in
-                        DraftCard(model: model, entry: $entry) {
-                            model.drafts.removeAll { $0.id == entry.id }
+                    sectionTitle("日志草稿")
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 400), spacing: 14, alignment: .top)], spacing: 14) {
+                        ForEach($model.drafts) { $entry in
+                            DraftCard(model: model, entry: $entry) {
+                                model.drafts.removeAll { $0.id == entry.id }
+                            }
                         }
+                        Button { model.addManual() } label: {
+                            DSCard(dashed: true) {
+                                Label("手动添加一条", systemImage: "plus").font(DS.body).foregroundStyle(DS.textSecondary)
+                                    .frame(maxWidth: .infinity, minHeight: 80)
+                            }
+                        }
+                        .buttonStyle(.plain)
                     }
-                    DisclosureGroup("当天的提交（\(model.activities.reduce(0) { $0 + $1.commits.count }) 次）") {
-                        ActivityList(model: model)
+                    DisclosureGroup {
+                        ActivityList(model: model).padding(.top, 8)
+                    } label: {
+                        Text("当天的提交（\(model.activities.reduce(0) { $0 + $1.commits.count }) 次）").font(DS.sectionTitle).foregroundStyle(DS.textSecondary)
                     }
-                    .padding(.horizontal, 4)
                 }
             }
-            .padding(20)
-            .frame(maxWidth: 860)
+            .padding(.horizontal, 28)
+            .padding(.top, 6)
+            .padding(.bottom, 24)
+            .frame(maxWidth: 1000, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .scrollIndicators(.never)
         .safeAreaInset(edge: .bottom) { bottomBar }
     }
 
-    private var bottomBar: some View {
-        GlassEffectContainer {
-            HStack(spacing: 10) {
-                Button("手动添加", systemImage: "plus") { model.addManual() }
-                    .buttonStyle(.glass)
-                Button("加班", systemImage: "moon.stars.fill") { showOvertime = true }
-                    .buttonStyle(.glass)
-                Spacer()
-                Text("合计 \(hoursText(model.totalHours)) / 默认 \(hoursText(model.defaultHours)) 小时")
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(model.totalHours > model.defaultHours ? Color.orange : .secondary)
-                Button {
-                    confirmSubmit = true
-                } label: {
-                    if model.isSubmitting { ProgressView().controlSize(.small) } else { Label("提交到禅道", systemImage: "paperplane.fill") }
-                }
-                .buttonStyle(.glassProminent)
-                .disabled(model.pendingDrafts.isEmpty || model.isSubmitting)
-            }
-            .padding(12)
-        }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 12)
+    private func sectionTitle(_ t: String) -> some View {
+        Text(t).font(DS.sectionTitle).foregroundStyle(DS.textSecondary)
     }
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItemGroup {
-            Picker("AI", selection: $model.providerKind) {
-                ForEach(AIProviderKind.allCases) { Text($0.displayName).tag($0) }
-            }
-            .help("这次用哪个 AI 生成")
+    private var bottomBar: some View {
+        HStack(spacing: 12) {
+            Button("手动添加", systemImage: "plus") { model.addManual() }.buttonStyle(.dsGhost)
+            Spacer()
+            Text("合计 \(hoursText(model.totalHours)) / \(hoursText(model.defaultHours)) 小时")
+                .font(DS.body.monospacedDigit())
+                .foregroundStyle(model.totalHours > model.defaultHours ? DS.warning : DS.textSecondary)
             Button {
-                Task { await model.refresh() }
+                confirmSubmit = true
             } label: {
-                if model.isScanning || model.isLoadingTasks { ProgressView().controlSize(.small) } else { Label("刷新", systemImage: "arrow.clockwise") }
-            }
-            .help("重新扫描提交、拉取禅道任务")
-            Button {
-                Task { await model.generate() }
-            } label: {
-                if model.isGenerating {
-                    ProgressView().controlSize(.small)
+                if model.isSubmitting {
+                    HStack(spacing: 6) { ProgressView().controlSize(.small).tint(DS.onPrimary); Text("提交中") }
                 } else {
-                    Label("生成草稿", systemImage: "sparkles")
+                    Text("提交到禅道")
                 }
             }
-            .buttonStyle(.glassProminent)
-            .disabled(model.isGenerating)
+            .buttonStyle(.dsPrimary)
+            .disabled(model.pendingDrafts.isEmpty || model.isSubmitting)
         }
+        .padding(.horizontal, 28)
+        .frame(height: 56)
+        .background(DS.canvas)
+        .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
     }
 }
 
@@ -129,71 +151,52 @@ func hoursText(_ h: Double) -> String {
     h == h.rounded() ? String(Int(h)) : String(format: "%.1f", h)
 }
 
-/// 最近 7 天选择条。
-struct DayStrip: View {
+/// 最近 7 天标签。
+struct DayTabs: View {
     let model: LogModel
 
     var body: some View {
-        GlassEffectContainer(spacing: 6) {
-            HStack(spacing: 6) {
-                ForEach(model.recentDays, id: \.self) { day in
-                    let info = model.context.workCalendar.dayInfo(day)
-                    let selected = Calendar.current.isDate(day, inSameDayAs: model.date)
-                    Button {
-                        Task { await model.select(date: day) }
-                    } label: {
-                        VStack(spacing: 2) {
-                            Text(Calendar.current.isDateInToday(day) ? "今天" : day.formatted(.dateTime.weekday(.abbreviated)))
-                                .font(.caption2)
-                            Text(day.formatted(.dateTime.month(.defaultDigits).day()))
-                                .font(.callout.weight(.semibold).monospacedDigit())
-                            Text(dayBadge(info)).font(.system(size: 9)).foregroundStyle(info.isWorkday ? Color.secondary : .red)
+        HStack(spacing: 6) {
+            ForEach(model.recentDays, id: \.self) { day in
+                let info = model.context.workCalendar.dayInfo(day)
+                let selected = Calendar.current.isDate(day, inSameDayAs: model.date)
+                let submitted = !model.store.submissions(on: WorkCalendar.dayString(day)).isEmpty
+                Button {
+                    Task { await model.select(date: day) }
+                } label: {
+                    VStack(spacing: 2) {
+                        Text(Calendar.current.isDateInToday(day) ? "今天" : day.formatted(.dateTime.weekday(.abbreviated)))
+                            .font(.system(size: 12.5, weight: selected ? .semibold : .regular))
+                        HStack(spacing: 3) {
+                            Text(day.formatted(.dateTime.month(.defaultDigits).day())).monospacedDigit()
+                            if submitted { Image(systemName: "checkmark").foregroundStyle(DS.toggle) }
+                            else if !info.isWorkday { Text(info.name.map { String($0.prefix(2)) } ?? "休").foregroundStyle(DS.danger) }
                         }
-                        .frame(width: 58, height: 52)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(DS.textSecondary)
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(selected ? .regular.tint(Color.accentColor.opacity(0.35)).interactive() : .regular.interactive(),
-                                 in: .rect(cornerRadius: 14))
+                    .foregroundStyle(selected ? DS.text : DS.textSecondary)
+                    .frame(width: 62, height: 44)
+                    .background(selected ? DS.selected : .clear, in: .rect(cornerRadius: DS.controlRadius))
+                    .contentShape(.rect)
                 }
+                .buttonStyle(.plain)
             }
-        }
-    }
-
-    func dayBadge(_ info: DayInfo) -> String {
-        switch info.kind {
-        case .workday: "班"
-        case .makeupWorkday: "补班"
-        case .weekend: "休"
-        case .holiday: info.name ?? "假"
         }
     }
 }
 
-struct SummaryCard: View {
+struct Metrics: View {
     let model: LogModel
 
     var body: some View {
         let commits = model.activities.reduce(0) { $0 + $1.commits.count }
-        let unmapped = model.activities.filter { model.mappings[$0.repoPath]?.projectID == nil }
-        GlassCard {
-            HStack(spacing: 28) {
-                stat("\(commits)", "次提交")
-                stat("\(model.activities.count)", "个仓库")
-                stat("\(model.openTasks.count)", "个未关闭任务")
-                stat(hoursText(model.defaultHours), "小时默认工时")
-                Spacer()
-                if !unmapped.isEmpty {
-                    Label("\(unmapped.count) 个仓库还没对应禅道项目", systemImage: "exclamationmark.circle")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-            }
-        }
-    }
-
-    func stat(_ value: String, _ label: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(value).font(.title2.weight(.semibold).monospacedDigit())
-            Text(label).font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            DSMetric("提交", value: "\(commits) 次", detail: "\(model.activities.count) 个仓库")
+            DSMetric("草稿工时", value: "\(hoursText(model.totalHours)) h", detail: "默认 \(hoursText(model.defaultHours)) h")
+            DSMetric("未关闭任务", value: "\(model.openTasks.count)", detail: "\(model.projects.count) 个项目")
+            DSMetric("状态", value: model.pendingDrafts.isEmpty && model.drafts.contains(where: \.isRecorded) ? "已提交" : model.drafts.isEmpty ? "未生成" : "待提交",
+                     detail: model.lastScan.map { "扫描于 \($0.formatted(date: .omitted, time: .shortened))" })
         }
     }
 }
@@ -203,29 +206,32 @@ struct ActivityList: View {
 
     var body: some View {
         if model.activities.isEmpty {
-            GlassCard {
-                Label(model.isScanning ? "正在扫描…" : "这一天没有找到你的提交", systemImage: "tray")
-                    .foregroundStyle(.secondary)
+            DSCard {
+                Text(model.isScanning ? "正在扫描…" : "这一天没有找到你的提交，可以手动添加工作内容。")
+                    .font(DS.body).foregroundStyle(DS.textSecondary)
             }
         }
-        ForEach(model.activities) { act in
-            GlassCard(padding: 14) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(act.repoName).font(.headline)
-                        if let m = model.mappings[act.repoPath], m.projectID != nil {
-                            Tag(m.projectName, color: .accentColor)
-                        } else {
-                            Tag("未关联项目", color: .orange)
+        VStack(spacing: 10) {
+            ForEach(model.activities) { act in
+                DSCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Text(act.repoName).font(DS.rowTitle)
+                            if let m = model.mappings[act.repoPath], m.projectID != nil {
+                                Tag(m.projectName, color: DS.textSecondary)
+                            } else {
+                                Tag("未关联项目", color: DS.warning)
+                            }
+                            Spacer()
+                            Text("\(act.commits.count) 次 · \(act.lines) 行").font(DS.caption).foregroundStyle(DS.textTertiary)
                         }
-                        Spacer()
-                        Text("\(act.commits.count) 次 · \(act.lines) 行").font(.caption).foregroundStyle(.secondary)
-                    }
-                    ForEach(act.commits) { c in
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(c.date.formatted(date: .omitted, time: .shortened))
-                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                            Text(c.subject).font(.callout).lineLimit(1)
+                        ForEach(act.commits) { c in
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Text(c.date.formatted(date: .omitted, time: .shortened))
+                                    .font(DS.caption.monospacedDigit()).foregroundStyle(DS.textTertiary)
+                                    .frame(width: 40, alignment: .leading)
+                                Text(c.subject).font(DS.body).lineLimit(1)
+                            }
                         }
                     }
                 }
@@ -241,68 +247,56 @@ struct DraftCard: View {
     let onDelete: () -> Void
 
     var body: some View {
-        GlassCard(tint: entry.isRecorded ? .gray : entry.isFallback ? .yellow : nil) {
+        DSCard {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     if entry.isRecorded {
                         Text(model.task(entry.taskID).map { "#\($0.id) \($0.name)" } ?? "#\(entry.taskID ?? 0)")
-                            .font(.headline)
+                            .font(DS.rowTitle).lineLimit(1)
                     } else {
-                        TaskPicker(model: model, selection: $entry.taskID)
+                        DSPicker(selection: $entry.taskID, options: taskOptions, width: 250)
                             .onChange(of: entry.taskID) { recompute() }
                     }
-                    if entry.isRecorded { Tag("已记录", color: .green) }
-                    if entry.isFallback { Tag("兜底", color: .orange) }
+                    if entry.isRecorded { Tag("已记录", color: DS.success) }
+                    if entry.isFallback { Tag("兜底", color: DS.warning) }
                     if entry.isOvertime { Tag("加班", color: .purple) }
-                    if entry.isManual { Tag("手动", color: .blue) }
-                    Spacer()
+                    if entry.isManual { Tag("手动", color: DS.textSecondary) }
+                    Spacer(minLength: 0)
                     if !entry.isRecorded {
-                        Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }
-                            .buttonStyle(.borderless)
-                            .help("删除这一条")
+                        Button(action: onDelete) { Image(systemName: "trash") }.buttonStyle(.dsGhost).help("删除这一条")
                     }
                 }
-                HStack(spacing: 18) {
-                    LabeledContent("消耗") {
-                        if entry.isRecorded {
-                            Text("\(hoursText(entry.hours)) h")
-                        } else {
-                            Stepper(value: $entry.hours, in: 0...24, step: 0.5) {
-                                Text("\(hoursText(entry.hours)) h").monospacedDigit()
-                            }
-                            .onChange(of: entry.hours) { recompute() }
-                        }
-                    }
-                    LabeledContent("剩余") {
-                        if entry.isRecorded {
-                            Text("\(hoursText(entry.left)) h")
-                        } else {
-                            TextField("剩余", value: $entry.left, format: .number)
-                                .frame(width: 60)
-                                .textFieldStyle(.roundedBorder)
-                        }
-                    }
-                    if !entry.isRecorded {
-                        Toggle("加班", isOn: $entry.isOvertime).toggleStyle(.checkbox)
-                    }
-                    Spacer()
-                    if !entry.repoPaths.isEmpty {
-                        Text(entry.repoPaths.map { ($0 as NSString).lastPathComponent }.joined(separator: "、"))
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
+                if let task = model.task(entry.taskID) {
+                    Text("\(task.projectName)" + (entry.repoPaths.isEmpty ? "" : " · " + entry.repoPaths.map { ($0 as NSString).lastPathComponent }.joined(separator: "、")))
+                        .font(DS.caption).foregroundStyle(DS.textTertiary).lineLimit(1)
                 }
-                .font(.callout)
                 if entry.isRecorded {
-                    Text(entry.work).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(entry.work).font(DS.body).foregroundStyle(DS.textSecondary).textSelection(.enabled)
+                    Text("消耗 \(hoursText(entry.hours)) h · 剩余 \(hoursText(entry.left)) h").font(DS.caption).foregroundStyle(DS.textTertiary)
                 } else {
                     TextEditor(text: $entry.work)
-                        .font(.callout)
-                        .frame(minHeight: 64)
+                        .font(DS.body)
                         .scrollContentBackground(.hidden)
-                        .padding(6)
-                        .background(.background.opacity(0.4), in: .rect(cornerRadius: 10))
+                        .frame(minHeight: 70)
+                        .padding(8)
+                        .background(DS.well, in: .rect(cornerRadius: DS.controlRadius))
+                    HStack(spacing: 10) {
+                        Text("消耗").font(DS.caption).foregroundStyle(DS.textSecondary)
+                        DSStepper(value: $entry.hours, in: 0...24, step: 0.5) { "\(hoursText($0)) h" }
+                            .onChange(of: entry.hours) { recompute() }
+                        Text("剩余").font(DS.caption).foregroundStyle(DS.textSecondary)
+                        TextField("", value: $entry.left, format: .number).textFieldStyle(.ds).frame(width: 56)
+                        Spacer()
+                        Toggle("加班", isOn: $entry.isOvertime).toggleStyle(.checkbox).font(DS.caption)
+                    }
                 }
             }
+        }
+    }
+
+    private var taskOptions: [(Int?, String)] {
+        [(nil, "选择任务…")] + model.projects.flatMap { p in
+            model.openTasks.filter { $0.projectID == p.id }.map { (Int?.some($0.id), "\(p.name) · #\($0.id) \($0.name)") }
         }
     }
 
@@ -311,24 +305,15 @@ struct DraftCard: View {
     }
 }
 
-/// 按项目分组的任务选择器。
+/// 任务下拉（加班弹框用）。
 struct TaskPicker: View {
     let model: LogModel
     @Binding var selection: Int?
 
     var body: some View {
-        Picker("任务", selection: $selection) {
-            Text("选择任务…").tag(Int?.none)
-            ForEach(model.projects, id: \.id) { project in
-                Section(project.name) {
-                    ForEach(model.openTasks.filter { $0.projectID == project.id }) { t in
-                        Text("#\(t.id) \(t.name)（剩 \(hoursText(t.left))h）").tag(Int?.some(t.id))
-                    }
-                }
-            }
-        }
-        .labelsHidden()
-        .frame(maxWidth: 420)
+        DSPicker(selection: $selection,
+                 options: [(nil, "选择任务…")] + model.openTasks.map { (Int?.some($0.id), "\($0.projectName) · #\($0.id) \($0.name)") },
+                 width: 300)
     }
 }
 
@@ -340,27 +325,33 @@ struct OvertimeSheet: View {
     @State private var work = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Label("记一笔加班", systemImage: "moon.stars.fill").font(.title3.weight(.semibold))
-            Form {
-                Stepper(value: $hours, in: 0.5...12, step: 0.5) { Text("时长：\(hoursText(hours)) 小时") }
-                LabeledContent("任务") { TaskPicker(model: model, selection: $taskID) }
-                TextField("做了什么（可留空）", text: $work, axis: .vertical).lineLimit(2...4)
+        VStack(alignment: .leading, spacing: 18) {
+            Text("记一笔加班").font(DS.pageTitle)
+            VStack(spacing: 0) {
+                DSRow("时长") { DSStepper(value: $hours, in: 0.5...12, step: 0.5) { "\(hoursText($0)) 小时" } }
+                Divider().overlay(DS.border).padding(.horizontal, 16)
+                DSRow("任务") { TaskPicker(model: model, selection: $taskID) }
+                Divider().overlay(DS.border).padding(.horizontal, 16)
+                DSBlockRow {
+                    TextField("做了什么（可留空）", text: $work, axis: .vertical).textFieldStyle(.plain).font(DS.body).lineLimit(2...4)
+                }
             }
-            .formStyle(.grouped)
+            .background(DS.card, in: .rect(cornerRadius: DS.radius))
+            .overlay { RoundedRectangle(cornerRadius: DS.radius).strokeBorder(DS.border) }
             HStack {
                 Spacer()
-                Button("取消") { dismiss() }.buttonStyle(.glass)
+                Button("取消") { dismiss() }.buttonStyle(.dsSecondary)
                 Button("加上") {
                     model.addOvertime(hours: hours, taskID: taskID, work: work)
                     dismiss()
                 }
-                .buttonStyle(.glassProminent)
+                .buttonStyle(.dsPrimary)
                 .disabled(taskID == nil)
             }
         }
-        .padding(20)
-        .frame(width: 480)
+        .padding(22)
+        .frame(width: 500)
+        .background(DS.groupBackground)
         .onAppear {
             hours = model.settings[LogKeys.overtimeDefaultHours]
             taskID = model.busiestTaskID

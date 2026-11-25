@@ -11,79 +11,73 @@ struct MenuBarLabel: View {
         let text = app.menuBarText
         Text(text.isEmpty ? "🍚" : "🍚 \(text)")
             .onAppear {
-            // 菜单栏标签启动时就会渲染，这里拿到 openWindow 给全局用。
-            app.openMainWindow = { openWindow(id: "main") }
-        }
+                // 菜单栏标签启动时就会渲染，这里拿到 openWindow 给全局用。
+                app.openMainWindow = { openWindow(id: "main") }
+                app.openSettingsWindow = { openWindow(id: "settings") }
+            }
     }
 }
 
-/// 点菜单栏图标弹出的玻璃面板。
+/// 点菜单栏图标弹出的面板。
 struct MenuPanel: View {
     let app: AppModel
-    @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header
-            GlassEffectContainer(spacing: 8) {
-                VStack(spacing: 6) {
-                    ForEach(app.enabledPlugins.filter { !$0.isComingSoon }, id: \.id) { plugin in
-                        Button {
-                            app.open(plugin: plugin.id)
-                        } label: {
-                            Label(plugin.title, systemImage: plugin.systemImage)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 6)
-                                .padding(.horizontal, 10)
-                        }
-                        .buttonStyle(.plain)
-                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+        VStack(alignment: .leading, spacing: 0) {
+            header.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
+
+            VStack(spacing: 2) {
+                DSSidebarItem("今天", systemImage: "house", selected: false) { app.open(plugin: AppModel.homeID) }
+                ForEach(app.enabledPlugins.filter { !$0.isComingSoon }, id: \.id) { plugin in
+                    DSSidebarItem(plugin.title, systemImage: plugin.systemImage, selected: false) {
+                        app.open(plugin: plugin.id)
                     }
                 }
             }
+            .padding(.horizontal, 6)
+
             let items = app.availableMenuBarItems.compactMap { item in item.text().map { (item.title, $0) } }
             if !items.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 5) {
                     ForEach(items, id: \.0) { title, value in
                         HStack {
-                            Text(title).foregroundStyle(.secondary)
+                            Text(title).foregroundStyle(DS.textSecondary).lineLimit(1)
                             Spacer()
                             Text(value).monospacedDigit()
                         }
-                        .font(.caption)
+                        .font(DS.caption)
                     }
                 }
-                .padding(.horizontal, 4)
+                .padding(12)
+                .background(DS.well, in: .rect(cornerRadius: 10))
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
             }
-            Divider()
-            HStack {
-                Button("打开饭碗") {
-                    openWindow(id: "main")
-                    NSApp.activate()
-                }
+
+            HStack(spacing: 4) {
+                Button("设置") { app.openSettings() }.buttonStyle(.dsGhost)
                 Spacer()
-                Button("设置…") {
-                    openSettings()
-                    NSApp.activate()
-                }
-                Button("退出") { NSApp.terminate(nil) }
+                Button("退出饭碗") { NSApp.terminate(nil) }.buttonStyle(.dsGhost)
             }
-            .buttonStyle(.borderless)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
+            .padding(.top, 10)
         }
-        .padding(14)
-        .frame(width: 300)
+        .frame(width: 290)
+        .background(DS.canvas)
     }
 
     private var header: some View {
+        let _ = app.now
         let info = app.workCalendar.dayInfo(Date())
-        return HStack(alignment: .firstTextBaseline) {
-            Text("🍚 饭碗").font(.headline)
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("饭碗").font(.system(size: 14, weight: .semibold))
             Spacer()
-            Text(Date().formatted(.dateTime.month().day().weekday(.wide)))
-                .font(.caption).foregroundStyle(.secondary)
-            if !info.isWorkday { Tag(info.name ?? "休", color: .red) }
-            if info.kind == .makeupWorkday { Tag("补班", color: .orange) }
+            Text(Date().formatted(.dateTime.month().day().weekday(.wide)) + " · " + WorkCalendar.lunarString(Date()))
+                .font(DS.caption).foregroundStyle(DS.textSecondary)
+            if !info.isWorkday { Tag(info.name ?? "休", color: DS.danger) }
+            if info.kind == .makeupWorkday { Tag("补班", color: DS.warning) }
         }
     }
 }

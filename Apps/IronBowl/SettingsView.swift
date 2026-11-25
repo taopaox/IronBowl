@@ -1,21 +1,87 @@
 import IronBowlKit
 import SwiftUI
 
+/// 设置窗口：左边搜索 + 分组导航，右边灰底白卡（WorkBuddy 风格）。
 struct SettingsView: View {
-    let app: AppModel
+    @Bindable var app: AppModel
+    @State private var query = ""
+
+    struct NavGroup: Identifiable {
+        let id: String
+        let title: String
+        let pages: [SettingsPage]
+    }
+
+    private var groups: [NavGroup] {
+        let core = NavGroup(id: "core", title: "设置", pages: [
+            SettingsPage(id: "general", title: "通用", systemImage: "gearshape") { AnyView(GeneralSettings(app: app)) },
+            SettingsPage(id: "worktime", title: "工作时间", systemImage: "clock") { AnyView(WorkTimeSettings(app: app)) },
+            SettingsPage(id: "ai", title: "AI 提供者", systemImage: "sparkles") { AnyView(ProviderSettings(app: app)) },
+        ])
+        let plugins = app.enabledPlugins.compactMap { p -> NavGroup? in
+            let pages = p.settingsPages
+            return pages.isEmpty ? nil : NavGroup(id: p.id, title: p.title, pages: pages)
+        }
+        return ([core] + plugins).compactMap { g in
+            let q = query.trimmingCharacters(in: .whitespaces)
+            let pages = q.isEmpty ? g.pages : g.pages.filter { $0.title.localizedCaseInsensitiveContains(q) || g.title.localizedCaseInsensitiveContains(q) }
+            return pages.isEmpty ? nil : NavGroup(id: g.id, title: g.title, pages: pages)
+        }
+    }
 
     var body: some View {
-        TabView {
-            GeneralSettings(app: app).tabItem { Label("通用", systemImage: "gearshape") }
-            WorkTimeSettings(app: app).tabItem { Label("工作时间", systemImage: "clock") }
-            ProviderSettings(app: app).tabItem { Label("AI 提供者", systemImage: "sparkles") }
-            ForEach(app.enabledPlugins, id: \.id) { plugin in
-                if let view = plugin.makeSettingsView() {
-                    view.tabItem { Label(plugin.title, systemImage: plugin.systemImage) }
+        let groups = groups
+        let current = groups.flatMap(\.pages).first { $0.id == app.settingsSelection } ?? groups.first?.pages.first
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(DS.textTertiary)
+                    TextField("搜索设置项", text: $query).textFieldStyle(.plain)
                 }
+                .font(.system(size: 13))
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(DS.selected, in: .rect(cornerRadius: DS.controlRadius))
+                .padding(.horizontal, 12)
+                .padding(.top, 40)
+                .padding(.bottom, 6)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(groups) { group in
+                            DSSidebarSection(group.title)
+                            ForEach(group.pages) { page in
+                                DSSidebarItem(page.title, systemImage: page.systemImage, selected: page.id == current?.id) {
+                                    app.settingsSelection = page.id
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 12)
+                }
+                .scrollIndicators(.never)
             }
+            .frame(width: 220)
+            .background(DS.sidebar)
+
+            Rectangle().fill(DS.border).frame(width: 1)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    if let current {
+                        current.makeView().id(current.id)
+                    }
+                }
+                .padding(.horizontal, 28)
+                .padding(.top, 40)
+                .padding(.bottom, 28)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .background(DS.groupBackground)
         }
-        .frame(width: 760, height: 600)
+        .ignoresSafeArea()
+        .frame(width: 900, height: 660)
     }
 }
 
@@ -26,36 +92,25 @@ struct GeneralSettings: View {
 
     var body: some View {
         let s = app.settings
-        Form {
-            Section("启动与显示") {
-                Toggle("开机自动启动", isOn: $app.launchAtLogin)
-                if let e = app.launchError { Text(e).font(.caption).foregroundStyle(.red) }
-                Picker("程序坞图标", selection: Binding(
-                    get: { s[AppKeys.dockMode] },
-                    set: { s[AppKeys.dockMode] = $0; app.applyDockMode() }
-                )) {
-                    ForEach(DockMode.allCases) { Text($0.displayName).tag($0) }
-                }
+        DSSection("启动与显示") {
+            DSRow("开机自动启动", description: app.launchError ?? "登录电脑后自动启动饭碗，只在菜单栏显示。") {
+                DSToggle(isOn: $app.launchAtLogin)
             }
-
-            Section {
-                MenuBarItemsEditor(app: app)
-            } header: {
-                Text("菜单栏显示")
-            } footer: {
-                Hint("🍚 图标一直显示；勾选的信息按顺序跟在后面，用箭头调整顺序。")
+            DSRow("程序坞图标", description: "饭碗平时只在菜单栏，这里决定要不要在程序坞里出现。") {
+                DSPicker(selection: Binding(get: { s[AppKeys.dockMode] }, set: { s[AppKeys.dockMode] = $0; app.applyDockMode() }),
+                         options: DockMode.allCases.map { ($0, $0.displayName) })
             }
-
-            Section("插件") {
-                ForEach(app.plugins, id: \.id) { plugin in
-                    Toggle(isOn: Binding(get: { app.enabledIDs.contains(plugin.id) },
-                                         set: { app.setEnabled(plugin.id, $0) })) {
-                        Label(plugin.title + (plugin.isComingSoon ? "（即将推出）" : ""), systemImage: plugin.systemImage)
-                    }
+        }
+        DSSection("菜单栏显示", footer: "🍚 图标一直显示；打开的信息按顺序跟在后面，用箭头调整顺序。") {
+            MenuBarItemsEditor(app: app)
+        }
+        DSSection("功能插件") {
+            ForEach(app.plugins, id: \.id) { plugin in
+                DSRow(plugin.title, description: plugin.isComingSoon ? "即将推出" : nil) {
+                    DSToggle(isOn: Binding(get: { app.enabledIDs.contains(plugin.id) }, set: { app.setEnabled(plugin.id, $0) }))
                 }
             }
         }
-        .formStyle(.grouped)
     }
 }
 
@@ -66,28 +121,26 @@ struct MenuBarItemsEditor: View {
         let s = app.settings
         let selected = s[AppKeys.menuBarItems]
         let all = app.availableMenuBarItems
-        // 已选的按顺序在前，没选的在后。
         let ordered = selected.compactMap { id in all.first { $0.id == id } } + all.filter { !selected.contains($0.id) }
         ForEach(ordered) { item in
-            HStack {
-                Toggle(item.title, isOn: Binding(
-                    get: { s[AppKeys.menuBarItems].contains(item.id) },
-                    set: { on in
-                        var list = s[AppKeys.menuBarItems].filter { $0 != item.id }
-                        if on { list.append(item.id) }
-                        s[AppKeys.menuBarItems] = list
+            DSRow(item.title, description: selected.contains(item.id) ? "当前显示：\(item.text() ?? "—")" : nil) {
+                HStack(spacing: 4) {
+                    if let i = selected.firstIndex(of: item.id) {
+                        Button { move(i, -1) } label: { Image(systemName: "chevron.up") }
+                            .buttonStyle(.dsGhost).disabled(i == 0)
+                        Button { move(i, 1) } label: { Image(systemName: "chevron.down") }
+                            .buttonStyle(.dsGhost).disabled(i == selected.count - 1)
                     }
-                ))
-                Spacer()
-                if let i = selected.firstIndex(of: item.id) {
-                    Text(item.text() ?? "—").font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                    Button { move(i, -1) } label: { Image(systemName: "chevron.up") }
-                        .disabled(i == 0)
-                    Button { move(i, 1) } label: { Image(systemName: "chevron.down") }
-                        .disabled(i == selected.count - 1)
+                    DSToggle(isOn: Binding(
+                        get: { s[AppKeys.menuBarItems].contains(item.id) },
+                        set: { on in
+                            var list = s[AppKeys.menuBarItems].filter { $0 != item.id }
+                            if on { list.append(item.id) }
+                            s[AppKeys.menuBarItems] = list
+                        }
+                    ))
                 }
             }
-            .buttonStyle(.borderless)
         }
     }
 
@@ -111,11 +164,9 @@ struct WorkTimeSettings: View {
     var body: some View {
         let s = app.settings
         let cal = app.workCalendar
-        Form {
-            Section("工作日与上下班") {
-                HStack {
-                    Text("每周上班")
-                    Spacer()
+        DSSection("工作日与上下班") {
+            DSRow("每周上班", description: "点击切换哪几天上班。") {
+                HStack(spacing: 4) {
                     ForEach(weekdays, id: \.0) { day, name in
                         let on = s[WorkCalendar.weekdaysKey].contains(day)
                         Button(name) {
@@ -124,60 +175,58 @@ struct WorkTimeSettings: View {
                             s[WorkCalendar.weekdaysKey] = list.sorted()
                         }
                         .buttonStyle(.plain)
-                        .frame(width: 30, height: 26)
-                        .glassEffect(on ? .regular.tint(Color.accentColor.opacity(0.4)).interactive() : .regular.interactive(),
-                                     in: .rect(cornerRadius: 8))
+                        .font(.system(size: 12.5, weight: on ? .semibold : .regular))
+                        .foregroundStyle(on ? DS.onPrimary : DS.textSecondary)
+                        .frame(width: 28, height: 28)
+                        .background(on ? DS.primaryFill : DS.well, in: .circle)
                     }
                 }
-                TimeField(title: "上班时间", value: s.binding(WorkCalendar.startKey))
-                TimeField(title: "下班时间", value: s.binding(WorkCalendar.endKey))
-                Stepper("午休 \(s[WorkCalendar.lunchMinutesKey]) 分钟", value: s.binding(WorkCalendar.lunchMinutesKey), in: 0...180, step: 15)
-                LabeledContent("每天默认工时", value: "\(String(format: "%g", cal.defaultWorkHours)) 小时")
             }
-
-            Section {
-                Picker("数据源", selection: s.binding(WorkCalendar.sourceKey)) {
-                    ForEach(HolidaySource.allCases) { Text($0.displayName).tag($0) }
-                }
-                Picker("更新频率", selection: s.binding(WorkCalendar.frequencyKey)) {
-                    ForEach(HolidayUpdateFrequency.allCases) { Text($0.displayName).tag($0) }
-                }
-                HStack {
-                    let years = cal.cachedYears
-                    Text(years.isEmpty ? "还没有节假日数据" : "已缓存：\(years.map(String.init).joined(separator: "、")) 年")
-                        .foregroundStyle(.secondary)
-                    if let last = s[WorkCalendar.lastFetchKey] {
-                        Text("· 更新于 \(last.formatted(date: .abbreviated, time: .shortened))").foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button {
-                        Task { await cal.updateNow() }
-                    } label: {
-                        if cal.isUpdating { ProgressView().controlSize(.small) } else { Text("立即更新") }
-                    }
-                    .disabled(s[WorkCalendar.sourceKey] == .manual)
-                }
-                .font(.callout)
-                if let e = cal.lastError { Text(e).font(.caption).foregroundStyle(.red) }
-            } header: {
-                Text("法定节假日与调休")
-            } footer: {
-                Hint("holiday-cn 根据国务院放假通知自动更新，免费、无需注册。手动标记优先于联网数据。")
+            DSRow("上班时间") { TimeField(value: s.binding(WorkCalendar.startKey)) }
+            DSRow("下班时间") { TimeField(value: s.binding(WorkCalendar.endKey)) }
+            DSRow("午休", description: "每天默认工时 = 下班 − 上班 − 午休，现在是 \(String(format: "%g", cal.defaultWorkHours)) 小时。") {
+                DSStepper(intValue: s.binding(WorkCalendar.lunchMinutesKey), in: 0...180, step: 15) { "\($0) 分钟" }
             }
+        }
 
-            Section("手动标记某一天") {
-                DatePicker("日期", selection: $markDate, displayedComponents: .date)
-                let info = cal.dayInfo(markDate)
-                LabeledContent("当前", value: label(info) + (cal.override(for: markDate) != nil ? "（手动）" : ""))
-                HStack {
-                    Button("标为放假") { cal.setOverride(markDate, isOffDay: true, note: "手动放假") }
-                    Button("标为上班") { cal.setOverride(markDate, isOffDay: false, note: "手动补班") }
-                    Button("清除手动标记") { cal.setOverride(markDate, isOffDay: nil) }
+        DSSection("法定节假日与调休", footer: "holiday-cn 根据国务院放假通知自动更新，免费、无需注册。手动标记优先于联网数据。") {
+            DSRow("数据源") {
+                DSPicker(selection: s.binding(WorkCalendar.sourceKey), options: HolidaySource.allCases.map { ($0, $0.displayName) })
+            }
+            DSRow("更新频率") {
+                DSPicker(selection: s.binding(WorkCalendar.frequencyKey), options: HolidayUpdateFrequency.allCases.map { ($0, $0.displayName) })
+            }
+            DSRow("已缓存数据", description: cachedText(cal: cal, s: s)) {
+                Button {
+                    Task { await cal.updateNow() }
+                } label: {
+                    if cal.isUpdating { ProgressView().controlSize(.small) } else { Text("立即更新") }
+                }
+                .buttonStyle(.dsSecondary)
+                .disabled(s[WorkCalendar.sourceKey] == .manual)
+            }
+        }
+
+        DSSection("手动标记某一天") {
+            DSRow("日期", description: label(cal.dayInfo(markDate)) + (cal.override(for: markDate) != nil ? "（手动标记）" : "")) {
+                DatePicker("", selection: $markDate, displayedComponents: .date).labelsHidden().datePickerStyle(.field)
+            }
+            DSBlockRow {
+                HStack(spacing: 8) {
+                    Button("标为放假") { cal.setOverride(markDate, isOffDay: true, note: "手动放假") }.buttonStyle(.dsSecondary)
+                    Button("标为上班") { cal.setOverride(markDate, isOffDay: false, note: "手动补班") }.buttonStyle(.dsSecondary)
+                    Button("清除手动标记") { cal.setOverride(markDate, isOffDay: nil) }.buttonStyle(.dsGhost)
                         .disabled(cal.override(for: markDate) == nil)
                 }
             }
         }
-        .formStyle(.grouped)
+    }
+
+    func cachedText(cal: WorkCalendar, s: SettingsStore) -> String {
+        var t = cal.cachedYears.isEmpty ? "还没有节假日数据" : "已缓存 \(cal.cachedYears.map(String.init).joined(separator: "、")) 年"
+        if let last = s[WorkCalendar.lastFetchKey] { t += "，更新于 \(last.formatted(date: .abbreviated, time: .shortened))" }
+        if let e = cal.lastError { t += "。\(e)" }
+        return t
     }
 
     func label(_ info: DayInfo) -> String {
@@ -190,12 +239,12 @@ struct WorkTimeSettings: View {
     }
 }
 
+/// "09:00" 字符串 ⇄ 时间选择。
 struct TimeField: View {
-    let title: String
     @Binding var value: String
 
     var body: some View {
-        DatePicker(title, selection: Binding(
+        DatePicker("", selection: Binding(
             get: {
                 let p = value.split(separator: ":").compactMap { Int($0) }
                 return Calendar.current.date(bySettingHour: p.first ?? 9, minute: p.count > 1 ? p[1] : 0, second: 0, of: Date()) ?? Date()
@@ -205,6 +254,8 @@ struct TimeField: View {
                 value = String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
             }
         ), displayedComponents: .hourAndMinute)
+        .labelsHidden()
+        .datePickerStyle(.field)
     }
 }
 
@@ -215,18 +266,15 @@ struct ProviderSettings: View {
 
     var body: some View {
         let store = app.providers
-        Form {
-            Section {
-                Picker("默认提供者", selection: Binding(get: { store.defaultKind }, set: { store.defaultKind = $0 })) {
-                    ForEach(AIProviderKind.allCases) { Text($0.displayName).tag($0) }
-                }
-                Hint("日志页工具栏可以临时换别的。所有提供者都以只读方式运行，碰不到你的仓库。")
-            }
-            ForEach(store.configs) { config in
-                ProviderEditor(store: store, config: config)
+        DSSection(footer: "日志页可以临时换别的。所有提供者都以只读方式运行，碰不到你的仓库。") {
+            DSRow("默认提供者") {
+                DSPicker(selection: Binding(get: { store.defaultKind }, set: { store.defaultKind = $0 }),
+                         options: AIProviderKind.allCases.map { ($0, $0.displayName) })
             }
         }
-        .formStyle(.grouped)
+        ForEach(store.configs) { config in
+            ProviderEditor(store: store, config: config)
+        }
     }
 }
 
@@ -238,42 +286,42 @@ struct ProviderEditor: View {
     @State private var testResult: String?
 
     var body: some View {
-        Section(config.kind.displayName) {
-            HStack {
-                TextField("程序路径", text: bind(\.executablePath), prompt: Text("留空自动查找"))
-                Button("自动查找") {
-                    Task {
-                        if let p = await Shell.which(config.kind.binaryName) { update { $0.executablePath = p } }
+        DSSection(config.kind.displayName, footer: config.kind == .codex ? "Codex 需要先在终端运行一次 codex login 登录。" : nil) {
+            DSRow("程序路径", description: "留空会用登录 shell 自动查找。") {
+                HStack(spacing: 6) {
+                    TextField("", text: bind(\.executablePath), prompt: Text("自动查找")).textFieldStyle(.ds).frame(width: 300)
+                    Button("查找") {
+                        Task { if let p = await Shell.which(config.kind.binaryName) { update { $0.executablePath = p } } }
+                    }
+                    .buttonStyle(.dsSecondary)
+                }
+            }
+            DSRow("模型", description: "留空用 CLI 自己的默认模型。") {
+                HStack(spacing: 6) {
+                    TextField("", text: bind(\.model), prompt: Text("默认")).textFieldStyle(.ds).frame(width: 220)
+                    if config.kind == .agy {
+                        DSPicker(selection: bind(\.model), options: [("", "默认")] + models.map { ($0.id, $0.name) })
+                            .task { if models.isEmpty { models = await AIRunner.listModels(config: config) } }
                     }
                 }
             }
-            HStack {
-                TextField("模型", text: bind(\.model), prompt: Text("留空用默认模型"))
-                if config.kind == .agy {
-                    Menu("选择") {
-                        ForEach(models, id: \.id) { m in Button(m.name) { update { $0.model = m.id } } }
-                    }
-                    .frame(width: 80)
-                    .task { if models.isEmpty { models = await AIRunner.listModels(config: config) } }
-                }
+            DSRow("思考深度") {
+                DSPicker(selection: bind(\.effort), options: config.kind.effortOptions.map { ($0, $0.isEmpty ? "默认" : $0) })
             }
-            Picker("思考深度", selection: bind(\.effort)) {
-                ForEach(config.kind.effortOptions, id: \.self) { Text($0.isEmpty ? "默认" : $0).tag($0) }
+            DSRow("超时") {
+                DSStepper(intValue: bind(\.timeoutSeconds), in: 15...600, step: 15) { "\($0) 秒" }
             }
-            Stepper("超时 \(config.timeoutSeconds) 秒", value: bind(\.timeoutSeconds), in: 15...600, step: 15)
-            TextField("额外参数", text: bind(\.extraArgs), prompt: Text("空格分隔，追加到命令末尾"))
-            HStack {
+            DSRow("额外参数", description: "空格分隔，追加到命令末尾。") {
+                TextField("", text: bind(\.extraArgs)).textFieldStyle(.ds).frame(width: 300)
+            }
+            DSRow("测试", description: testResult ?? "发一条示例提交，看生成结果和耗时。") {
                 Button {
                     Task { await test() }
                 } label: {
                     if testing { ProgressView().controlSize(.small) } else { Text("测试") }
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.dsSecondary)
                 .disabled(testing)
-                if let testResult { Text(testResult).font(.callout).textSelection(.enabled) }
-            }
-            if config.kind == .codex {
-                Hint("Codex 需要先在终端运行一次 `codex login` 登录。")
             }
         }
     }

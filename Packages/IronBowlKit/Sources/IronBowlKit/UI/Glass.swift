@@ -5,29 +5,6 @@ public extension Color {
     static let amber = Color(red: 0.961, green: 0.620, blue: 0.141)
 }
 
-/// 液态玻璃卡片。
-public struct GlassCard<Content: View>: View {
-    var cornerRadius: CGFloat
-    var tint: Color?
-    var padding: CGFloat
-    @ViewBuilder var content: Content
-
-    public init(cornerRadius: CGFloat = 18, tint: Color? = nil, padding: CGFloat = 16, @ViewBuilder content: () -> Content) {
-        self.cornerRadius = cornerRadius
-        self.tint = tint
-        self.padding = padding
-        self.content = content()
-    }
-
-    public var body: some View {
-        content
-            .padding(padding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(tint.map { Glass.regular.tint($0.opacity(0.18)) } ?? .regular,
-                         in: .rect(cornerRadius: cornerRadius))
-    }
-}
-
 /// 小号胶囊标签，比如"兜底""加班""已记录"。
 public struct Tag: View {
     let text: String

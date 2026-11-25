@@ -194,6 +194,26 @@ public final class WorkCalendar {
         reload()
     }
 
+    /// 下一个法定节假日（第一天）。
+    public func nextHoliday(after date: Date = Date()) -> (name: String, date: Date)? {
+        let today = Self.dayString(date)
+        var seen = Set<String>()
+        let firsts = holidays.filter { $0.value.isOffDay && $0.key > today }
+            .sorted { $0.key < $1.key }
+            .filter { seen.insert($0.value.name).inserted }
+        guard let first = firsts.first, let d = Self.dayFormatter.date(from: first.key) else { return nil }
+        return (first.value.name, d)
+    }
+
+    /// 农历日期，比如"十月十七"。
+    public nonisolated static func lunarString(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .chinese)
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "MMMd"
+        return f.string(from: date)
+    }
+
     /// 已缓存数据覆盖到的年份。
     public var cachedYears: [Int] {
         Set(holidays.keys.compactMap { Int($0.prefix(4)) }).sorted()

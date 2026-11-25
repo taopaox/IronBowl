@@ -267,6 +267,43 @@ final class LogModel {
         todaySubmitted = !store.submissions(on: WorkCalendar.dayString(Date())).isEmpty
     }
 
+    // MARK: 首页一句话记日志
+
+    /// 用 AI 把一句话解析成今天的一条手动日志，加进今天的草稿。返回给用户看的结果。
+    func addFromSentence(_ text: String) async -> String {
+        guard isConfigured else { return "❌ 先在设置里填写禅道账号" }
+        if tasks.isEmpty { await loadTasks() }
+        guard !openTasks.isEmpty else { return "❌ 没拉到禅道任务，先在设置里测试连接" }
+        let provider = context.providers.config(context.providers.defaultKind)
+        var prompt = """
+        把我的一句话解析成一条禅道工时记录。从下面的任务里挑最贴近的 taskId（挑不出来就用兜底任务）；
+        hours 是小时数（0.5 的倍数，没说时长就填 1）；work 是中文工作内容，一句话，写业务不写技术细节。
+
+        我说：\(text)
+
+        ## 可选任务
+
+        """
+        for t in openTasks { prompt += "- taskId=\(t.id) [\(t.projectName)] \(t.name)\n" }
+        if let fb = settings[LogKeys.fallbackTaskID] { prompt += "\n兜底任务：taskId=\(fb)\n" }
+        let schema = #"{"type":"object","additionalProperties":false,"required":["taskId","hours","work"],"properties":{"taskId":{"type":"integer"},"hours":{"type":"number"},"work":{"type":"string"}}}"#
+        struct R: Decodable { let taskId: Int; let hours: Double; let work: String }
+        do {
+            let result = try await AIRunner.run(config: provider, prompt: prompt, schema: schema)
+            let r = try JSONDecoder().decode(R.self, from: result.json)
+            let taskID = openTasks.contains { $0.id == r.taskId } ? r.taskId : settings[LogKeys.fallbackTaskID]
+            let hours = max(0.5, (r.hours * 2).rounded() / 2)
+            if !Calendar.current.isDateInToday(date) { await select(date: Date()) }
+            drafts.append(DraftEntry(taskID: taskID, hours: hours, left: 0, work: r.work,
+                                     isFallback: taskID == settings[LogKeys.fallbackTaskID], isManual: true))
+            recomputeLeft(for: drafts.count - 1)
+            let name = task(taskID).map { "#\($0.id) \($0.name)" } ?? "未选任务"
+            return "已加到今天的草稿：\(name)，\(hoursText(hours)) 小时。去禅道日志页确认后提交。"
+        } catch {
+            return "❌ \(error.localizedDescription)"
+        }
+    }
+
     // MARK: 映射
 
     func setMapping(repo: String, project: (id: Int, name: String)?) {

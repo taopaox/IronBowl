@@ -92,7 +92,7 @@ public final class ReminderCenter: NSObject, UNUserNotificationCenterDelegate {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.backgroundColor = .clear
         panel.isOpaque = false
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
         panel.contentView = hosting
@@ -164,35 +164,35 @@ struct ReminderPanelView: View {
     let onAction: (ReminderAction) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: content.systemImage)
-                    .font(.title2)
-                    .foregroundStyle(Color.accentColor)
+                    .font(.system(size: 15))
+                    .foregroundStyle(DS.text)
                     .frame(width: 32, height: 32)
-                    .glassEffect(.regular.tint(Color.accentColor.opacity(0.25)), in: .circle)
+                    .background(DS.well, in: .rect(cornerRadius: 9))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(content.title).font(.headline)
-                    Text(content.message).font(.callout).foregroundStyle(.secondary)
+                    Text(content.title).font(.system(size: 14, weight: .semibold))
+                    Text(content.message).font(DS.body).foregroundStyle(DS.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            GlassEffectContainer {
-                HStack(spacing: 8) {
-                    ForEach(content.actions) { action in
-                        if action.isPrimary {
-                            Button(action.title) { onAction(action) }.buttonStyle(.glassProminent)
-                        } else {
-                            Button(action.title) { onAction(action) }.buttonStyle(.glass)
-                        }
+            HStack(spacing: 8) {
+                Spacer()
+                ForEach(content.actions) { action in
+                    if action.isPrimary {
+                        Button(action.title) { onAction(action) }.buttonStyle(.dsPrimary)
+                    } else {
+                        Button(action.title) { onAction(action) }.buttonStyle(.dsSecondary)
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(18)
-        .frame(width: centered ? 420 : 340)
-        .glassEffect(.regular, in: .rect(cornerRadius: 22))
-        .padding(10) // 给阴影留空间
+        .frame(width: centered ? 420 : 350)
+        .background(DS.card, in: .rect(cornerRadius: 14))
+        .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(DS.border) }
+        .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
+        .padding(24) // 给阴影留空间
     }
 }

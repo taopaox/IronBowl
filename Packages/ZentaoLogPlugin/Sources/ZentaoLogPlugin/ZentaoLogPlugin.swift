@@ -28,9 +28,69 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
         return AnyView(LogView(model: model))
     }
 
-    public func makeSettingsView() -> AnyView? {
-        guard let model, let scheduler else { return nil }
-        return AnyView(LogSettingsView(model: model, scheduler: scheduler))
+    public static let settingsAccountID = "zentao.account"
+    public static let settingsReposID = "zentao.repos"
+
+    public var settingsPages: [SettingsPage] {
+        guard let model, let scheduler else { return [] }
+        return [
+            SettingsPage(id: Self.settingsAccountID, title: "禅道账号", systemImage: "person.crop.circle") { AnyView(ZentaoAccountSettings(model: model)) },
+            SettingsPage(id: Self.settingsReposID, title: "仓库与映射", systemImage: "folder") { AnyView(RepoSettings(model: model)) },
+            SettingsPage(id: "zentao.generate", title: "日志生成", systemImage: "sparkles") { AnyView(GenerateSettings(model: model)) },
+            SettingsPage(id: "zentao.reminder", title: "日志提醒", systemImage: "bell") { AnyView(ReminderSettings(model: model, scheduler: scheduler)) },
+        ]
+    }
+
+    public var sidebarRecents: [SidebarRecent] {
+        guard let model else { return [] }
+        let _ = model.todaySubmitted
+        let f = DateFormatter()
+        f.dateFormat = "M月d日"
+        return model.recentDays.prefix(5).map { day in
+            let subs = model.store.submissions(on: WorkCalendar.dayString(day))
+            let info = model.context.workCalendar.dayInfo(day)
+            let status = subs.isEmpty ? (info.isWorkday ? "待提交" : "休息") : "\(hoursText(subs.reduce(0) { $0 + $1.hours }))h"
+            let trailing = Calendar.current.isDateInToday(day) ? "今天" : day.formatted(.dateTime.weekday(.abbreviated))
+            return SidebarRecent(id: "zentao.day.\(WorkCalendar.dayString(day))", title: "\(f.string(from: day)) \(status)", trailing: trailing) {
+                model.context.openPlugin(ZentaoLogPlugin.pluginID)
+                Task { await model.select(date: day) }
+            }
+        }
+    }
+
+    public var quickActions: [QuickAction] {
+        guard let model else { return [] }
+        return [
+            QuickAction(id: "zentao.generate", title: "生成今日日志", systemImage: "sparkles") {
+                model.context.openPlugin(ZentaoLogPlugin.pluginID)
+                Task {
+                    await model.select(date: Date())
+                    await model.loadTasks()
+                    await model.generate()
+                }
+            },
+            QuickAction(id: "zentao.open", title: "看今天的提交", systemImage: "arrow.triangle.branch") {
+                model.context.openPlugin(ZentaoLogPlugin.pluginID)
+            },
+            QuickAction(id: "zentao.settings", title: "仓库映射", systemImage: "folder") {
+                model.context.openSettings(Self.settingsReposID)
+            },
+        ]
+    }
+
+    public var homeCards: [HomeCard] {
+        guard let model else { return [] }
+        return [
+            HomeCard(id: "zentao.today", label: "今日日志",
+                     value: { model.todaySubmitted ? "已提交" : "未提交" },
+                     detail: { model.todayCommitCount.map { "今天 \($0) 次提交" } },
+                     action: { model.context.openPlugin(ZentaoLogPlugin.pluginID) }),
+        ]
+    }
+
+    public func handleHomeInput(_ text: String) async -> String? {
+        guard let model else { return nil }
+        return await model.addFromSentence(text)
     }
 
     public var menuBarItems: [MenuBarItem] {

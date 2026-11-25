@@ -15,18 +15,92 @@ public protocol IronBowlPlugin: AnyObject {
     /// 工作台启动且插件已启用时调用一次。
     func start(context: PluginContext)
     func makeMainView() -> AnyView
-    /// 插件的设置页（显示在设置窗口里），没有就返回 nil。
-    func makeSettingsView() -> AnyView?
+    /// 插件在设置窗口左侧导航里的页面（按插件分组显示）。
+    var settingsPages: [SettingsPage] { get }
     /// 插件能提供给菜单栏显示的信息项。
     var menuBarItems: [MenuBarItem] { get }
+    /// 侧栏「最近」里的条目。
+    var sidebarRecents: [SidebarRecent] { get }
+    /// 首页的快捷标签。
+    var quickActions: [QuickAction] { get }
+    /// 首页的小卡片。
+    var homeCards: [HomeCard] { get }
+    /// 首页输入框的内容交给插件处理；处理了返回给用户看的结果，不处理返回 nil。
+    func handleHomeInput(_ text: String) async -> String?
 }
 
 public extension IronBowlPlugin {
     var isComingSoon: Bool { false }
     var migrations: [DatabaseMigration] { [] }
     func start(context: PluginContext) {}
-    func makeSettingsView() -> AnyView? { nil }
+    var settingsPages: [SettingsPage] { [] }
     var menuBarItems: [MenuBarItem] { [] }
+    var sidebarRecents: [SidebarRecent] { [] }
+    var quickActions: [QuickAction] { [] }
+    var homeCards: [HomeCard] { [] }
+    func handleHomeInput(_ text: String) async -> String? { nil }
+}
+
+/// 设置窗口里的一页。
+public struct SettingsPage: Identifiable {
+    public let id: String
+    public let title: String
+    public let systemImage: String
+    public let makeView: () -> AnyView
+
+    public init(id: String, title: String, systemImage: String, makeView: @escaping () -> AnyView) {
+        self.id = id
+        self.title = title
+        self.systemImage = systemImage
+        self.makeView = makeView
+    }
+}
+
+/// 侧栏「最近」里的一条。
+public struct SidebarRecent: Identifiable {
+    public let id: String
+    public let title: String
+    public let trailing: String
+    public let action: () -> Void
+
+    public init(id: String, title: String, trailing: String, action: @escaping () -> Void) {
+        self.id = id
+        self.title = title
+        self.trailing = trailing
+        self.action = action
+    }
+}
+
+/// 首页快捷标签。
+public struct QuickAction: Identifiable {
+    public let id: String
+    public let title: String
+    public let systemImage: String
+    public let action: () -> Void
+
+    public init(id: String, title: String, systemImage: String, action: @escaping () -> Void) {
+        self.id = id
+        self.title = title
+        self.systemImage = systemImage
+        self.action = action
+    }
+}
+
+/// 首页小卡片。`value`、`detail` 在视图里求值，跟着 @Observable 状态刷新。
+public struct HomeCard: Identifiable {
+    public let id: String
+    public let label: String
+    public let value: () -> String
+    public let detail: () -> String?
+    public let action: (() -> Void)?
+
+    public init(id: String, label: String, value: @escaping () -> String, detail: @escaping () -> String? = { nil }, action: (() -> Void)? = nil) {
+        self.id = id
+        self.label = label
+        self.value = value
+        self.detail = detail
+        self.action = action
+    }
 }
 
 /// 插件运行时能拿到的共享服务。
@@ -38,6 +112,8 @@ public final class PluginContext {
     public let providers: AIProviderStore
     /// 打开主窗口并切到某个插件页。
     public let openPlugin: (String) -> Void
+    /// 打开设置窗口，可指定页面 id。
+    public let openSettings: (String?) -> Void
 
     public init(
         database: AppDatabase,
@@ -45,7 +121,8 @@ public final class PluginContext {
         reminders: ReminderCenter,
         workCalendar: WorkCalendar,
         providers: AIProviderStore,
-        openPlugin: @escaping (String) -> Void
+        openPlugin: @escaping (String) -> Void,
+        openSettings: @escaping (String?) -> Void
     ) {
         self.database = database
         self.settings = settings
@@ -53,6 +130,7 @@ public final class PluginContext {
         self.workCalendar = workCalendar
         self.providers = providers
         self.openPlugin = openPlugin
+        self.openSettings = openSettings
     }
 }
 
@@ -90,6 +168,8 @@ public final class ComingSoonPlugin: IronBowlPlugin {
                 systemImage: systemImage,
                 description: Text("先把饭碗端稳，再慢慢加菜。")
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(DS.canvas)
         )
     }
 }

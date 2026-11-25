@@ -1,0 +1,158 @@
+name: 自动升级版本编译并发布 Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "可选：手动指定目标版本号（例如 0.2.0），留空则按提交自动升级"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: 升级版本、编译双应用并发布 Release
+    if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release):')
+    runs-on: macos-26
+
+    steps:
+      - name: 检出仓库完整历史
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 计算目标版本号与生成中文更新日志
+        id: plan
+        run: |
+          ARGS=(--repo "${{ github.repository }}" --notes-file release-notes.md --github-output "$GITHUB_OUTPUT")
+          if [[ -n "${{ inputs.version }}" ]]; then
+            ARGS+=(--override-version "${{ inputs.version }}")
+          fi
+          python3 scripts/release.py plan "${ARGS[@]}"
+
+      - name: 无新增可发布提交时跳过
+        if: steps.plan.outputs.should_release != 'true'
+        run: |
+          echo "没有需要发布的新提交，跳过本次发版。"
+
+      - name: 更新 project.yml 版本号与构建号
+        if: steps.plan.outputs.should_release == 'true'
+        run: |
+          python3 scripts/release.py bump \
+            --version "${{ steps.plan.outputs.version }}" \
+            --build "${{ steps.plan.outputs.build }}"
+          git diff project.yml
+
+      - name: 安装 XcodeGen 并生成 Xcode 工程
+        if: steps.plan.outputs.should_release == 'true'
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen generate
+          xcodebuild -version
+
+      - name: 运行全部单元测试
+        if: steps.plan.outputs.should_release == 'true'
+        run: |
+          python3 -m unittest discover -s scripts -p "test_*.py" -v
+          for pkg in IronBowlKit ZentaoLogPlugin CalendarPlugin FeishuPlugin AIWebPlugin SchedulerPlugin; do
+            echo "=== Testing $pkg ==="
+            swift test --package-path "Packages/$pkg"
+          done
+
+      - name: Release 编译 IronBowl 与 IronBowlCalendar
+        if: steps.plan.outputs.should_release == 'true'
+        run: |
+          xcodebuild -project IronBowl.xcodeproj -scheme IronBowl -configuration Release -derivedDataPath build/DerivedData build
+          xcodebuild -project IronBowl.xcodeproj -scheme Calendar -configuration Release -derivedDataPath build/DerivedData build
+
+      - name: 校验构建产物的 Info.plist 版本号
+        if: steps.plan.outputs.should_release == 'true'
+        env:
+          EXPECTED_VER: ${{ steps.plan.outputs.version }}
+          EXPECTED_BUILD: ${{ steps.plan.outputs.build }}
+        run: |
+          for app in IronBowl.app IronBowlCalendar.app; do
+            plist="build/DerivedData/Build/Products/Release/$app/Contents/Info.plist"
+            actual_ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+            actual_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")"
+            echo "$app -> version=$actual_ver build=$actual_build"
+            [[ "$actual_ver" == "$EXPECTED_VER" ]]
+            [[ "$actual_build" == "$EXPECTED_BUILD" ]]
+          done
+
+      - name: 打包 DMG 与 ZIP 安装包及校验文件
+        if: steps.plan.outputs.should_release == 'true'
+        env:
+          VER: ${{ steps.plan.outputs.version }}
+        run: |
+          mkdir -p dist
+          PRODUCTS_DIR="build/DerivedData/Build/Products/Release"
+
+          package_app() {
+            local app_name="$1"
+            local artifact_prefix="$2"
+            local vol_name="$3"
+            local app_path="$PRODUCTS_DIR/$app_name"
+            local base_name="${artifact_prefix}-v${VER}-macOS-arm64"
+
+            ditto -c -k --sequesterRsrc --keepParent "$app_path" "dist/${base_name}.zip"
+
+            local stage_dir
+            stage_dir="$(mktemp -d)"
+            cp -R "$app_path" "$stage_dir/$app_name"
+            ln -s /Applications "$stage_dir/Applications"
+            hdiutil create \
+              -volname "$vol_name" \
+              -srcfolder "$stage_dir" \
+              -ov -format UDZO \
+              "dist/${base_name}.dmg"
+            rm -rf "$stage_dir"
+          }
+
+          package_app "IronBowl.app" "IronBowl" "IronBowl v${VER}"
+          package_app "IronBowlCalendar.app" "IronBowlCalendar" "IronBowlCalendar v${VER}"
+
+          (cd dist && shasum -a 256 *.dmg *.zip > SHA256SUMS.txt)
+          ls -lh dist/
+          cat dist/SHA256SUMS.txt
+
+      - name: 提交版本升级记录并推送 Tag
+        if: steps.plan.outputs.should_release == 'true'
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add project.yml
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(release): 发布 ${TAG}"
+          fi
+          git tag -a "$TAG" -m "Release ${TAG}"
+          git push origin HEAD:main
+          git push origin "$TAG"
+
+      - name: 创建 GitHub Release 并上传产物
+        if: steps.plan.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --title "IronBowl ${TAG}" \
+            --notes-file release-notes.md
+
+      - name: 写入 Release 摘要
+        if: steps.plan.outputs.should_release == 'true'
+        run: |
+          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"

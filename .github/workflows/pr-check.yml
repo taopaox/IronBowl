@@ -1,0 +1,98 @@
+name: PR 检查与版本预览
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify-and-preview:
+    name: 测试、双应用编译与发版预览
+    runs-on: macos-26
+
+    steps:
+      - name: 检出仓库完整历史
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 安装 XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+          xcodebuild -version
+
+      - name: 运行发版脚本单元测试
+        run: python3 -m unittest discover -s scripts -p "test_*.py" -v
+
+      - name: 运行各 Swift Package 单元测试
+        run: |
+          for pkg in IronBowlKit ZentaoLogPlugin CalendarPlugin FeishuPlugin AIWebPlugin SchedulerPlugin; do
+            echo "=== Testing $pkg ==="
+            swift test --package-path "Packages/$pkg"
+          done
+
+      - name: 生成 Xcode 工程并 Release 编译双应用
+        run: |
+          xcodegen generate
+          xcodebuild -project IronBowl.xcodeproj -scheme IronBowl -configuration Release -derivedDataPath build/DerivedData build
+          xcodebuild -project IronBowl.xcodeproj -scheme Calendar -configuration Release -derivedDataPath build/DerivedData build
+
+      - name: 预览合并后的目标版本与更新日志
+        id: plan
+        run: |
+          python3 scripts/release.py plan \
+            --repo "${{ github.repository }}" \
+            --notes-file release-preview.md \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: 写入构建摘要并回帖到 PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          VER: ${{ steps.plan.outputs.version }}
+          BUILD_NUM: ${{ steps.plan.outputs.build }}
+          COMMIT_COUNT: ${{ steps.plan.outputs.commit_count }}
+        run: |
+          {
+            echo "### 构建与发版预览"
+            echo ""
+            echo "- **IronBowl & IronBowlCalendar Release 编译**：通过"
+            echo "- **合入后预计发布版本**：\`v${VER}\`（Build \`${BUILD_NUM}\`，包含 \`${COMMIT_COUNT}\` 条提交）"
+            echo ""
+            cat release-preview.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "<!-- ironbowl-release-preview -->"
+            echo "### ✅ PR 预检通过 · 发版预览"
+            echo ""
+            echo "- **双应用 Release 编译**：\`IronBowl.app\` 与 \`IronBowlCalendar.app\` 构建成功"
+            echo "- **合并到 \`main\` 后将自动发布**：\`v${VER}\`（Build \`${BUILD_NUM}\`，涵盖 \`${COMMIT_COUNT}\` 条提交）"
+            echo "- **产物列表**：两款应用的 \`.dmg\`、\`.zip\` 与 \`SHA256SUMS.txt\`"
+            echo ""
+            echo "<details>"
+            echo "<summary>展开查看自动生成的 Release Notes 预览</summary>"
+            echo ""
+            cat release-preview.md
+            echo ""
+            echo "</details>"
+          } > pr-comment.md
+
+          EXISTING_ID="$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" --jq '.[] | select(.body | contains("<!-- ironbowl-release-preview -->")) | .id' | head -n 1 || true)"
+          if [[ -n "$EXISTING_ID" ]]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${EXISTING_ID}" -F body=@pr-comment.md >/dev/null
+          else
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file pr-comment.md
+          fi

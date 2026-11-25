@@ -17,6 +17,14 @@ git config core.hooksPath .githooks
 - **`dev` 为日常开发主分支**：新功能与修复均在 `dev`（或从 `dev` 切出的 `feat/*`、`fix/*` 分支）开发提交。
 - **`main` 仅接受合并或 PR**：启用 `.githooks` 后，本地会阻止在 `main` 上直接提交或直接推送非合并提交；向 `main` 发起 PR 时会自动触发预检与版本预览，合入 `main` 后自动升级版本号、编译双应用并发布 GitHub Release。
 
+## 自动版本升级与 GitHub Actions 发布
+
+- **PR 预检流水线（[`.github/workflows/pr-check.yml`](../../.github/workflows/pr-check.yml)）**：向 `main` 发起或更新 PR 时在 `macos-26` Runner 上运行发版脚本单测、6 个 Swift Package 单测，生成工程并 Release 编译 `IronBowl` 与 `Calendar` 两款应用，同时在 PR 下评论预览版本号与更新日志。
+- **自动发版流水线（[`.github/workflows/release.yml`](../../.github/workflows/release.yml)）**：`main` 收到合并推送（或手动 `workflow_dispatch`）时自动执行 [`scripts/release.py`](../../scripts/release.py)：
+  - 扫描上一个 `v*` Tag 至 `HEAD` 间的非合并提交（跳过 `chore(release):` 提交）并按约定式提交规则计算新版本号（含 `BREAKING CHANGE` / `!` 规则与 `0.x` 次版本递增规则）、递增 `CURRENT_PROJECT_VERSION`；
+  - 更新 [`project.yml`](../../project.yml) 并重新生成 Xcode 工程，通过所有测试后 Release 编译并校验 `IronBowl.app` 与 `IronBowlCalendar.app` 的 `Info.plist` 版本；
+  - 为两款应用分别打包 `.dmg` 与 `.zip` 安装包及 `SHA256SUMS.txt`，提交 `chore(release): 发布 vX.Y.Z`、创建 `vX.Y.Z` Tag 并发布 GitHub Release（附中文分类更新日志）。
+
 ## 本地构建与运行
 
 ### 主工作台应用（`IronBowl`）

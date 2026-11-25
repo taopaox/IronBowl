@@ -137,7 +137,7 @@ struct RepoSettings: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(DS.textTertiary)
                     TextField("搜索仓库", text: $query).textFieldStyle(.plain)
                 }
-                .font(.system(size: 13))
+                .font(DS.font(14))
                 .padding(.horizontal, 10)
                 .frame(width: 220, height: 30)
                 .background(DS.card, in: .rect(cornerRadius: DS.controlRadius))
@@ -291,7 +291,7 @@ struct GenerateSettings: View {
         DSSection("提示词", footer: "占位符：{{date}} 日期，{{activity}} 提交明细，{{tasks}} 可选任务和兜底任务。") {
             DSBlockRow {
                 TextEditor(text: s.binding(LogKeys.prompt))
-                    .font(.system(size: 12.5, design: .monospaced))
+                    .font(DS.mono(13.5))
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 280)
             }
@@ -354,7 +354,7 @@ struct ReminderSettings: View {
                     HStack(spacing: 10) {
                         Button("预览") { scheduler.preview(style: style) }.buttonStyle(.dsGhost)
                         Image(systemName: s[LogKeys.reminderStyle] == style ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 17))
+                            .font(DS.font(18))
                             .foregroundStyle(s[LogKeys.reminderStyle] == style ? DS.toggle : DS.textTertiary)
                     }
                 }

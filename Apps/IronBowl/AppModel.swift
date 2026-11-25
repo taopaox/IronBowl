@@ -38,6 +38,7 @@ enum AppearanceMode: String, Codable, Sendable, CaseIterable, Identifiable {
 
 enum AppKeys {
     static let appearance = SettingKey<AppearanceMode>("app.appearance", default: .system)
+    static let fontScale = SettingKey<Double>("app.fontScale", default: 1.0)
     static let enabledPlugins = SettingKey<[String]?>("app.enabledPlugins", default: nil)
     static let menuBarItems = SettingKey<[String]>("app.menuBarItems", default: ["zentao.status"])
     static let dockMode = SettingKey<DockMode>("app.dockMode", default: .whenWindowOpen)
@@ -95,6 +96,7 @@ final class AppModel {
         startEnabledPlugins()
         applyDockMode()
         applyAppearance()
+        DS.fontScale = settings[AppKeys.fontScale]
         clock = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.now = Date() }
         }
@@ -175,6 +177,18 @@ final class AppModel {
         set {
             settings[AppKeys.appearance] = newValue
             applyAppearance()
+        }
+    }
+
+    /// 字体缩放档位。
+    static let fontScales: [Double] = [0.9, 1.0, 1.1, 1.2, 1.3, 1.4]
+
+    /// 字体缩放。根视图用 `.id(app.fontScale)` 重建，所有界面一起变大变小。
+    var fontScale: Double {
+        get { settings[AppKeys.fontScale] }
+        set {
+            settings[AppKeys.fontScale] = newValue
+            DS.fontScale = newValue
         }
     }
 

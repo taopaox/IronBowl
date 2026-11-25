@@ -39,7 +39,7 @@ struct SettingsView: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(DS.textTertiary)
                     TextField("搜索设置项", text: $query).textFieldStyle(.plain)
                 }
-                .font(.system(size: 13))
+                .font(DS.font(14))
                 .padding(.horizontal, 10)
                 .frame(height: 30)
                 .background(DS.selected, in: .rect(cornerRadius: DS.controlRadius))
@@ -82,7 +82,8 @@ struct SettingsView: View {
             .background(DS.groupBackground)
         }
         .ignoresSafeArea()
-        .frame(width: 900, height: 660)
+        .frame(width: DS.s(900), height: DS.s(660))
+        .id(app.fontScale)
     }
 }
 
@@ -169,6 +170,38 @@ struct AppearanceSettings: View {
                 }
             }
         }
+        DSSection("文字") {
+            DSRow("字体大小", description: "所有界面的文字和控件一起缩放，松手后生效。") {
+                FontScaleSlider(app: app)
+            }
+        }
+    }
+}
+
+/// 字体大小滑块：小 · 默认 · 大，拖动松手后才应用（应用时界面会重建）。
+private struct FontScaleSlider: View {
+    let app: AppModel
+    @State private var index: Double = 1
+
+    var body: some View {
+        let scales = AppModel.fontScales
+        VStack(spacing: 4) {
+            Slider(value: $index, in: 0...Double(scales.count - 1), step: 1) { editing in
+                if !editing { app.fontScale = scales[Int(index)] }
+            }
+            .tint(DS.primaryFill)
+            // 「默认」对准第 2 档刻度：滑块两端各留约 10pt。
+            ZStack(alignment: .leading) {
+                Text("小")
+                Text("默认").fixedSize().position(x: 10 + (300 - 20) / Double(scales.count - 1), y: 8)
+                Text("大").frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .frame(height: 16)
+            .font(DS.caption)
+            .foregroundStyle(DS.textSecondary)
+        }
+        .frame(width: 300)
+        .onAppear { index = Double(scales.firstIndex(of: app.fontScale) ?? 1) }
     }
 }
 
@@ -269,7 +302,7 @@ struct WorkTimeSettings: View {
                             s[WorkCalendar.weekdaysKey] = list.sorted()
                         }
                         .buttonStyle(.plain)
-                        .font(.system(size: 12.5, weight: on ? .semibold : .regular))
+                        .font(DS.font(13.5, on ? .semibold : .regular))
                         .foregroundStyle(on ? DS.onPrimary : DS.textSecondary)
                         .frame(width: 28, height: 28)
                         .background(on ? DS.primaryFill : DS.well, in: .circle)

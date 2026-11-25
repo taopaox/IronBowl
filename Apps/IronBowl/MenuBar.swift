@@ -64,15 +64,16 @@ struct MenuPanel: View {
             .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
             .padding(.top, 10)
         }
-        .frame(width: 290)
+        .frame(width: DS.s(290))
         .background(DS.canvas)
+        .id(app.fontScale)
     }
 
     private var header: some View {
         let _ = app.now
         let info = app.workCalendar.dayInfo(Date())
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("饭碗").font(.system(size: 14, weight: .semibold))
+            Text("饭碗").font(DS.font(15, .semibold))
             Spacer()
             Text(Date().formatted(.dateTime.month().day().weekday(.wide)) + " · " + WorkCalendar.lunarString(Date()))
                 .font(DS.caption).foregroundStyle(DS.textSecondary)

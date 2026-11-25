@@ -56,7 +56,7 @@ struct LogView: View {
 
     private var notConfigured: some View {
         VStack(spacing: 14) {
-            Image(systemName: "link").font(.system(size: 28)).foregroundStyle(DS.textTertiary)
+            Image(systemName: "link").font(DS.font(30)).foregroundStyle(DS.textTertiary)
             Text("先连上禅道").font(DS.pageTitle)
             Text("填写禅道地址、账号和密码后，就能从 git 提交生成工作日志。").font(DS.body).foregroundStyle(DS.textSecondary)
             Button("去填写禅道账号") { model.context.openSettings(ZentaoLogPlugin.settingsAccountID) }
@@ -166,13 +166,13 @@ struct DayTabs: View {
                 } label: {
                     VStack(spacing: 2) {
                         Text(Calendar.current.isDateInToday(day) ? "今天" : day.formatted(.dateTime.weekday(.abbreviated)))
-                            .font(.system(size: 12.5, weight: selected ? .semibold : .regular))
+                            .font(DS.font(13.5, selected ? .semibold : .regular))
                         HStack(spacing: 3) {
                             Text(day.formatted(.dateTime.month(.defaultDigits).day())).monospacedDigit()
                             if submitted { Image(systemName: "checkmark").foregroundStyle(DS.toggle) }
                             else if !info.isWorkday { Text(info.name.map { String($0.prefix(2)) } ?? "休").foregroundStyle(DS.danger) }
                         }
-                        .font(.system(size: 10.5))
+                        .font(DS.font(11.5))
                         .foregroundStyle(DS.textSecondary)
                     }
                     .foregroundStyle(selected ? DS.text : DS.textSecondary)

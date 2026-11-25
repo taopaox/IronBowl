@@ -10,7 +10,7 @@ struct MainView: View {
         HStack(spacing: 0) {
             if !collapsed {
                 Sidebar(app: app, collapsed: $collapsed)
-                    .frame(width: 216)
+                    .frame(width: DS.s(216))
                     .transition(.move(edge: .leading))
                 Rectangle().fill(DS.border).frame(width: 1)
             }
@@ -29,6 +29,7 @@ struct MainView: View {
         }
         .ignoresSafeArea()
         .frame(minWidth: 860, minHeight: 600)
+        .id(app.fontScale)
         .onAppear { app.mainWindow(isOpen: true) }
         .onDisappear { app.mainWindow(isOpen: false) }
     }
@@ -63,8 +64,8 @@ struct Sidebar: View {
             .padding(.horizontal, 10)
 
             HStack(spacing: 6) {
-                Text("饭碗").font(.system(size: 15, weight: .semibold))
-                Text(Bundle.main.shortVersion).font(.system(size: 11)).foregroundStyle(DS.textTertiary)
+                Text("饭碗").font(DS.font(16, .semibold))
+                Text(Bundle.main.shortVersion).font(DS.font(12)).foregroundStyle(DS.textTertiary)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 12)
@@ -98,8 +99,8 @@ struct Sidebar: View {
             TodayCard(app: app).padding(.horizontal, 10).padding(.bottom, 8)
 
             HStack(spacing: 2) {
-                Text("🍚").font(.system(size: 15))
-                Text(NSFullUserName().isEmpty ? "我" : NSFullUserName()).font(.system(size: 12.5))
+                Text("🍚").font(DS.font(16))
+                Text(NSFullUserName().isEmpty ? "我" : NSFullUserName()).font(DS.font(13.5))
                     .lineLimit(1)
                 Spacer()
                 Button { openWindow(id: "settings") } label: { Image(systemName: "gearshape") }
@@ -121,9 +122,9 @@ private struct RecentRow: View {
     var body: some View {
         Button(action: item.action) {
             HStack {
-                Text(item.title).font(.system(size: 12.5)).lineLimit(1)
+                Text(item.title).font(DS.font(13.5)).lineLimit(1)
                 Spacer(minLength: 6)
-                Text(item.trailing).font(.system(size: 11)).foregroundStyle(DS.textTertiary)
+                Text(item.trailing).font(DS.font(12)).foregroundStyle(DS.textTertiary)
             }
             .foregroundStyle(DS.text)
             .padding(.horizontal, 10)
@@ -145,14 +146,14 @@ private struct TodayCard: View {
         let info = app.workCalendar.dayInfo(Date())
         VStack(alignment: .leading, spacing: 4) {
             Text(info.isWorkday ? "今天上班" : (info.name ?? "今天休息"))
-                .font(.system(size: 11.5)).foregroundStyle(DS.textSecondary)
+                .font(DS.font(12.5)).foregroundStyle(DS.textSecondary)
             if info.isWorkday, let end = app.workCalendar.workEnd(), end > Date() {
-                Text("距下班 \(countdown(to: end))").font(.system(size: 14, weight: .semibold)).monospacedDigit()
+                Text("距下班 \(countdown(to: end))").font(DS.font(15, .semibold)).monospacedDigit()
                 ProgressView(value: workProgress(end: end))
                     .progressViewStyle(.linear)
                     .tint(DS.brand)
             } else {
-                Text(info.isWorkday ? "已下班，辛苦了" : "好好休息").font(.system(size: 14, weight: .semibold))
+                Text(info.isWorkday ? "已下班，辛苦了" : "好好休息").font(DS.font(15, .semibold))
             }
         }
         .padding(12)

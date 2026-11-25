@@ -17,7 +17,7 @@ public struct Tag: View {
 
     public var body: some View {
         Text(text)
-            .font(.caption2.weight(.semibold))
+            .font(DS.font(11.5, .semibold))
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .foregroundStyle(color)
@@ -30,6 +30,6 @@ public struct Hint: View {
     let text: String
     public init(_ text: String) { self.text = text }
     public var body: some View {
-        Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        Text(text).font(DS.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
 }

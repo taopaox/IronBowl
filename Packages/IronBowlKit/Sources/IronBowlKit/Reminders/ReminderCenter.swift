@@ -167,12 +167,12 @@ struct ReminderPanelView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: content.systemImage)
-                    .font(.system(size: 15))
+                    .font(DS.font(16))
                     .foregroundStyle(DS.text)
                     .frame(width: 32, height: 32)
                     .background(DS.well, in: .rect(cornerRadius: 9))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(content.title).font(.system(size: 14, weight: .semibold))
+                    Text(content.title).font(DS.font(15, .semibold))
                     Text(content.message).font(DS.body).foregroundStyle(DS.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -192,7 +192,7 @@ struct ReminderPanelView: View {
         .frame(width: centered ? 420 : 350)
         .background(DS.card, in: .rect(cornerRadius: 14))
         .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(DS.border) }
-        .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
+        .shadow(color: .black.opacity(0.07), radius: 12, y: 4)
         .padding(24) // 给阴影留空间
     }
 }

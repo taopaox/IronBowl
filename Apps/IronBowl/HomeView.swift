@@ -91,7 +91,7 @@ struct HomeView: View {
                     Task { await send() }
                 } label: {
                     Group {
-                        if sending { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.up").font(.system(size: 13, weight: .bold)) }
+                        if sending { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.up").font(DS.font(14, .bold)) }
                     }
                     .foregroundStyle(DS.onPrimary)
                     .frame(width: 30, height: 30)
@@ -104,7 +104,6 @@ struct HomeView: View {
         .padding(14)
         .background(DS.card, in: .rect(cornerRadius: 16))
         .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(focused ? DS.borderStrong : DS.border) }
-        .shadow(color: .black.opacity(0.04), radius: 10, y: 4)
     }
 
     private func send() async {

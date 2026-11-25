@@ -26,8 +26,8 @@ public enum DS {
     public static let card = Color(light: hex(0xFFFFFF), dark: hex(0x222225))
     /// 指标卡这类无边框的浅灰块。
     public static let well = Color(light: hex(0xF4F4F5), dark: hex(0x232326))
-    public static let border = Color(light: hex(0x000000, 0.08), dark: hex(0xFFFFFF, 0.10))
-    public static let borderStrong = Color(light: hex(0x000000, 0.14), dark: hex(0xFFFFFF, 0.18))
+    public static let border = Color(light: hex(0x000000, 0.06), dark: hex(0xFFFFFF, 0.09))
+    public static let borderStrong = Color(light: hex(0x000000, 0.10), dark: hex(0xFFFFFF, 0.15))
     public static let hover = Color(light: hex(0x000000, 0.04), dark: hex(0xFFFFFF, 0.06))
     public static let selected = Color(light: hex(0x000000, 0.065), dark: hex(0xFFFFFF, 0.10))
     public static let primaryFill = Color(light: hex(0x18181B), dark: hex(0xF4F4F5))
@@ -41,13 +41,28 @@ public enum DS {
     public static let warning = Color(light: hex(0xB76E00), dark: hex(0xF5B54A))
     public static let success = Color(light: hex(0x13875F), dark: hex(0x3DD39A))
 
-    // MARK: 字体
-    public static let heroTitle = Font.system(size: 26, weight: .semibold)
-    public static let pageTitle = Font.system(size: 17, weight: .semibold)
-    public static let sectionTitle = Font.system(size: 13, weight: .medium)
-    public static let rowTitle = Font.system(size: 13.5, weight: .medium)
-    public static let body = Font.system(size: 13)
-    public static let caption = Font.system(size: 11.5)
+    // MARK: 字体（随「外观 → 字体大小」整体缩放）
+
+    /// 字体缩放倍数，1 = 默认。改了之后根视图要用 `.id(DS.fontScale)` 重建才会刷新。
+    public static var fontScale: CGFloat = 1
+
+    public static func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .system(size: size * fontScale, weight: weight)
+    }
+
+    public static func mono(_ size: CGFloat) -> Font {
+        .system(size: size * fontScale, design: .monospaced)
+    }
+
+    /// 跟着字号一起缩放的尺寸（控件高度等）。
+    public static func s(_ v: CGFloat) -> CGFloat { (v * fontScale).rounded() }
+
+    public static var heroTitle: Font { font(28, .semibold) }
+    public static var pageTitle: Font { font(18, .semibold) }
+    public static var sectionTitle: Font { font(14, .medium) }
+    public static var rowTitle: Font { font(14.5, .medium) }
+    public static var body: Font { font(14) }
+    public static var caption: Font { font(12.5) }
 
     public static let radius: CGFloat = 12
     public static let controlRadius: CGFloat = 8
@@ -95,7 +110,7 @@ public struct DSMetric: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label).font(DS.caption).foregroundStyle(DS.textSecondary)
-            Text(value).font(.system(size: 19, weight: .semibold)).monospacedDigit()
+            Text(value).font(DS.font(21, .semibold)).monospacedDigit()
             if let detail { Text(detail).font(DS.caption).foregroundStyle(DS.textTertiary) }
         }
         .padding(12)
@@ -162,10 +177,10 @@ private struct DSPrimaryButtonBody: View {
 
     var body: some View {
         configuration.label
-            .font(.system(size: 13, weight: .medium))
+            .font(DS.font(14, .medium))
             .foregroundStyle(DS.onPrimary)
             .padding(.horizontal, 14)
-            .frame(height: 30)
+            .frame(height: DS.s(30))
             .background(DS.primaryFill.opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.35),
                         in: .rect(cornerRadius: DS.controlRadius))
             .contentShape(.rect)
@@ -186,10 +201,10 @@ private struct DSSecondaryButtonBody: View {
 
     var body: some View {
         configuration.label
-            .font(.system(size: 13))
+            .font(DS.font(14))
             .foregroundStyle(enabled ? DS.text : DS.textTertiary)
             .padding(.horizontal, 12)
-            .frame(height: 30)
+            .frame(height: DS.s(30))
             .background(configuration.isPressed ? DS.selected : hovering ? DS.hover : DS.card,
                         in: .rect(cornerRadius: DS.controlRadius))
             .overlay { RoundedRectangle(cornerRadius: DS.controlRadius).strokeBorder(DS.borderStrong) }
@@ -212,10 +227,10 @@ private struct DSGhostButtonBody: View {
 
     var body: some View {
         configuration.label
-            .font(.system(size: 13))
+            .font(DS.font(14))
             .foregroundStyle(DS.textSecondary)
             .padding(.horizontal, 7)
-            .frame(minWidth: 28, minHeight: 28)
+            .frame(minWidth: DS.s(28), minHeight: DS.s(28))
             .background(configuration.isPressed ? DS.selected : hovering ? DS.hover : .clear,
                         in: .rect(cornerRadius: DS.controlRadius))
             .contentShape(.rect)
@@ -239,10 +254,10 @@ private struct DSChipBody: View {
 
     var body: some View {
         configuration.label
-            .font(.system(size: 12.5))
+            .font(DS.font(13.5))
             .foregroundStyle(DS.text)
             .padding(.horizontal, 12)
-            .frame(height: 28)
+            .frame(height: DS.s(28))
             .background(selected || configuration.isPressed ? DS.selected : hovering ? DS.hover : DS.card, in: .capsule)
             .overlay { Capsule().strokeBorder(selected ? .clear : DS.borderStrong) }
             .contentShape(.capsule)
@@ -286,19 +301,19 @@ public struct DSSidebarItem: View {
         Button(action: action) {
             HStack(spacing: 9) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 14))
-                    .frame(width: 18)
-                Text(title).font(.system(size: 13.5))
+                    .font(DS.font(15))
+                    .frame(width: DS.s(18))
+                Text(title).font(DS.font(14.5))
                 Spacer(minLength: 0)
                 if let badge {
-                    Text(badge).font(.system(size: 10.5)).foregroundStyle(DS.textTertiary)
+                    Text(badge).font(DS.font(11.5)).foregroundStyle(DS.textTertiary)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .overlay { Capsule().strokeBorder(DS.border) }
                 }
             }
             .foregroundStyle(DS.text)
             .padding(.horizontal, 10)
-            .frame(height: 30)
+            .frame(height: DS.s(30))
             .background(selected ? DS.selected : hovering ? DS.hover : .clear, in: .rect(cornerRadius: DS.controlRadius))
             .contentShape(.rect)
         }
@@ -312,7 +327,7 @@ public struct DSSidebarSection: View {
     let title: String
     public init(_ title: String) { self.title = title }
     public var body: some View {
-        Text(title).font(.system(size: 11.5)).foregroundStyle(DS.textTertiary)
+        Text(title).font(DS.font(12.5)).foregroundStyle(DS.textTertiary)
             .padding(.horizontal, 10).padding(.top, 14).padding(.bottom, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -343,10 +358,10 @@ struct DSTabButtonStyle: ButtonStyle {
     let selected: Bool
     func makeBody(configuration: ButtonStyleConfiguration) -> some View {
         configuration.label
-            .font(.system(size: 12.5, weight: selected ? .medium : .regular))
+            .font(DS.font(13.5, selected ? .medium : .regular))
             .foregroundStyle(selected ? DS.text : DS.textSecondary)
             .padding(.horizontal, 10)
-            .frame(height: 26)
+            .frame(height: DS.s(26))
             .background(selected ? DS.selected : .clear, in: .rect(cornerRadius: 7))
             .contentShape(.rect)
     }
@@ -417,7 +432,7 @@ public struct DSRow<Trailing: View>: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .frame(minHeight: 52)
+        .frame(minHeight: DS.s(52))
     }
 }
 
@@ -465,20 +480,19 @@ public struct DSPicker<Value: Hashable>: View {
                 Text(options.first { $0.0 == selection }?.1 ?? "请选择")
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(DS.textSecondary)
+                Image(systemName: "chevron.down").font(DS.font(11, .semibold)).foregroundStyle(DS.textSecondary)
             }
-            .font(.system(size: 13))
+            .font(DS.font(14))
             .foregroundStyle(DS.text)
             .padding(.horizontal, 10)
-            .frame(height: 30)
+            .frame(height: DS.s(30))
             .frame(width: width)
-            .frame(minWidth: 110)
+            .frame(minWidth: DS.s(110))
             .background(DS.card, in: .rect(cornerRadius: DS.controlRadius))
             .overlay { RoundedRectangle(cornerRadius: DS.controlRadius).strokeBorder(DS.borderStrong) }
             .contentShape(.rect)
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize(horizontal: width == nil, vertical: true)
     }
@@ -490,9 +504,9 @@ public struct DSTextFieldStyle: TextFieldStyle {
     public func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
             .textFieldStyle(.plain)
-            .font(.system(size: 13))
+            .font(DS.font(14))
             .padding(.horizontal, 10)
-            .frame(height: 30)
+            .frame(height: DS.s(30))
             .background(DS.card, in: .rect(cornerRadius: DS.controlRadius))
             .overlay { RoundedRectangle(cornerRadius: DS.controlRadius).strokeBorder(DS.borderStrong) }
     }
@@ -518,12 +532,12 @@ public struct DSStepper: View {
 
     public var body: some View {
         HStack(spacing: 0) {
-            Button { value = max(range.lowerBound, value - step) } label: { Image(systemName: "minus").frame(width: 26, height: 28) }
-            Text(format(value)).font(.system(size: 13).monospacedDigit()).frame(minWidth: 52)
-            Button { value = min(range.upperBound, value + step) } label: { Image(systemName: "plus").frame(width: 26, height: 28) }
+            Button { value = max(range.lowerBound, value - step) } label: { Image(systemName: "minus").frame(width: DS.s(26), height: DS.s(28)) }
+            Text(format(value)).font(DS.font(14).monospacedDigit()).frame(minWidth: DS.s(52))
+            Button { value = min(range.upperBound, value + step) } label: { Image(systemName: "plus").frame(width: DS.s(26), height: DS.s(28)) }
         }
         .buttonStyle(.plain)
-        .font(.system(size: 11, weight: .semibold))
+        .font(DS.font(12, .semibold))
         .foregroundStyle(DS.text)
         .background(DS.card, in: .rect(cornerRadius: DS.controlRadius))
         .overlay { RoundedRectangle(cornerRadius: DS.controlRadius).strokeBorder(DS.borderStrong) }

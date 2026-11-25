@@ -14,3 +14,7 @@ Package.resolved
 
 # 本地参考截图（不入库）
 docs/ref/
+
+# Python
+__pycache__/
+*.pyc

@@ -205,6 +205,15 @@ public final class WorkCalendar {
         return (first.value.name, d)
     }
 
+    /// 某年的法定节假日（每个假期取第一天），给万年历的「假期」下拉用。
+    public func holidays(inYear year: Int) -> [(name: String, date: Date)] {
+        var seen = Set<String>()
+        return holidays.filter { $0.value.isOffDay && $0.key.hasPrefix("\(year)-") }
+            .sorted { $0.key < $1.key }
+            .filter { seen.insert($0.value.name).inserted }
+            .compactMap { kv in Self.dayFormatter.date(from: kv.key).map { (kv.value.name, $0) } }
+    }
+
     /// 农历日期，比如"十月十七"。
     public nonisolated static func lunarString(_ date: Date) -> String {
         let f = DateFormatter()

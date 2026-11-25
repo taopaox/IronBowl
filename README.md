@@ -10,6 +10,8 @@ brew install xcodegen
 xcodegen generate
 xcodebuild -project IronBowl.xcodeproj -scheme IronBowl -configuration Release -derivedDataPath build/DerivedData build
 open build/DerivedData/Build/Products/Release/IronBowl.app
+# 独立版万年历
+xcodebuild -project IronBowl.xcodeproj -scheme Calendar -configuration Release -derivedDataPath build/DerivedData build
 ```
 
 也可以 `xcodegen generate` 后用 Xcode 打开 `IronBowl.xcodeproj` 运行。
@@ -18,6 +20,8 @@ open build/DerivedData/Build/Products/Release/IronBowl.app
 
 - `Packages/IronBowlKit`：公共底座（插件协议、数据库、设置、提醒、工作日历、AI 提供者）
 - `Packages/ZentaoLogPlugin`：禅道日志插件
+- `Packages/CalendarPlugin`：万年历插件（农历、节气、节日、天气）
+- `Apps/Calendar`：独立版万年历
 - `Apps/IronBowl`：工作台应用
 
 ## 测试

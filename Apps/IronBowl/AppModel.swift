@@ -3,6 +3,7 @@ import IronBowlKit
 import Observation
 import ServiceManagement
 import SwiftUI
+import CalendarPlugin
 import ZentaoLogPlugin
 
 enum DockMode: String, Codable, Sendable, CaseIterable, Identifiable {
@@ -71,7 +72,7 @@ final class AppModel {
     init() {
         let plugins: [IronBowlPlugin] = [
             ZentaoLogPlugin(),
-            ComingSoonPlugin(id: "calendar", title: "万年历", systemImage: "calendar"),
+            CalendarPlugin(),
             ComingSoonPlugin(id: "feishu", title: "飞书知识库", systemImage: "book.pages"),
             ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist"),
             ComingSoonPlugin(id: "report", title: "周报日报", systemImage: "doc.text"),

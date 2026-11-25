@@ -12,6 +12,13 @@ public nonisolated enum ScanMode: String, Codable, Sendable, CaseIterable, Ident
         case .manualOnly: "只在点「刷新」时扫描"
         }
     }
+    public var detail: String {
+        switch self {
+        case .onDemand: "打开日志页、提醒弹出或点刷新时自动扫描。"
+        case .onDemandPlusInterval: "在按需扫描的基础上，每隔固定分钟自动扫描一次。"
+        case .manualOnly: "不自动扫描，仅在手动点击「刷新」时读取仓库。"
+        }
+    }
 }
 
 /// 日志插件的所有设置键。
@@ -85,6 +92,20 @@ enum LogMigrations {
                 t.column("taskID", .integer).notNull()
             }
         },
+        DatabaseMigration("zentao.v2") { db in
+            try db.create(table: "zentaoPendingDraft") { t in
+                t.primaryKey("date", .text)
+                t.column("payload", .text).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+        },
+        DatabaseMigration("zentao.v3") { db in
+            try db.create(table: "zentaoDailyOvertime") { t in
+                t.primaryKey("date", .text)
+                t.column("hours", .double).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+        },
     ]
 }
 
@@ -105,6 +126,10 @@ struct LogStore {
         (try? db.pool.read { try Submission.filter(Column("date") == date).fetchAll($0) }) ?? []
     }
 
+    func submissions(since minDate: String) -> [Submission] {
+        (try? db.pool.read { try Submission.filter(Column("date") >= minDate).fetchAll($0) }) ?? []
+    }
+
     func add(_ submission: Submission) {
         try? db.pool.write { try submission.insert($0) }
     }
@@ -119,6 +144,48 @@ struct LogStore {
             for repo in repos {
                 try db.execute(sql: "INSERT OR REPLACE INTO zentaoLastTask(repoPath, taskID) VALUES (?, ?)", arguments: [repo, taskID])
             }
+        }
+    }
+
+    func pendingDrafts(since minDate: String) -> [String: [DraftEntry]] {
+        let rows = (try? db.pool.read { db in
+            try Row.fetchAll(db, sql: "SELECT date, payload FROM zentaoPendingDraft WHERE date >= ?", arguments: [minDate])
+        }) ?? []
+        let decoder = JSONDecoder()
+        var out: [String: [DraftEntry]] = [:]
+        for row in rows {
+            guard let date: String = row["date"],
+                  let payload: String = row["payload"],
+                  let data = payload.data(using: .utf8),
+                  let entries = try? decoder.decode([DraftEntry].self, from: data) else {
+                continue
+            }
+            let pending = entries.filter { !$0.isRecorded }
+            if !pending.isEmpty {
+                out[date] = pending
+            }
+        }
+        return out
+    }
+
+    func savePendingDrafts(_ entries: [DraftEntry], for date: String) {
+        let pending = entries.filter { !$0.isRecorded }
+        if pending.isEmpty {
+            try? db.pool.write { db in
+                try db.execute(sql: "DELETE FROM zentaoPendingDraft WHERE date = ?", arguments: [date])
+            }
+            return
+        }
+        guard let data = try? JSONEncoder().encode(pending),
+              let payload = String(data: data, encoding: .utf8) else {
+            return
+        }
+        let now = Date()
+        try? db.pool.write { db in
+            try db.execute(
+                sql: "INSERT OR REPLACE INTO zentaoPendingDraft(date, payload, updatedAt) VALUES (?, ?, ?)",
+                arguments: [date, payload, now]
+            )
         }
     }
 }

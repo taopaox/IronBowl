@@ -55,9 +55,13 @@ struct ZentaoAccountSettings: View {
 
         DSSection("兜底任务") {
             DSRow("兜底任务", description: "AI 找不到合适任务时记到这里，草稿里会标黄。默认选名字里带「杂项」的任务。") {
-                DSPicker(selection: s.binding(LogKeys.fallbackTaskID),
-                         options: [(Int?.none, "未设置")] + model.openTasks.map { (Int?.some($0.id), "#\($0.id) \($0.name)") },
-                         width: 260)
+                let fallbackOptions = [DSPickerOption(Int?.none, title: "未设置", subtitle: "自动匹配名称含「杂项」的未关闭任务。")]
+                    + model.openTasks.map { DSPickerOption(Int?.some($0.id), title: "#\($0.id) \($0.name)", subtitle: $0.projectName) }
+                DSPicker(
+                    selection: s.binding(LogKeys.fallbackTaskID),
+                    options: fallbackOptions,
+                    width: 260
+                )
             }
         }
         .task { if model.tasks.isEmpty { await model.loadTasks() } }
@@ -105,7 +109,10 @@ struct RepoSettings: View {
                 TextField("", text: s.binding(LogKeys.authorEmail)).textFieldStyle(.ds).frame(width: 260)
             }
             DSRow("扫描方式") {
-                DSPicker(selection: s.binding(LogKeys.scanMode), options: ScanMode.allCases.map { ($0, $0.shortName) })
+                DSPicker(
+                    selection: s.binding(LogKeys.scanMode),
+                    options: ScanMode.allCases.map { DSPickerOption($0, title: $0.shortName, subtitle: $0.detail) }
+                )
             }
             if s[LogKeys.scanMode] == .onDemandPlusInterval {
                 DSRow("定时扫描间隔") {
@@ -313,6 +320,29 @@ struct GenerateSettings: View {
 struct ReminderSettings: View {
     let model: LogModel
     let scheduler: LogReminderScheduler
+    @State private var notificationStatus: SystemNotificationStatus?
+    @State private var previewing = false
+    @State private var requestingAuth = false
+    @State private var previewFeedback: NotificationBannerState?
+
+    private enum BannerAction {
+        case none
+        case openSettings(String)
+        case requestAuth(String)
+
+        var title: String? {
+            switch self {
+            case .none: nil
+            case .openSettings(let title), .requestAuth(let title): title
+            }
+        }
+    }
+
+    private struct NotificationBannerState {
+        let kind: DSBanner.Kind
+        let text: String
+        let action: BannerAction
+    }
 
     var body: some View {
         let s = model.settings
@@ -349,18 +379,262 @@ struct ReminderSettings: View {
             }
         }
         DSSection("怎么提醒", footer: "系统通知是横幅还是常驻，由「系统设置 → 通知 → 饭碗」决定；右上角卡片和中央弹框由饭碗自己画，不操作不会消失，勿扰模式下也会出现。") {
-            ForEach(ReminderStyle.allCases) { style in
-                DSRow(style.shortName, description: style.detail) {
-                    HStack(spacing: 10) {
-                        Button("预览") { scheduler.preview(style: style) }.buttonStyle(.dsGhost)
-                        Image(systemName: s[LogKeys.reminderStyle] == style ? "checkmark.circle.fill" : "circle")
-                            .font(DS.font(18))
-                            .foregroundStyle(s[LogKeys.reminderStyle] == style ? DS.toggle : DS.textTertiary)
+            DSRow("提醒方式", description: "系统通知走 macOS 通知中心；卡片与弹框在勿扰模式下也会出现。") {
+                HStack(spacing: 8) {
+                    Button {
+                        Task { await runPreview(style: s[LogKeys.reminderStyle]) }
+                    } label: {
+                        if previewing {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("预览")
+                        }
                     }
+                    .buttonStyle(.dsSecondary)
+                    .disabled(previewing)
+                    DSPicker(
+                        selection: s.binding(LogKeys.reminderStyle),
+                        options: ReminderStyle.allCases.map {
+                            DSPickerOption($0, title: $0.shortName, subtitle: $0.detail)
+                        }
+                    )
                 }
-                .contentShape(.rect)
-                .onTapGesture { s[LogKeys.reminderStyle] = style }
             }
+            if s[LogKeys.reminderStyle] == .system {
+                DSRow("系统通知权限", description: permissionDescription) {
+                    permissionControls
+                }
+            }
+        }
+        if s[LogKeys.reminderStyle] == .system, let banner = activeBanner {
+            DSBanner(banner.kind, banner.text, actionTitle: banner.action.title) {
+                performBannerAction(banner.action)
+            }
+        }
+        Color.clear
+            .frame(height: 0)
+            .task { await refreshNotificationStatus() }
+            .onChange(of: s[LogKeys.reminderStyle]) { _, newStyle in
+                if newStyle == .system {
+                    Task { await refreshNotificationStatus() }
+                } else {
+                    previewFeedback = nil
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                Task { await refreshNotificationStatus() }
+            }
+    }
+
+    private var permissionDescription: String {
+        switch notificationStatus {
+        case nil:
+            "正在检查系统通知权限…"
+        case .authorized:
+            "已开启系统通知，预览或到点时会由 macOS 通知中心弹出。"
+        case .notDetermined:
+            "尚未授权，点击「请求权限」或点「预览」会弹出系统授权提示。"
+        case .denied:
+            "未允许通知，请在「系统设置 → 通知 → 饭碗」打开「允许通知」。"
+        case .alertsDisabled:
+            "提醒样式当前为「无」，请在「系统设置 → 通知 → 饭碗」选择「横幅」或「提醒」。"
+        case .unavailable:
+            "仅以 .app 应用包运行时支持系统通知。"
+        }
+    }
+
+    @ViewBuilder
+    private var permissionControls: some View {
+        switch notificationStatus {
+        case nil:
+            ProgressView().controlSize(.small)
+        case .notDetermined:
+            HStack(spacing: 8) {
+                statusBadge("未授权", color: DS.warning)
+                Button {
+                    Task { await requestAuthorization() }
+                } label: {
+                    if requestingAuth { ProgressView().controlSize(.small).tint(DS.onPrimary) } else { Text("请求权限") }
+                }
+                .buttonStyle(.dsPrimary)
+                .disabled(requestingAuth)
+                Button("系统设置") { openSystemSettings() }
+                    .buttonStyle(.dsSecondary)
+            }
+        case .denied:
+            HStack(spacing: 8) {
+                statusBadge("未开启", color: DS.warning)
+                Button("前往设置权限") { openSystemSettings() }
+                    .buttonStyle(.dsPrimary)
+            }
+        case .alertsDisabled:
+            HStack(spacing: 8) {
+                statusBadge("样式为无", color: DS.warning)
+                Button("前往设置样式") { openSystemSettings() }
+                    .buttonStyle(.dsPrimary)
+            }
+        case .authorized:
+            HStack(spacing: 8) {
+                statusBadge("已开启", color: DS.success)
+                Button("打开系统设置") { openSystemSettings() }
+                    .buttonStyle(.dsSecondary)
+            }
+        case .unavailable:
+            HStack(spacing: 8) {
+                statusBadge("不可用", color: DS.textTertiary)
+                Button("打开系统设置") { openSystemSettings() }
+                    .buttonStyle(.dsSecondary)
+            }
+        }
+    }
+
+    private func statusBadge(_ text: String, color: Color) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(text).font(DS.caption).foregroundStyle(color)
+        }
+    }
+
+    private var activeBanner: NotificationBannerState? {
+        if let previewFeedback { return previewFeedback }
+        switch notificationStatus {
+        case .denied:
+            return NotificationBannerState(
+                kind: .warning,
+                text: "系统通知权限未开启，选「系统通知」时将无法弹出提醒。请前往「系统设置 → 通知 → 饭碗」打开「允许通知」。",
+                action: .openSettings("前往设置权限")
+            )
+        case .alertsDisabled:
+            return NotificationBannerState(
+                kind: .warning,
+                text: "系统通知权限已开启，但提醒样式当前为「无」，不会在屏幕上弹窗。请前往「系统设置 → 通知 → 饭碗」改为「横幅」或「提醒」。",
+                action: .openSettings("前往设置样式")
+            )
+        case .notDetermined:
+            return NotificationBannerState(
+                kind: .info,
+                text: "尚未向系统申请通知权限，点击「请求权限」或在首次预览时授权。",
+                action: .requestAuth("请求权限")
+            )
+        case .unavailable:
+            return NotificationBannerState(
+                kind: .warning,
+                text: "当前不是以 .app 应用包运行，macOS 不会投递系统通知。",
+                action: .none
+            )
+        case .authorized, nil:
+            return nil
+        }
+    }
+
+    private func performBannerAction(_ action: BannerAction) {
+        switch action {
+        case .none:
+            break
+        case .openSettings:
+            openSystemSettings()
+        case .requestAuth:
+            Task { await requestAuthorization() }
+        }
+    }
+
+    private func refreshNotificationStatus() async {
+        let latest = await model.context.reminders.systemNotificationStatus()
+        notificationStatus = latest
+        if latest == .authorized, previewFeedback?.kind == .warning {
+            previewFeedback = nil
+        }
+    }
+
+    private func requestAuthorization() async {
+        requestingAuth = true
+        defer { requestingAuth = false }
+        let latest = await model.context.reminders.requestSystemNotificationAuthorization()
+        notificationStatus = latest
+        previewFeedback = bannerState(for: latest)
+    }
+
+    private func bannerState(for status: SystemNotificationStatus) -> NotificationBannerState? {
+        switch status {
+        case .authorized:
+            return NotificationBannerState(
+                kind: .success,
+                text: "系统通知权限已开启，现在可以点击「预览」测试通知效果。",
+                action: .none
+            )
+        case .denied:
+            return NotificationBannerState(
+                kind: .warning,
+                text: "未获得系统通知权限，请到「系统设置 → 通知 → 饭碗」打开「允许通知」。",
+                action: .openSettings("前往设置权限")
+            )
+        case .alertsDisabled:
+            return NotificationBannerState(
+                kind: .warning,
+                text: "系统通知提醒样式当前为「无」，请到「系统设置 → 通知 → 饭碗」改为「横幅」或「提醒」。",
+                action: .openSettings("前往设置样式")
+            )
+        case .notDetermined:
+            return nil
+        case .unavailable:
+            return NotificationBannerState(
+                kind: .warning,
+                text: "当前不是以 .app 应用包运行，macOS 不会投递系统通知。",
+                action: .none
+            )
+        }
+    }
+
+    private func runPreview(style: ReminderStyle) async {
+        previewing = true
+        defer { previewing = false }
+        let result = await scheduler.preview(style: style)
+        guard style == .system else {
+            previewFeedback = nil
+            return
+        }
+        notificationStatus = await model.context.reminders.systemNotificationStatus()
+        switch result {
+        case .delivered:
+            previewFeedback = NotificationBannerState(
+                kind: .success,
+                text: "已发送系统通知预览。如果右上角仍未出现，请检查是否开启了「专注/勿扰模式」，或打开系统设置确认提醒样式。",
+                action: .openSettings("打开系统设置")
+            )
+        case .permissionDenied:
+            previewFeedback = NotificationBannerState(
+                kind: .warning,
+                text: "未弹出通知：系统通知权限未开启。请到「系统设置 → 通知 → 饭碗」打开「允许通知」。",
+                action: .openSettings("前往设置权限")
+            )
+        case .alertsDisabled:
+            previewFeedback = NotificationBannerState(
+                kind: .warning,
+                text: "未弹出通知：系统通知提醒样式当前为「无」，不会在屏幕上弹窗。请到「系统设置 → 通知 → 饭碗」改为「横幅」或「提醒」。",
+                action: .openSettings("前往设置样式")
+            )
+        case .unavailable:
+            previewFeedback = NotificationBannerState(
+                kind: .warning,
+                text: "当前不是以 .app 应用包运行，macOS 不会投递系统通知。",
+                action: .none
+            )
+        case .failed(let message):
+            previewFeedback = NotificationBannerState(
+                kind: .danger,
+                text: "系统通知发送失败：\(message)",
+                action: .openSettings("打开系统设置")
+            )
+        }
+    }
+
+    private func openSystemSettings() {
+        if !ReminderCenter.openSystemNotificationSettings() {
+            previewFeedback = NotificationBannerState(
+                kind: .warning,
+                text: "未能自动打开系统设置，请手动前往「系统设置 → 通知 → 饭碗」。",
+                action: .none
+            )
         }
     }
 

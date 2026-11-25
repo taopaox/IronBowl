@@ -5,6 +5,8 @@ import SwiftUI
 /// 禅道日志插件。
 public final class ZentaoLogPlugin: IronBowlPlugin {
     public static let pluginID = "zentao.log"
+    public static let autoSubmitActionID = "zentao.autoSubmitLog"
+    public static let defaultAutoSubmitTaskID = "builtin.zentao.dailyAutoSubmit"
     public let id = ZentaoLogPlugin.pluginID
     public let title = "禅道日志"
     public let systemImage = "square.and.pencil"
@@ -12,15 +14,93 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
 
     var model: LogModel?
     var scheduler: LogReminderScheduler?
+    private var pluginContext: PluginContext?
 
     public init() {}
 
     public func start(context: PluginContext) {
+        self.pluginContext = context
         let model = LogModel(context: context)
         self.model = model
         let scheduler = LogReminderScheduler(model: model)
         self.scheduler = scheduler
         scheduler.start()
+        registerScheduledActions(context: context, model: model)
+    }
+
+    public func stop() {
+        pluginContext?.scheduler.unregister(actionID: Self.autoSubmitActionID)
+        pluginContext = nil
+        scheduler?.stop()
+        scheduler = nil
+        model = nil
+    }
+
+    private func registerScheduledActions(context: PluginContext, model: LogModel) {
+        context.scheduler.register(action: ScheduledTaskAction(
+            id: Self.autoSubmitActionID,
+            title: "自动生成并提交今日禅道日志",
+            subtitle: "检查今日是否已提交；未提交时自动扫描 Git、生成草稿并写入禅道。",
+            pluginID: Self.pluginID,
+            systemImage: "square.and.pencil",
+            defaultName: "每日自动生成并提交禅道日志",
+            parameterSpecs: [
+                ScheduledActionParameterSpec(
+                    key: "draftStrategy",
+                    title: "已有未提交草稿时",
+                    description: "触发时如果今天已经存在尚未提交的草稿，如何处理。",
+                    kind: .choice([
+                        .init(value: AutoLogDraftStrategy.regenerate.rawValue, title: "重新扫描并生成覆盖后提交", subtitle: "拉取最新 Git 提交重新生成草稿并提交（推荐）。"),
+                        .init(value: AutoLogDraftStrategy.submitExisting.rawValue, title: "直接提交已有草稿", subtitle: "不再重新扫描和调用 AI，直接提交现有草稿。"),
+                        .init(value: AutoLogDraftStrategy.skip.rawValue, title: "保留草稿并跳过", subtitle: "不覆盖手动编辑中的草稿，等手动确认提交。"),
+                    ]),
+                    defaultValue: AutoLogDraftStrategy.regenerate.rawValue
+                ),
+                ScheduledActionParameterSpec(
+                    key: "allowFallbackOnAIFailure",
+                    title: "AI 失败时使用回退文本自动提交",
+                    description: "关闭后，若 AI 调用失败则只保存草稿并弹窗提醒，不自动提交。",
+                    kind: .bool,
+                    defaultValue: "true"
+                ),
+                ScheduledActionParameterSpec(
+                    key: "requireMappedTask",
+                    title: "命中兜底任务时暂停自动提交",
+                    description: "开启后，如果存在未关联项目的仓库落到兜底任务，仅保存草稿并提醒人工确认。",
+                    kind: .bool,
+                    defaultValue: "false"
+                ),
+            ]
+        ) { [weak model] ctx in
+            guard let model else {
+                return .failed(summary: "禅道日志插件未就绪", detail: "请先在设置中启用「禅道日志」插件。")
+            }
+            let strategy = AutoLogDraftStrategy(rawValue: ctx.string("draftStrategy", default: AutoLogDraftStrategy.regenerate.rawValue)) ?? .regenerate
+            let options = AutoSubmitLogOptions(
+                draftStrategy: strategy,
+                allowFallbackOnAIFailure: ctx.bool("allowFallbackOnAIFailure", default: true),
+                requireMappedTask: ctx.bool("requireMappedTask", default: false)
+            )
+            return await model.autoGenerateAndSubmitToday(options: options, now: ctx.now)
+        })
+
+        context.scheduler.seedDefaultTaskIfNeeded({
+            ScheduledTask(
+                id: Self.defaultAutoSubmitTaskID,
+                name: "每日自动生成并提交禅道日志",
+                actionID: Self.autoSubmitActionID,
+                isEnabled: true,
+                schedule: TaskSchedule(kind: .workdays, hour: 17, minute: 0),
+                misfirePolicy: .runIfMissedToday,
+                notifyPolicy: .onSuccessAndFailure,
+                notifyStyle: context.settings[LogKeys.reminderStyle],
+                parameters: [
+                    "draftStrategy": AutoLogDraftStrategy.regenerate.rawValue,
+                    "allowFallbackOnAIFailure": "true",
+                    "requireMappedTask": "false",
+                ]
+            )
+        }, seedID: Self.defaultAutoSubmitTaskID)
     }
 
     public func makeMainView() -> AnyView {
@@ -44,14 +124,24 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
     public var sidebarRecents: [SidebarRecent] {
         guard let model else { return [] }
         let _ = model.todaySubmitted
+        let _ = model.recordedByDate
+        let _ = model.pendingByDate
         let f = DateFormatter()
         f.dateFormat = "M月d日"
         return model.recentDays.prefix(5).map { day in
-            let subs = model.store.submissions(on: WorkCalendar.dayString(day))
+            let hours = model.recordedHours(on: day)
+            let pendingH = model.pendingHours(on: day)
             let info = model.context.workCalendar.dayInfo(day)
-            let status = subs.isEmpty ? (info.isWorkday ? "待提交" : "休息") : "\(hoursText(subs.reduce(0) { $0 + $1.hours }))h"
+            let status: String
+            if hours > 0 {
+                status = "已写 \(hoursText(hours))h"
+            } else if pendingH > 0 {
+                status = "草稿 \(hoursText(pendingH))h"
+            } else {
+                status = info.isWorkday ? "未写" : "休息"
+            }
             let trailing = Calendar.current.isDateInToday(day) ? "今天" : CN.weekdayShort(day)
-            return SidebarRecent(id: "zentao.day.\(WorkCalendar.dayString(day))", title: "\(f.string(from: day)) \(status)", trailing: trailing) {
+            return SidebarRecent(id: "zentao.day.\(WorkCalendar.dayString(day))", title: "\(f.string(from: day)) · \(status)", trailing: trailing) {
                 model.context.openPlugin(ZentaoLogPlugin.pluginID)
                 Task { await model.select(date: day) }
             }
@@ -82,7 +172,10 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
         guard let model else { return [] }
         return [
             HomeCard(id: "zentao.today", label: "今日日志",
-                     value: { model.todaySubmitted ? "已提交" : "未提交" },
+                     value: {
+                         let h = model.recordedHours(on: Date())
+                         return h > 0 ? "已写 \(hoursText(h))h" : (model.todaySubmitted ? "已提交" : "未写")
+                     },
                      detail: { model.todayCommitCount.map { "今天 \($0) 次提交" } },
                      action: { model.context.openPlugin(ZentaoLogPlugin.pluginID) }),
         ]
@@ -96,16 +189,21 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
     public var menuBarItems: [MenuBarItem] {
         guard let model, let scheduler else { return [] }
         return [
-            MenuBarItem(id: "zentao.status", title: "今天的日志状态（✓ 已提交 / ● 未提交）") {
+            MenuBarItem(id: "zentao.status", title: "今天的日志状态（✓ 已写 / ● 未写）") {
                 model.todaySubmitted ? "✓" : (model.context.workCalendar.isWorkday(Date()) ? "●" : nil)
             },
             MenuBarItem(id: "zentao.commits", title: "今天的提交数") {
                 model.todayCommitCount.map { "\($0)次" }
             },
-            MenuBarItem(id: "zentao.hours", title: "今天的预计工时") {
-                let subs = model.store.submissions(on: WorkCalendar.dayString(Date()))
-                let h = subs.isEmpty ? model.defaultHours : subs.reduce(0) { $0 + $1.hours }
-                return "\(hoursText(h))h"
+            MenuBarItem(id: "zentao.hours", title: "今天的工时") {
+                let recorded = model.recordedHours(on: Date())
+                let target = model.targetHours(on: Date())
+                if recorded > 0 {
+                    return target > recorded
+                        ? "已写 \(hoursText(recorded))/\(hoursText(target))h"
+                        : "已写 \(hoursText(recorded))h"
+                }
+                return "需填 \(hoursText(target))h"
             },
             MenuBarItem(id: "zentao.nextReminder", title: "离下次提醒还有多久") {
                 scheduler.nextReminder().map { "提醒 " + countdown(to: $0) }
@@ -136,6 +234,18 @@ final class LogReminderScheduler {
         if settings[LogKeys.scanMode] != .manualOnly {
             Task { await model.scanTodayCount() }
         }
+        if model.isConfigured {
+            Task { await model.loadRecentRecorded() }
+        }
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        scanTimer?.invalidate()
+        scanTimer = nil
+        snoozeUntil = nil
+        model.context.reminders.dismiss(id: Self.reminderID)
     }
 
     /// 定时扫描（只在"按需 + 定时"模式下）。
@@ -233,8 +343,9 @@ final class LogReminderScheduler {
         model.context.reminders.show(content, style: style)
     }
 
-    /// 设置页的「测试」按钮：只预览样式，按钮不产生任何效果。
-    func preview(style: ReminderStyle) {
+    /// 设置页的「预览」按钮：只预览样式，按钮不产生任何效果，并返回投递结果。
+    @discardableResult
+    func preview(style: ReminderStyle) async -> ReminderDeliveryResult {
         let id = "zentao.log.preview.\(style.rawValue)"
         let content = ReminderContent(
             id: id,
@@ -247,7 +358,7 @@ final class LogReminderScheduler {
                 ReminderAction(id: "write", title: "去写日志", isPrimary: true) {},
             ]
         )
-        model.context.reminders.show(content, style: style)
+        return await model.context.reminders.showAndReport(content, style: style)
     }
 
     static func time(_ hhmm: String, on day: Date) -> Date? {

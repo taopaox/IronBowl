@@ -24,12 +24,38 @@ public nonisolated struct ZentaoEstimate: Sendable, Hashable {
     public let left: Double
     public let work: String
     public let account: String
+    public let objectType: String
+    public let objectTitle: String?
+    public let projectID: Int?
+
+    public init(
+        taskID: Int,
+        date: String,
+        consumed: Double,
+        left: Double,
+        work: String,
+        account: String,
+        objectType: String = "task",
+        objectTitle: String? = nil,
+        projectID: Int? = nil
+    ) {
+        self.taskID = taskID
+        self.date = date
+        self.consumed = consumed
+        self.left = left
+        self.work = work
+        self.account = account
+        self.objectType = objectType
+        self.objectTitle = objectTitle
+        self.projectID = projectID
+    }
 }
 
 public nonisolated enum ZentaoError: LocalizedError, Sendable {
     case notConfigured
     case loginFailed(String)
     case badResponse(String)
+    case submitFailed(taskID: Int, reason: String)
     case submitNotVerified(taskID: Int)
 
     public var errorDescription: String? {
@@ -37,6 +63,7 @@ public nonisolated enum ZentaoError: LocalizedError, Sendable {
         case .notConfigured: "还没填写禅道地址、账号和密码"
         case .loginFailed(let r): "禅道登录失败：\(r)"
         case .badResponse(let s): "禅道返回了看不懂的内容：\(s.prefix(200))"
+        case .submitFailed(let id, let reason): "任务 #\(id) 提交失败：\(reason)"
         case .submitNotVerified(let id): "任务 #\(id) 提交后没在禅道里查到这条工时，请到禅道确认"
         }
     }
@@ -53,6 +80,7 @@ public actor ZentaoClient {
     private var sessionName = "zentaosid"
     private var sessionID: String?
     private var loggedIn = false
+    private var supportsEffortModule: Bool?
 
     public init(baseURL: String, account: String, password: String) throws {
         var trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -64,7 +92,7 @@ public actor ZentaoClient {
         self.account = account
         self.password = password
         let config = URLSessionConfiguration.ephemeral
-        config.httpCookieStorage = HTTPCookieStorage()
+        config.httpShouldSetCookies = true
         config.httpCookieAcceptPolicy = .always
         config.timeoutIntervalForRequest = 20
         session = URLSession(configuration: config)
@@ -87,6 +115,7 @@ public actor ZentaoClient {
         let status = obj?["status"] as? String
         if status == "success" || obj?["user"] != nil {
             loggedIn = true
+            supportsEffortModule = Self.detectEffortModule(obj ?? [:])
             return
         }
         let reason = (obj?["reason"] as? String) ?? (obj?["message"] as? String) ?? String(decoding: data.prefix(200), as: UTF8.self)
@@ -101,7 +130,15 @@ public actor ZentaoClient {
 
     /// 指派给我的任务（含已关闭，界面上再过滤）。
     public func myTasks() async throws -> [ZentaoTask] {
-        let obj = try await getJSON("my-task-assignedTo-id_desc-0-500-1.json")
+        Self.parseTasks(try await getJSON("my-task-assignedTo-id_desc-0-500-1.json"))
+    }
+
+    /// 我近期完成过的任务（避免任务完成后从指派列表消失而查不到已写工时）。
+    public func finishedTasks() async throws -> [ZentaoTask] {
+        Self.parseTasks(try await getJSON("my-task-finishedBy-id_desc-0-100-1.json"))
+    }
+
+    private static func parseTasks(_ obj: [String: Any]) -> [ZentaoTask] {
         let raw: [[String: Any]]
         if let arr = obj["tasks"] as? [[String: Any]] {
             raw = arr
@@ -127,12 +164,25 @@ public actor ZentaoClient {
 
     /// 某任务已有的工时记录。
     public func estimates(taskID: Int) async throws -> [ZentaoEstimate] {
+        try await ensureLogin()
+        if supportsEffortModule != false {
+            let obj = try await getJSON("effort-createForObject-task-\(taskID).json")
+            if let efforts = Self.parseEfforts(obj, fallbackTaskID: taskID) {
+                supportsEffortModule = true
+                return efforts.sorted { $0.date < $1.date }
+            }
+            if supportsEffortModule == nil {
+                supportsEffortModule = false
+            }
+        }
         let obj = try await getJSON("task-recordEstimate-\(taskID).json")
         let raw: [[String: Any]]
         if let arr = obj["estimates"] as? [[String: Any]] {
             raw = arr
         } else if let dict = obj["estimates"] as? [String: [String: Any]] {
-            raw = Array(dict.values)
+            raw = dict.sorted { (Int($0.key) ?? Int.max, $0.key) < (Int($1.key) ?? Int.max, $1.key) }.map(\.value)
+        } else if let efforts = Self.parseEfforts(obj, fallbackTaskID: taskID) {
+            return efforts.sorted { $0.date < $1.date }
         } else {
             raw = []
         }
@@ -142,7 +192,7 @@ public actor ZentaoClient {
                 date: String(((e["date"] as? String) ?? "").prefix(10)),
                 consumed: Self.double(e["consumed"]) ?? 0,
                 left: Self.double(e["left"]) ?? 0,
-                work: (e["work"] as? String) ?? "",
+                work: ((e["work"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
                 account: (e["account"] as? String) ?? ""
             )
         }
@@ -150,29 +200,99 @@ public actor ZentaoClient {
 
     /// 我在某天对这些任务记过的工时。
     public func myEstimates(on date: String, taskIDs: [Int]) async throws -> [ZentaoEstimate] {
-        var result: [ZentaoEstimate] = []
-        for id in Set(taskIDs) {
-            let list = try await estimates(taskID: id)
-            result += list.filter { $0.date == date && ($0.account.isEmpty || $0.account == account) }
+        let grouped = try await myEstimates(since: date, taskIDs: taskIDs)
+        return (grouped[date] ?? []).filter { $0.date == date }
+    }
+
+    /// 并发拉取从 `minDate`（yyyy-MM-dd）起各任务的工时记录，按日期分组返回。
+    public func myEstimates(since minDate: String, taskIDs: [Int]) async throws -> [String: [ZentaoEstimate]] {
+        try await ensureLogin()
+        if supportsEffortModule != false {
+            if let efforts = try await myEfforts(since: minDate) {
+                supportsEffortModule = true
+                return Dictionary(grouping: efforts, by: \.date)
+            }
+            if supportsEffortModule == nil {
+                supportsEffortModule = false
+            }
         }
-        return result
+        let unique = Array(Set(taskIDs))
+        guard !unique.isEmpty else { return [:] }
+        var grouped: [String: [ZentaoEstimate]] = [:]
+        let batchSize = 6
+        for start in stride(from: 0, to: unique.count, by: batchSize) {
+            let batch = unique[start..<min(start + batchSize, unique.count)]
+            let batchResults = await withTaskGroup(of: [ZentaoEstimate].self) { group in
+                for id in batch {
+                    group.addTask {
+                        (try? await self.estimates(taskID: id)) ?? []
+                    }
+                }
+                var collected: [ZentaoEstimate] = []
+                for await list in group {
+                    collected.append(contentsOf: list)
+                }
+                return collected
+            }
+            for e in batchResults where e.date >= minDate && (e.account.isEmpty || e.account == account) {
+                grouped[e.date, default: []].append(e)
+            }
+        }
+        return grouped
+    }
+
+    private func myEfforts(since minDate: String) async throws -> [ZentaoEstimate]? {
+        var collected: [ZentaoEstimate] = []
+        let maxPages = 5
+        for page in 1...maxPages {
+            let obj = try await getJSON("my-effort-all-date_desc-0-100-\(page).json")
+            guard let list = Self.parseEfforts(obj) else {
+                return page == 1 ? nil : collected
+            }
+            for e in list where e.date >= minDate && (e.account.isEmpty || e.account == account) {
+                collected.append(e)
+            }
+            let pager = obj["pager"] as? [String: Any]
+            let pageTotal = Self.int(pager?["pageTotal"]) ?? 1
+            let oldestDate = list.map(\.date).filter { !$0.isEmpty }.min()
+            if list.isEmpty || oldestDate == nil || oldestDate! < minDate || page >= min(pageTotal, maxPages) {
+                break
+            }
+        }
+        return collected
     }
 
     /// 给任务记一条工时，提交后回查确认。
     public func recordEstimate(taskID: Int, date: String, consumed: Double, left: Double, work: String) async throws {
         try await ensureLogin()
         let before = try await estimates(taskID: taskID).count
-        let form: [String: String] = [
+        let trimmedWork = work.trimmingCharacters(in: .whitespacesAndNewlines)
+        let path: String
+        var form: [String: String] = [
             "id[1]": "1",
             "dates[1]": date,
             "consumed[1]": Self.format(consumed),
             "left[1]": Self.format(left),
             "work[1]": work,
         ]
-        _ = try await request("task-recordEstimate-\(taskID).json", form: form)
+        if supportsEffortModule == true {
+            path = "effort-createForObject-task-\(taskID).json"
+            form["objectType[1]"] = "task"
+            form["objectID[1]"] = String(taskID)
+        } else {
+            path = "task-recordEstimate-\(taskID).json"
+        }
+        let postData = try await postForm(path, form: form)
+        if let reason = Self.failureReason(postData) {
+            throw ZentaoError.submitFailed(taskID: taskID, reason: reason)
+        }
         let after = try await estimates(taskID: taskID)
         let found = after.count > before
-            || after.contains { $0.date == date && abs($0.consumed - consumed) < 0.01 && $0.work == work }
+            || after.contains {
+                $0.date == date
+                    && abs($0.consumed - consumed) < 0.01
+                    && $0.work.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedWork
+            }
         if !found { throw ZentaoError.submitNotVerified(taskID: taskID) }
     }
 
@@ -187,6 +307,49 @@ public actor ZentaoClient {
             return try await getJSON(path, retry: false)
         }
         return try Self.payload(data)
+    }
+
+    private func postForm(_ path: String, form: [String: String], retry: Bool = true) async throws -> Data {
+        try await ensureLogin()
+        let (data, http) = try await request(path, form: form)
+        if Self.looksLoggedOut(data) {
+            guard retry else { throw ZentaoError.loginFailed("会话已失效") }
+            loggedIn = false
+            return try await postForm(path, form: form, retry: false)
+        }
+        guard (200..<400).contains(http.statusCode) else {
+            throw ZentaoError.badResponse("HTTP \(http.statusCode)")
+        }
+        return data
+    }
+
+    static func failureReason(_ data: Data) -> String? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let result = (obj["result"] as? String)?.lowercased()
+        let status = (obj["status"] as? String)?.lowercased()
+        let isFailure = result == "fail" || status == "fail" || status == "error"
+        guard isFailure else { return nil }
+        if let msg = extractMessage(obj["message"]), !msg.isEmpty { return msg }
+        if let reason = obj["reason"] as? String, !reason.isEmpty { return reason }
+        return "禅道返回失败（\(result ?? status ?? "fail")）"
+    }
+
+    private static func extractMessage(_ value: Any?) -> String? {
+        if let s = value as? String {
+            return s.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let arr = value as? [Any] {
+            let parts = arr.compactMap { extractMessage($0) }.filter { !$0.isEmpty }
+            return parts.isEmpty ? nil : parts.joined(separator: "；")
+        }
+        if let dict = value as? [String: Any] {
+            let parts = dict.sorted { $0.key < $1.key }.compactMap { k, v -> String? in
+                guard let text = extractMessage(v), !text.isEmpty else { return nil }
+                return "\(k)：\(text)"
+            }
+            return parts.isEmpty ? nil : parts.joined(separator: "；")
+        }
+        return nil
     }
 
     private func request(_ path: String, form: [String: String]? = nil, redactForm: Bool = false) async throws -> (Data, HTTPURLResponse) {
@@ -222,7 +385,60 @@ public actor ZentaoClient {
         return obj
     }
 
+    static func detectEffortModule(_ loginResponse: [String: Any]) -> Bool? {
+        guard let user = loginResponse["user"] as? [String: Any],
+              let outerRights = user["rights"] as? [String: Any],
+              let rights = outerRights["rights"] as? [String: Any] else {
+            return nil
+        }
+        if let effort = rights["effort"] as? [String: Any], !effort.isEmpty {
+            return true
+        }
+        if let my = rights["my"] as? [String: Any], my["effort"] as? Bool == true {
+            return true
+        }
+        return false
+    }
+
+    static func parseEfforts(_ obj: [String: Any], fallbackTaskID: Int? = nil) -> [ZentaoEstimate]? {
+        let raw: [[String: Any]]
+        if let arr = obj["efforts"] as? [[String: Any]] {
+            raw = arr
+        } else if let dict = obj["efforts"] as? [String: [String: Any]] {
+            raw = dict.sorted { (Int($0.key) ?? Int.max, $0.key) < (Int($1.key) ?? Int.max, $1.key) }.map(\.value)
+        } else {
+            return nil
+        }
+        return raw.compactMap { e in
+            if Self.int(e["deleted"]) == 1 { return nil }
+            let rawType = ((e["objectType"] as? String) ?? "task")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let objectType = rawType.isEmpty ? "task" : rawType
+            let taskID = objectType == "task"
+                ? (Self.int(e["objectID"]) ?? Self.int(e["task"]) ?? fallbackTaskID ?? 0)
+                : 0
+            let rawTitle = ((e["objectTitle"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return ZentaoEstimate(
+                taskID: taskID,
+                date: String(((e["date"] as? String) ?? "").prefix(10)),
+                consumed: Self.double(e["consumed"]) ?? 0,
+                left: Self.double(e["left"]) ?? 0,
+                work: ((e["work"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+                account: (e["account"] as? String) ?? "",
+                objectType: objectType,
+                objectTitle: rawTitle.isEmpty ? nil : rawTitle,
+                projectID: Self.int(e["project"])
+            )
+        }
+    }
+
     static func looksLoggedOut(_ data: Data) -> Bool {
+        if let inner = try? payload(data),
+           let locate = inner["locate"] as? String,
+           locate.contains("user-login") {
+            return true
+        }
         let s = String(decoding: data.prefix(2000), as: UTF8.self)
         return s.contains("user-login") && !s.contains("\"status\":\"success\"")
     }

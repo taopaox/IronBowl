@@ -35,13 +35,15 @@ final class LogModel {
         self.context = context
         store = LogStore(db: context.database)
         providerKind = context.providers.defaultKind
+        mappings = store.mappings()
         refreshTodaySubmitted()
     }
 
     var dateString: String { WorkCalendar.dayString(date) }
     var isConfigured: Bool { !settings[LogKeys.account].isEmpty && !settings[LogKeys.password].isEmpty }
     var openTasks: [ZentaoTask] { tasks.filter(\.isOpen) }
-    var mappings: [String: RepoMapping] { store.mappings() }
+    /// 仓库 → 禅道项目。缓存在内存里，界面才能观察到变化；写入时同步落库。
+    private(set) var mappings: [String: RepoMapping] = [:]
     var pendingDrafts: [DraftEntry] { drafts.filter { !$0.isRecorded } }
     var totalHours: Double { drafts.reduce(0) { $0 + $1.hours } }
     var defaultHours: Double { context.workCalendar.defaultWorkHours }
@@ -272,12 +274,14 @@ final class LogModel {
         m.projectID = project?.id
         m.projectName = project?.name ?? ""
         store.save(m)
+        mappings[repo] = m
     }
 
     func updateMapping(repo: String, _ change: (inout RepoMapping) -> Void) {
         var m = mappings[repo] ?? RepoMapping(repoPath: repo, projectID: nil, projectName: "", excluded: false, sendDiff: false)
         change(&m)
         store.save(m)
+        mappings[repo] = m
     }
 
     /// 禅道项目列表（从我的任务里汇总）。

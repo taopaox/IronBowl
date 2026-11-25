@@ -142,7 +142,8 @@ public final class CalendarModel {
     }
 
     func select(_ d: Date) {
-        selected = Self.cal.startOfDay(for: d)
+        let day = Self.cal.startOfDay(for: d)
+        if selected != day { selected = day }
         if !Self.cal.isDate(d, equalTo: month, toGranularity: .month) { month = Self.firstOfMonth(d) }
     }
 

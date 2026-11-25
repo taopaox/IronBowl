@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import IronBowlKit
 
@@ -12,4 +13,20 @@ import Testing
     #expect(CN.time(d) == "14:05")
     #expect(CN.full(d) == "2026年11月25日 星期三")
     #expect(CN.slash(d) == "11/25")
+}
+
+@MainActor @Test func settingSameValueDoesNotNotify() throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "ib-test-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let db = try AppDatabase(url: url, migrations: [])
+    let s = SettingsStore(database: db)
+    let key = SettingKey<Bool>("t", default: false)
+    s[key] = true
+    final class Flag: @unchecked Sendable { var value = false }
+    let notified = Flag()
+    withObservationTracking { _ = s[key] } onChange: { notified.value = true }
+    s[key] = true
+    #expect(!notified.value)
+    s[key] = false
+    #expect(notified.value)
 }

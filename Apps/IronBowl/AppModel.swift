@@ -165,7 +165,10 @@ final class AppModel {
     /// 菜单栏单独的日历图标。
     var calendarMenuShown: Bool {
         get { calendarModel?.menuBarEnabled ?? false }
-        set { calendarModel?.menuBarEnabled = newValue }
+        set {
+            guard let model = calendarModel, model.menuBarEnabled != newValue else { return }
+            model.menuBarEnabled = newValue
+        }
     }
 
     /// 所有可选的菜单栏信息项（核心 + 已启用插件）。

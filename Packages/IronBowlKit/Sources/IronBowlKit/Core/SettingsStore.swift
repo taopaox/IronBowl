@@ -40,6 +40,8 @@ public final class SettingsStore {
         set {
             guard let data = try? JSONEncoder().encode(Wrapper(v: newValue)),
                   let json = String(data: data, encoding: .utf8) else { return }
+            // 值没变就什么都不做：不写库、不触发界面刷新（避免 SwiftUI 绑定回写造成的刷新死循环）。
+            guard cache[key.name] != json else { return }
             cache[key.name] = json
             let name = key.name
             try? database.pool.write { db in

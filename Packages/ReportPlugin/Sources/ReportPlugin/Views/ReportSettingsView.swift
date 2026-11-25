@@ -6,8 +6,8 @@ struct ReportSettingsView: View {
 
     var body: some View {
         let s = model.settings
-        DSSection("周报偏好") {
-            DSRow("默认周报风格", description: "决定生成周报的组织结构与语气。") {
+        DSSection("通用偏好") {
+            DSRow("默认报告风格", description: "决定生成周报与月报时的组织结构与语气。") {
                 DSPicker(
                     selection: s.binding(ReportKeys.style),
                     options: WeeklyReportStyle.allCases.map {
@@ -15,27 +15,45 @@ struct ReportSettingsView: View {
                     }
                 )
             }
-            DSRow("包含未提交草稿", description: "查询本周每日日报时，一并纳入禅道日志页里尚未提交的本地草稿。") {
+            DSRow("包含未提交草稿", description: "查询本周或本月每日日报时，一并纳入禅道日志页里尚未提交的本地草稿。") {
                 DSToggle(isOn: s.binding(ReportKeys.includeDrafts))
             }
-            DSRow("周报附带工时统计", description: "在周报提示词和本地汇总结果中附带总工时与加班时长。") {
+            DSRow("附带工时统计", description: "在周报/月报提示词和本地汇总结果中附带总工时与加班时长。") {
                 DSToggle(isOn: s.binding(ReportKeys.includeHours))
             }
         }
 
         DSSection(
-            "生成提示词",
+            "周报生成提示词",
             footer: "占位符：{{weekRange}} 周次与日期区间，{{totalHours}} 本周工时汇总，{{styleInstruction}} 风格要求，{{dailyLogs}} 本周每日日报，{{extraNotes}} 补充说明。"
         ) {
             DSBlockRow {
                 TextEditor(text: s.binding(ReportKeys.prompt))
                     .font(DS.mono(13.5))
                     .scrollContentBackground(.hidden)
-                    .frame(minHeight: 260)
+                    .frame(minHeight: 220)
             }
-            DSRow("恢复默认提示词") {
+            DSRow("恢复默认周报提示词") {
                 Button("恢复默认") {
                     s[ReportKeys.prompt] = WeeklyReportGenerator.defaultPrompt
+                }
+                .buttonStyle(.dsSecondary)
+            }
+        }
+
+        DSSection(
+            "月报生成提示词",
+            footer: "占位符：{{monthRange}} 月份与日期区间，{{totalHours}} 本月工时汇总，{{styleInstruction}} 风格要求，{{dailyLogs}} 本月每日日报，{{weeklyReports}} 本月已有周报参考，{{extraNotes}} 补充说明。"
+        ) {
+            DSBlockRow {
+                TextEditor(text: s.binding(ReportKeys.monthlyPrompt))
+                    .font(DS.mono(13.5))
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 220)
+            }
+            DSRow("恢复默认月报提示词") {
+                Button("恢复默认") {
+                    s[ReportKeys.monthlyPrompt] = WeeklyReportGenerator.defaultMonthlyPrompt
                 }
                 .buttonStyle(.dsSecondary)
             }

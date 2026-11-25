@@ -2,13 +2,13 @@ import Foundation
 import IronBowlKit
 import SwiftUI
 
-/// 周报插件：查询本周每日日报并生成周报。
+/// 周报月报插件：查询本周或本月每日日报并生成周报、月报。
 public final class ReportPlugin: IronBowlPlugin {
     public static let pluginID = "report"
     public static let settingsGenerateID = "report.generate"
 
     public let id = ReportPlugin.pluginID
-    public let title = "周报"
+    public let title = "周报月报"
     public let systemImage = "doc.text"
     public var migrations: [DatabaseMigration] { ReportMigrations.all }
 
@@ -35,7 +35,7 @@ public final class ReportPlugin: IronBowlPlugin {
     public var settingsPages: [SettingsPage] {
         guard let model else { return [] }
         return [
-            SettingsPage(id: Self.settingsGenerateID, title: "周报生成", systemImage: "doc.text") {
+            SettingsPage(id: Self.settingsGenerateID, title: "周报与月报", systemImage: "doc.text") {
                 AnyView(ReportSettingsView(model: model))
             },
         ]
@@ -48,6 +48,13 @@ public final class ReportPlugin: IronBowlPlugin {
                 model.context.openPlugin(Self.pluginID)
                 Task {
                     await model.goToCurrentWeek()
+                    await model.generate()
+                }
+            },
+            QuickAction(id: "report.monthly", title: "生成本月月报", systemImage: "calendar.badge.clock") {
+                model.context.openPlugin(Self.pluginID)
+                Task {
+                    await model.goToCurrentMonth()
                     await model.generate()
                 }
             },
@@ -64,13 +71,33 @@ public final class ReportPlugin: IronBowlPlugin {
                     model.hasCurrentWeekReport ? "已生成" : "未生成"
                 },
                 detail: {
+                    let currentWeek = WeekRange.containing(Date())
                     if let hours = model.currentWeekSavedHours, model.hasCurrentWeekReport {
-                        return hours > 0 ? "累计 \(WorkCalendar.hoursText(hours))h · \(WeekRange.containing(Date()).shortRangeText)" : WeekRange.containing(Date()).shortRangeText
+                        return hours > 0 ? "累计 \(WorkCalendar.hoursText(hours))h · \(currentWeek.shortRangeText)" : currentWeek.shortRangeText
                     }
-                    return WeekRange.containing(Date()).title
+                    return currentWeek.title
                 },
                 action: {
                     model.context.openPlugin(Self.pluginID)
+                    Task { await model.switchPeriodKind(.weekly) }
+                }
+            ),
+            HomeCard(
+                id: "report.monthly",
+                label: "本月月报",
+                value: {
+                    model.hasCurrentMonthReport ? "已生成" : "未生成"
+                },
+                detail: {
+                    let currentMonth = MonthRange.containing(Date())
+                    if let hours = model.currentMonthSavedHours, model.hasCurrentMonthReport {
+                        return hours > 0 ? "累计 \(WorkCalendar.hoursText(hours))h · \(currentMonth.title)" : currentMonth.title
+                    }
+                    return currentMonth.title
+                },
+                action: {
+                    model.context.openPlugin(Self.pluginID)
+                    Task { await model.switchPeriodKind(.monthly) }
                 }
             ),
         ]

@@ -61,7 +61,7 @@ struct ReportView: View {
             }
         }
         .background(DS.canvas)
-        .task(id: model.week.startDateString) {
+        .task(id: "\(model.periodKind.rawValue)-\(model.activePeriodKey)") {
             model.loadLocalLogs()
             if model.isZentaoConfigured && !model.syncedFromZentao {
                 await model.refreshLogs()
@@ -70,64 +70,79 @@ struct ReportView: View {
         .onDisappear {
             model.saveEditsIfNeeded()
         }
-        .alert("清空本周周报？", isPresented: $confirmClear) {
+        .alert("清空\(model.periodKind.displayName)？", isPresented: $confirmClear) {
             Button("清空", role: .destructive) {
                 model.clearReport()
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("将删除本地保存的「\(model.week.title)」周报内容，不影响每日禅道日报。")
+            Text("将删除本地保存的「\(model.activePeriodTitle)」\(model.periodKind.displayName)内容，不影响每日禅道日报。")
         }
     }
 
     // MARK: - 顶栏
 
     private var headerBar: some View {
-        HStack(spacing: 12) {
-            Text("周报")
-                .font(DS.pageTitle)
+        let totalHistoryCount = model.recentReports.count + model.recentMonthlyReports.count
+        let periodLabel = model.periodKind == .weekly
+            ? "第 \(model.week.weekOfYear) 周 · \(model.week.shortRangeText)"
+            : model.month.title
+        let currentBadge = model.periodKind == .weekly ? "本周" : "本月"
+        let backLabel = model.periodKind == .weekly ? "回本周" : "回本月"
+        let generateTitle = model.hasReportContent ? "重新生成" : "生成\(model.periodKind.displayName)"
+
+        return HStack(spacing: 12) {
+            DSTabs(
+                selection: Binding(
+                    get: { model.periodKind },
+                    set: { next in
+                        Task<Void, Never> { await model.switchPeriodKind(next) }
+                    }
+                ),
+                options: ReportPeriodKind.allCases.map { ($0, $0.displayName) }
+            )
 
             HStack(spacing: 2) {
                 Button {
-                    Task { await model.previousWeek() }
+                    Task { await model.previousPeriod() }
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(DS.font(12, .semibold))
                 }
                 .buttonStyle(.dsGhost)
-                .help("上一周")
+                .help(model.periodKind == .weekly ? "上一周" : "上一月")
 
                 HStack(spacing: 6) {
-                    Text("第 \(model.week.weekOfYear) 周 · \(model.week.shortRangeText)")
+                    Text(periodLabel)
                         .font(DS.font(13, .medium))
                         .monospacedDigit()
                         .foregroundStyle(DS.text)
-                    if let badge = model.week.relativeBadge() {
-                        Tag(badge, color: badge == "本周" ? DS.toggle : DS.textSecondary)
+                    if let badge = model.activeRelativeBadge {
+                        Tag(badge, color: badge == currentBadge ? DS.toggle : DS.textSecondary)
                     }
                 }
                 .padding(.horizontal, 6)
 
                 Button {
-                    Task { await model.nextWeek() }
+                    Task { await model.nextPeriod() }
                 } label: {
                     Image(systemName: "chevron.right")
                         .font(DS.font(12, .semibold))
                 }
                 .buttonStyle(.dsGhost)
-                .help("下一周")
+                .help(model.periodKind == .weekly ? "下一周" : "下一月")
             }
             .padding(.horizontal, 2)
             .frame(height: DS.s(30))
             .background(DS.well, in: .rect(cornerRadius: DS.controlRadius))
-            .help(model.week.title)
+            .help("\(model.activePeriodTitle)（\(model.activePeriodRangeText)）")
 
-            if model.week.relativeBadge() != "本周" {
-                Button("回本周") {
-                    Task { await model.goToCurrentWeek() }
+            if !model.isCurrentPeriod {
+                Button(backLabel) {
+                    Task { await model.goToCurrentPeriod() }
                 }
                 .buttonStyle(.dsGhost)
-                .help("回到本周")
+                .help(model.periodKind == .weekly ? "回到本周" : "回到本月")
             }
 
             Spacer(minLength: 8)
@@ -137,16 +152,16 @@ struct ReportView: View {
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "clock.arrow.circlepath")
-                    if !model.recentReports.isEmpty {
-                        Text("\(model.recentReports.count)")
+                    if totalHistoryCount > 0 {
+                        Text("\(totalHistoryCount)")
                             .font(DS.font(12, .medium).monospacedDigit())
                     }
                 }
             }
             .buttonStyle(.dsGhost)
-            .help("查看历史周报")
+            .help("查看历史周报与月报")
             .popover(isPresented: $showHistory, arrowEdge: .bottom) {
-                WeeklyReportHistoryPopover(model: model, isPresented: $showHistory)
+                ReportHistoryPopover(model: model, isPresented: $showHistory)
             }
 
             Button {
@@ -159,7 +174,7 @@ struct ReportView: View {
                 }
             }
             .buttonStyle(.dsGhost)
-            .help("重新查询本周每日日报")
+            .help("重新查询每日日报")
             .disabled(model.isLoadingLogs)
 
             DSPicker(
@@ -168,7 +183,7 @@ struct ReportView: View {
                     DSPickerOption($0, title: $0.displayName, subtitle: $0.detail)
                 }
             )
-            .help("选择用于生成周报的 AI")
+            .help("选择用于生成\(model.periodKind.displayName)的 AI")
 
             Button {
                 Task { await model.generate() }
@@ -179,7 +194,7 @@ struct ReportView: View {
                         Text("生成中")
                     }
                 } else {
-                    Label(model.hasReportContent ? "重新生成" : "生成周报", systemImage: "sparkles")
+                    Label(generateTitle, systemImage: "sparkles")
                 }
             }
             .buttonStyle(.dsPrimary)
@@ -192,13 +207,17 @@ struct ReportView: View {
         .windowTitleBar()
     }
 
-    // MARK: - 左栏：本周每日日报
+    // MARK: - 左栏：周期每日日报
 
     private var leftDailyLogsPane: some View {
         VStack(alignment: .leading, spacing: 14) {
-            WeekSummaryBar(model: model)
+            PeriodSummaryBar(model: model)
 
-            WeekDayStrip(days: model.days, selectedDate: $model.selectedDayFilter)
+            if model.periodKind == .weekly {
+                WeekDayStrip(days: model.days, selectedDate: $model.selectedDayFilter)
+            } else {
+                MonthWeekStrip(model: model)
+            }
 
             HStack(spacing: 6) {
                 Text("每日日报")
@@ -223,9 +242,9 @@ struct ReportView: View {
                     }
                 }
 
-                if model.selectedDayFilter != nil {
-                    Button("全周") {
-                        model.selectedDayFilter = nil
+                if model.hasActiveFilter {
+                    Button(model.periodKind == .weekly ? "全周" : "全月") {
+                        model.clearActiveFilter()
                     }
                     .buttonStyle(.dsGhost)
                     .font(DS.caption)
@@ -260,14 +279,15 @@ struct ReportView: View {
     }
 
     private var emptyLogsCard: some View {
-        VStack(spacing: 10) {
+        let rangeDesc = model.periodKind == .weekly ? model.week.shortRangeText : model.month.title
+        return VStack(spacing: 10) {
             Image(systemName: "tray")
                 .font(DS.font(24))
                 .foregroundStyle(DS.textTertiary)
-            Text(model.isLoadingLogs ? "正在查询本周每日日报…" : "\(model.week.shortRangeText) 暂无日报")
+            Text(model.isLoadingLogs ? "正在查询每日日报…" : "\(rangeDesc) 暂无日报")
                 .font(DS.rowTitle)
                 .foregroundStyle(DS.text)
-            Text("可前往禅道日志补全日报，或直接在右侧「补充说明」填写本周要点。")
+            Text("可前往禅道日志补全日报，或直接在右侧「补充说明」填写\(model.periodKind == .weekly ? "本周" : "本月")要点。")
                 .font(DS.caption)
                 .foregroundStyle(DS.textSecondary)
                 .multilineTextAlignment(.center)
@@ -298,12 +318,12 @@ struct ReportView: View {
 
     private var emptyFilteredDayCard: some View {
         HStack {
-            Text("当天没有日报记录")
+            Text(model.periodKind == .weekly ? "当天没有日报记录" : "该周内没有日报记录")
                 .font(DS.body)
                 .foregroundStyle(DS.textSecondary)
             Spacer()
-            Button("查看全周") {
-                model.selectedDayFilter = nil
+            Button(model.periodKind == .weekly ? "查看全周" : "查看全月") {
+                model.clearActiveFilter()
             }
             .buttonStyle(.dsSecondary)
         }
@@ -312,7 +332,7 @@ struct ReportView: View {
         .overlay { RoundedRectangle(cornerRadius: DS.radius).strokeBorder(DS.border) }
     }
 
-    // MARK: - 右栏：补充说明 + 周报正文
+    // MARK: - 右栏：补充说明 + 报告正文
 
     private var rightReportPane: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -373,6 +393,10 @@ struct ReportView: View {
     /// 常驻展示的补充说明输入框。
     private var extraNotesCard: some View {
         let hasNotes = !model.extraNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let placeholder = model.periodKind == .weekly
+            ? "例如：周三参加产品评审并确定二期排期；下周重点联调导出与权限模块…"
+            : "例如：本月完成核心模块上线并牵头跨团队联调；下月重点推进性能优化与新版本规划…"
+
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "note.text")
@@ -381,7 +405,9 @@ struct ReportView: View {
                 Text("补充说明")
                     .font(DS.font(13.5, .semibold))
                     .foregroundStyle(DS.text)
-                Text("非代码事项、会议评审、风险或下周计划，生成时自动融入")
+                Text(model.periodKind == .weekly
+                    ? "非代码事项、会议评审、风险或下周计划，生成时自动融入"
+                    : "里程碑成果、跨团队协作、风险或下月计划，生成时自动融入")
                     .font(DS.caption)
                     .foregroundStyle(DS.textTertiary)
                     .lineLimit(1)
@@ -398,7 +424,7 @@ struct ReportView: View {
 
             ZStack(alignment: .topLeading) {
                 if model.extraNotes.isEmpty {
-                    Text("例如：周三参加产品评审并确定二期排期；下周重点联调导出与权限模块…")
+                    Text(placeholder)
                         .font(DS.body)
                         .foregroundStyle(DS.textTertiary)
                         .padding(.top, 2)
@@ -426,9 +452,12 @@ struct ReportView: View {
         }
     }
 
-    /// 文档纸张式周报卡片。
+    /// 文档纸张式报告卡片。
     private var reportDocumentCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let noun = model.periodKind.displayName
+        let periodLabel = model.periodKind == .weekly ? "本周" : "本月"
+
+        return VStack(alignment: .leading, spacing: 0) {
             documentToolbar
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -441,7 +470,7 @@ struct ReportView: View {
             if model.hasReportContent || previewMode == .edit {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 6) {
-                        TextField("输入周报标题…", text: $model.reportTitle)
+                        TextField("输入\(noun)标题…", text: $model.reportTitle)
                             .textFieldStyle(.plain)
                             .font(DS.font(20, .bold))
                             .foregroundStyle(DS.text)
@@ -450,18 +479,18 @@ struct ReportView: View {
                             }
 
                         HStack(spacing: 8) {
-                            Text(model.week.rangeText)
-                            if let record = model.currentRecord {
+                            Text(model.activePeriodRangeText)
+                            if let updatedAt = model.activeUpdatedAt {
                                 Text("·")
-                                Text("更新于 \(CN.dateTime(record.updatedAt))")
-                                if !record.providerName.isEmpty {
+                                Text("更新于 \(CN.dateTime(updatedAt))")
+                                if let providerName = model.activeProviderName, !providerName.isEmpty {
                                     Text("·")
-                                    Text(record.providerName)
+                                    Text(providerName)
                                 }
                             }
                             if model.totalHours > 0 {
                                 Text("·")
-                                Text("本周工时 \(WorkCalendar.hoursText(model.totalHours))h")
+                                Text("\(periodLabel)工时 \(WorkCalendar.hoursText(model.totalHours))h")
                             }
                         }
                         .font(DS.caption)
@@ -570,15 +599,24 @@ struct ReportView: View {
                 Image(systemName: "trash")
             }
             .buttonStyle(.dsGhost)
-            .help("清空本周周报")
+            .help("清空当前\(model.periodKind.displayName)")
         }
     }
 
     private var emptyReportDocumentState: some View {
+        let noun = model.periodKind.displayName
+        let periodLabel = model.periodKind == .weekly ? "本周" : "本月"
+        let weeklyRefCount = model.monthWeeklySummaries.filter {
+            !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.count
         let materialSummary: String = if model.totalLogCount > 0 {
-            "已收集本周 \(model.loggedDaysCount) 天共 \(model.totalLogCount) 条日报，累计 \(WorkCalendar.hoursText(model.totalHours))h"
+            if model.periodKind == .monthly && weeklyRefCount > 0 {
+                "已收集本月 \(model.loggedDaysCount) 天共 \(model.totalLogCount) 条日报（累计 \(WorkCalendar.hoursText(model.totalHours))h），并关联 \(weeklyRefCount) 份周报作为参考"
+            } else {
+                "已收集\(periodLabel) \(model.loggedDaysCount) 天共 \(model.totalLogCount) 条日报，累计 \(WorkCalendar.hoursText(model.totalHours))h"
+            }
         } else {
-            "本周暂无每日日报，可在上方填写「补充说明」后直接生成"
+            "\(periodLabel)暂无每日日报，可在上方填写「补充说明」后直接生成"
         }
 
         return VStack(spacing: 12) {
@@ -588,7 +626,7 @@ struct ReportView: View {
                 .frame(width: 50, height: 50)
                 .background(DS.well, in: .rect(cornerRadius: 12))
 
-            Text("准备好生成「\(model.week.title)」周报")
+            Text("准备好生成「\(model.activePeriodTitle)」\(noun)")
                 .font(DS.font(16, .semibold))
                 .foregroundStyle(DS.text)
 
@@ -601,7 +639,7 @@ struct ReportView: View {
                 Button {
                     Task { await model.generate() }
                 } label: {
-                    Label("生成周报", systemImage: "sparkles")
+                    Label("生成\(noun)", systemImage: "sparkles")
                 }
                 .buttonStyle(.dsSecondary)
                 .disabled(model.isGenerating)
@@ -621,7 +659,7 @@ struct ReportView: View {
 
 // MARK: - 左侧汇总与日报组件
 
-private struct WeekSummaryBar: View {
+private struct PeriodSummaryBar: View {
     let model: WeeklyReportModel
 
     var body: some View {
@@ -745,6 +783,62 @@ private struct WeekDayStrip: View {
                 .font(DS.font(10))
                 .foregroundStyle(DS.textTertiary)
         }
+    }
+}
+
+private struct MonthWeekStrip: View {
+    @Bindable var model: WeeklyReportModel
+
+    var body: some View {
+        let slices = model.month.weeks
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 4)], spacing: 4) {
+            ForEach(slices) { slice in
+                let selected = model.selectedWeekFilter == slice.id
+                let hours = model.monthWeekSliceHours(slice)
+                let hasWeekly = model.hasWeeklyReport(forSlice: slice)
+
+                Button {
+                    model.selectedWeekFilter = selected ? nil : slice.id
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Text(slice.label)
+                                .font(DS.font(11.5, selected ? .semibold : .medium))
+                                .foregroundStyle(selected ? DS.text : DS.textSecondary)
+                            Spacer(minLength: 2)
+                            if hasWeekly {
+                                Circle()
+                                    .fill(DS.toggle)
+                                    .frame(width: 5, height: 5)
+                                    .help("该周已有周报")
+                            }
+                        }
+                        Text(slice.shortRangeText)
+                            .font(DS.font(10.5).monospacedDigit())
+                            .foregroundStyle(DS.textTertiary)
+                            .lineLimit(1)
+                        Text(hours > 0 ? "\(WorkCalendar.hoursText(hours))h" : "—")
+                            .font(DS.font(11, .semibold).monospacedDigit())
+                            .foregroundStyle(hours > 0 ? DS.success : DS.textTertiary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(selected ? DS.card : .clear, in: .rect(cornerRadius: 7))
+                    .overlay {
+                        if selected {
+                            RoundedRectangle(cornerRadius: 7).strokeBorder(DS.borderStrong)
+                        }
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help("\(slice.label)（\(slice.shortRangeText)）")
+            }
+        }
+        .padding(4)
+        .background(DS.well, in: .rect(cornerRadius: 10))
+        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(DS.border) }
     }
 }
 
@@ -958,85 +1052,147 @@ private struct MarkdownReportPreview: View {
     }
 }
 
-// MARK: - 历史周报弹层
+// MARK: - 历史周报 / 月报弹层
 
-private struct WeeklyReportHistoryPopover: View {
+private struct ReportHistoryPopover: View {
     let model: WeeklyReportModel
     @Binding var isPresented: Bool
+    @State private var tab: ReportPeriodKind = .weekly
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("历史周报")
-                    .font(DS.font(14, .semibold))
+            HStack(spacing: 8) {
+                DSTabs(selection: $tab, options: [
+                    (.weekly, "周报 (\(model.recentReports.count))"),
+                    (.monthly, "月报 (\(model.recentMonthlyReports.count))"),
+                ])
                 Spacer()
-                Text("共 \(model.recentReports.count) 份")
-                    .font(DS.caption)
-                    .foregroundStyle(DS.textTertiary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
 
             Divider().overlay(DS.border)
 
-            if model.recentReports.isEmpty {
-                Text("还没有保存过周报")
-                    .font(DS.body)
-                    .foregroundStyle(DS.textTertiary)
-                    .frame(maxWidth: .infinity, minHeight: DS.s(120))
+            if tab == .weekly {
+                weeklyList
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(model.recentReports.enumerated()), id: \.element.id) { index, record in
-                            let isCurrent = record.weekStart == model.week.startDateString
-                            HStack(spacing: 10) {
-                                Button {
-                                    isPresented = false
-                                    Task { await model.openHistoryRecord(record) }
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        HStack(spacing: 6) {
-                                            Text(record.title)
-                                                .font(DS.font(13, isCurrent ? .semibold : .medium))
-                                                .foregroundStyle(DS.text)
-                                                .lineLimit(1)
-                                            if isCurrent {
-                                                Tag("当前", color: DS.toggle)
-                                            }
-                                        }
-                                        Text("\(record.weekStart) ~ \(record.weekEnd) · \(WorkCalendar.hoursText(record.totalHours))h · \(record.providerName)")
-                                            .font(DS.font(11.5))
-                                            .foregroundStyle(DS.textSecondary)
-                                            .lineLimit(1)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(.rect)
-                                }
-                                .buttonStyle(.plain)
+                monthlyList
+            }
+        }
+        .frame(width: DS.s(376))
+        .background(DS.canvas)
+        .onAppear {
+            tab = model.periodKind
+        }
+    }
 
-                                Button {
-                                    model.deleteHistoryRecord(weekStart: record.weekStart)
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(DS.font(12))
-                                }
-                                .buttonStyle(.dsGhost)
-                                .help("删除该周周报")
+    @ViewBuilder
+    private var weeklyList: some View {
+        if model.recentReports.isEmpty {
+            emptyHistoryView("还没有保存过周报")
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(model.recentReports.enumerated()), id: \.element.id) { index, record in
+                        let isCurrent = model.periodKind == .weekly && record.weekStart == model.week.startDateString
+                        historyRow(
+                            title: record.title,
+                            subtitle: "\(record.weekStart) ~ \(record.weekEnd) · \(WorkCalendar.hoursText(record.totalHours))h · \(record.providerName)",
+                            isCurrent: isCurrent,
+                            onOpen: {
+                                isPresented = false
+                                Task { await model.openHistoryRecord(record) }
+                            },
+                            onDelete: {
+                                model.deleteHistoryRecord(weekStart: record.weekStart)
                             }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 9)
-                            .background(isCurrent ? DS.selected : .clear)
-
-                            if index < model.recentReports.count - 1 {
-                                Divider().overlay(DS.border).padding(.horizontal, 14)
-                            }
+                        )
+                        if index < model.recentReports.count - 1 {
+                            Divider().overlay(DS.border).padding(.horizontal, 14)
                         }
                     }
                 }
-                .frame(maxHeight: DS.s(300))
             }
+            .frame(maxHeight: DS.s(300))
         }
-        .frame(width: DS.s(360))
-        .background(DS.canvas)
+    }
+
+    @ViewBuilder
+    private var monthlyList: some View {
+        if model.recentMonthlyReports.isEmpty {
+            emptyHistoryView("还没有保存过月报")
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(model.recentMonthlyReports.enumerated()), id: \.element.id) { index, record in
+                        let isCurrent = model.periodKind == .monthly && record.monthKey == model.month.monthKey
+                        historyRow(
+                            title: record.title,
+                            subtitle: "\(record.periodStart) ~ \(record.periodEnd) · \(WorkCalendar.hoursText(record.totalHours))h · \(record.providerName)",
+                            isCurrent: isCurrent,
+                            onOpen: {
+                                isPresented = false
+                                Task { await model.openMonthlyHistoryRecord(record) }
+                            },
+                            onDelete: {
+                                model.deleteMonthlyHistoryRecord(monthKey: record.monthKey)
+                            }
+                        )
+                        if index < model.recentMonthlyReports.count - 1 {
+                            Divider().overlay(DS.border).padding(.horizontal, 14)
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: DS.s(300))
+        }
+    }
+
+    private func emptyHistoryView(_ text: String) -> some View {
+        Text(text)
+            .font(DS.body)
+            .foregroundStyle(DS.textTertiary)
+            .frame(maxWidth: .infinity, minHeight: DS.s(120))
+    }
+
+    private func historyRow(
+        title: String,
+        subtitle: String,
+        isCurrent: Bool,
+        onOpen: @escaping () -> Void,
+        onDelete: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 10) {
+            Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(title)
+                            .font(DS.font(13, isCurrent ? .semibold : .medium))
+                            .foregroundStyle(DS.text)
+                            .lineLimit(1)
+                        if isCurrent {
+                            Tag("当前", color: DS.toggle)
+                        }
+                    }
+                    Text(subtitle)
+                        .font(DS.font(11.5))
+                        .foregroundStyle(DS.textSecondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .font(DS.font(12))
+            }
+            .buttonStyle(.dsGhost)
+            .help("删除该份报告")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(isCurrent ? DS.selected : .clear)
     }
 }

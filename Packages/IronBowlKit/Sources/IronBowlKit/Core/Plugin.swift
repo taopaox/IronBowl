@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// 工作台插件协议。每个功能（日志、万年历、待办…）都是一个插件。
@@ -9,11 +10,15 @@ public protocol IronBowlPlugin: AnyObject {
     var systemImage: String { get }
     /// 只占位、尚未实现。
     var isComingSoon: Bool { get }
+    /// 是否以可折叠目录形式在左侧栏展示（子条目来自 `sidebarChildren`）。
+    var isSidebarDirectory: Bool { get }
     /// 插件自己的数据库迁移。
     var migrations: [DatabaseMigration] { get }
 
     /// 工作台启动且插件已启用时调用一次。
     func start(context: PluginContext)
+    /// 插件被停用时调用，用于清理定时器和后台状态。
+    func stop()
     func makeMainView() -> AnyView
     /// 插件在设置窗口左侧导航里的页面（按插件分组显示）。
     var settingsPages: [SettingsPage] { get }
@@ -21,6 +26,12 @@ public protocol IronBowlPlugin: AnyObject {
     var menuBarItems: [MenuBarItem] { get }
     /// 侧栏「最近」里的条目。
     var sidebarRecents: [SidebarRecent] { get }
+    /// 固定在主窗口左侧栏「固定网页」分区的条目。
+    var sidebarPinnedItems: [SidebarPinnedItem] { get }
+    /// 紧跟在目录插件下方缩进展示的子条目。
+    var sidebarChildren: [SidebarPinnedItem] { get }
+    /// 用户从主窗口左侧栏主动点击该插件时调用。
+    func onSidebarSelect()
     /// 首页的快捷标签。
     var quickActions: [QuickAction] { get }
     /// 首页的小卡片。
@@ -31,11 +42,16 @@ public protocol IronBowlPlugin: AnyObject {
 
 public extension IronBowlPlugin {
     var isComingSoon: Bool { false }
+    var isSidebarDirectory: Bool { false }
     var migrations: [DatabaseMigration] { [] }
     func start(context: PluginContext) {}
+    func stop() {}
     var settingsPages: [SettingsPage] { [] }
     var menuBarItems: [MenuBarItem] { [] }
     var sidebarRecents: [SidebarRecent] { [] }
+    var sidebarPinnedItems: [SidebarPinnedItem] { [] }
+    var sidebarChildren: [SidebarPinnedItem] { [] }
+    func onSidebarSelect() {}
     var quickActions: [QuickAction] { [] }
     var homeCards: [HomeCard] { [] }
     func handleHomeInput(_ text: String) async -> String? { nil }
@@ -68,6 +84,80 @@ public struct SidebarRecent: Identifiable {
         self.title = title
         self.trailing = trailing
         self.action = action
+    }
+}
+
+/// 固定在主窗口左侧栏的条目（例如固定网页、AI 目录子项）。
+public struct SidebarPinnedItem: Identifiable {
+    public let id: String
+    public let pluginID: String
+    public let title: String
+    public let subtitle: String?
+    public let systemImage: String
+    public let iconImage: NSImage?
+    public let iconIsTemplate: Bool
+    public let isSelected: Bool
+    public let isSuspended: Bool
+    public let isNeverSuspend: Bool
+    public let canMoveUp: Bool
+    public let canMoveDown: Bool
+    public let action: () -> Void
+    public let onRename: ((String) -> Void)?
+    public let onEdit: (() -> Void)?
+    public let onMoveUp: (() -> Void)?
+    public let onMoveDown: (() -> Void)?
+    public let onToggleNeverSuspend: (() -> Void)?
+    public let onSuspendNow: (() -> Void)?
+    public let onUnpin: (() -> Void)?
+    public let onDelete: (() -> Void)?
+    public let onOpenInBrowser: (() -> Void)?
+
+    public init(
+        id: String,
+        pluginID: String,
+        title: String,
+        subtitle: String? = nil,
+        systemImage: String,
+        iconImage: NSImage? = nil,
+        iconIsTemplate: Bool = false,
+        isSelected: Bool,
+        isSuspended: Bool = false,
+        isNeverSuspend: Bool = false,
+        canMoveUp: Bool = false,
+        canMoveDown: Bool = false,
+        action: @escaping () -> Void,
+        onRename: ((String) -> Void)? = nil,
+        onEdit: (() -> Void)? = nil,
+        onMoveUp: (() -> Void)? = nil,
+        onMoveDown: (() -> Void)? = nil,
+        onToggleNeverSuspend: (() -> Void)? = nil,
+        onSuspendNow: (() -> Void)? = nil,
+        onUnpin: (() -> Void)? = nil,
+        onDelete: (() -> Void)? = nil,
+        onOpenInBrowser: (() -> Void)? = nil
+    ) {
+        self.id = id
+        self.pluginID = pluginID
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.iconImage = iconImage
+        self.iconIsTemplate = iconIsTemplate
+        self.isSelected = isSelected
+        self.isSuspended = isSuspended
+        self.isNeverSuspend = isNeverSuspend
+        self.canMoveUp = canMoveUp
+        self.canMoveDown = canMoveDown
+        self.action = action
+        self.onRename = onRename
+        self.onEdit = onEdit
+        self.onMoveUp = onMoveUp
+        self.onMoveDown = onMoveDown
+        self.onToggleNeverSuspend = onToggleNeverSuspend
+        self.onSuspendNow = onSuspendNow
+        self.onUnpin = onUnpin
+        self.onDelete = onDelete
+        self.onOpenInBrowser = onOpenInBrowser
     }
 }
 
@@ -110,6 +200,8 @@ public final class PluginContext {
     public let reminders: ReminderCenter
     public let workCalendar: WorkCalendar
     public let providers: AIProviderStore
+    public let webSessions: WebSessionManager
+    public let scheduler: TaskScheduler
     /// 打开主窗口并切到某个插件页。
     public let openPlugin: (String) -> Void
     /// 打开设置窗口，可指定页面 id。
@@ -121,6 +213,8 @@ public final class PluginContext {
         reminders: ReminderCenter,
         workCalendar: WorkCalendar,
         providers: AIProviderStore,
+        webSessions: WebSessionManager? = nil,
+        scheduler: TaskScheduler? = nil,
         openPlugin: @escaping (String) -> Void,
         openSettings: @escaping (String?) -> Void
     ) {
@@ -129,6 +223,15 @@ public final class PluginContext {
         self.reminders = reminders
         self.workCalendar = workCalendar
         self.providers = providers
+        self.webSessions = webSessions ?? WebSessionManager(settings: settings)
+        self.scheduler = scheduler ?? TaskScheduler(
+            database: database,
+            settings: settings,
+            workCalendar: workCalendar,
+            reminders: reminders,
+            openPlugin: openPlugin,
+            openSettings: openSettings
+        )
         self.openPlugin = openPlugin
         self.openSettings = openSettings
     }
@@ -170,6 +273,7 @@ public final class ComingSoonPlugin: IronBowlPlugin {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DS.canvas)
+            .overlay(alignment: .top) { WindowTitleBarArea(height: 52) }
         )
     }
 }

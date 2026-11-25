@@ -30,6 +30,7 @@ public enum DS {
     public static let borderStrong = Color(light: hex(0x000000, 0.10), dark: hex(0xFFFFFF, 0.15))
     public static let hover = Color(light: hex(0x000000, 0.04), dark: hex(0xFFFFFF, 0.06))
     public static let selected = Color(light: hex(0x000000, 0.065), dark: hex(0xFFFFFF, 0.10))
+    public static let pickerSelected = Color(light: hex(0xF4F4F5), dark: hex(0xFFFFFF, 0.10))
     public static let primaryFill = Color(light: hex(0x18181B), dark: hex(0xF4F4F5))
     public static let onPrimary = Color(light: hex(0xFFFFFF), dark: hex(0x18181B))
     public static let toggle = Color(light: hex(0x16B38A), dark: hex(0x1FC79B))
@@ -100,17 +101,19 @@ public struct DSMetric: View {
     let label: String
     let value: String
     let detail: String?
+    let valueColor: Color
 
-    public init(_ label: String, value: String, detail: String? = nil) {
+    public init(_ label: String, value: String, detail: String? = nil, valueColor: Color = DS.text) {
         self.label = label
         self.value = value
         self.detail = detail
+        self.valueColor = valueColor
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label).font(DS.caption).foregroundStyle(DS.textSecondary)
-            Text(value).font(DS.font(21, .semibold)).monospacedDigit()
+            Text(value).font(DS.font(21, .semibold)).monospacedDigit().foregroundStyle(valueColor)
             if let detail { Text(detail).font(DS.caption).foregroundStyle(DS.textTertiary) }
         }
         .padding(12)
@@ -124,10 +127,14 @@ public struct DSBanner: View {
     public enum Kind { case info, success, warning, danger }
     let kind: Kind
     let text: String
+    let actionTitle: String?
+    let action: (() -> Void)?
 
-    public init(_ kind: Kind, _ text: String) {
+    public init(_ kind: Kind, _ text: String, actionTitle: String? = nil, action: (() -> Void)? = nil) {
         self.kind = kind
         self.text = text
+        self.actionTitle = actionTitle
+        self.action = action
     }
 
     var color: Color {
@@ -149,10 +156,14 @@ public struct DSBanner: View {
     }
 
     public var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: actionTitle == nil ? .firstTextBaseline : .center, spacing: 8) {
             Image(systemName: icon)
             Text(text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.dsSecondary)
+            }
         }
         .font(DS.body)
         .foregroundStyle(color)
@@ -454,50 +465,6 @@ public struct DSToggle: View {
     }
 }
 
-/// 带边框的下拉选择（"简体中文 ⌄"）。
-public struct DSPicker<Value: Hashable>: View {
-    @Binding var selection: Value
-    let options: [(Value, String)]
-    var width: CGFloat?
-
-    public init(selection: Binding<Value>, options: [(Value, String)], width: CGFloat? = nil) {
-        _selection = selection
-        self.options = options
-        self.width = width
-    }
-
-    public var body: some View {
-        Menu {
-            ForEach(options, id: \.0) { value, title in
-                Button {
-                    selection = value
-                } label: {
-                    if value == selection { Label(title, systemImage: "checkmark") } else { Text(title) }
-                }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Text(options.first { $0.0 == selection }?.1 ?? "请选择")
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.down").font(DS.font(11, .semibold)).foregroundStyle(DS.textSecondary)
-            }
-            .font(DS.font(14))
-            .foregroundStyle(DS.text)
-            .padding(.horizontal, 10)
-            .frame(height: DS.s(30))
-            .frame(width: width)
-            .frame(minWidth: DS.s(110))
-            .background(DS.card, in: .rect(cornerRadius: DS.controlRadius))
-            .overlay { RoundedRectangle(cornerRadius: DS.controlRadius).strokeBorder(DS.borderStrong) }
-            .contentShape(.rect)
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize(horizontal: width == nil, vertical: true)
-    }
-}
-
 /// 带边框的输入框。
 public struct DSTextFieldStyle: TextFieldStyle {
     public init() {}
@@ -556,11 +523,18 @@ public extension DSStepper {
 /// 页面顶部：左边标题（+ 标签页），右边操作。
 public struct DSPageHeader<Leading: View, Actions: View>: View {
     let title: String
+    let topPadding: CGFloat
     @ViewBuilder var leading: Leading
     @ViewBuilder var actions: Actions
 
-    public init(_ title: String, @ViewBuilder leading: () -> Leading = { EmptyView() }, @ViewBuilder actions: () -> Actions) {
+    public init(
+        _ title: String,
+        topPadding: CGFloat = 0,
+        @ViewBuilder leading: () -> Leading = { EmptyView() },
+        @ViewBuilder actions: () -> Actions
+    ) {
         self.title = title
+        self.topPadding = topPadding
         self.leading = leading()
         self.actions = actions()
     }
@@ -574,5 +548,12 @@ public struct DSPageHeader<Leading: View, Actions: View>: View {
         }
         .padding(.horizontal, 28)
         .frame(height: 52)
+        .padding(.top, topPadding)
+        .windowTitleBar()
     }
+}
+
+public extension EnvironmentValues {
+    /// 主窗口侧边栏是否处于收起状态（收起时内容区左上角要给展开按钮让位置）。
+    @Entry var sidebarCollapsed = false
 }

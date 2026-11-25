@@ -12,12 +12,35 @@ public nonisolated enum AIProviderKind: String, Codable, Sendable, CaseIterable,
         case .codex: "Codex"
         }
     }
+    public var detail: String {
+        switch self {
+        case .agy: "调用本机 agy CLI 只读执行结构化生成。"
+        case .codex: "调用本机 codex CLI 只读执行结构化生成。"
+        }
+    }
     /// 命令行程序名，用于自动查找路径。
     public var binaryName: String { rawValue }
     public var effortOptions: [String] {
         switch self {
         case .agy: ["", "low", "medium", "high", "xhigh", "max"]
         case .codex: ["", "minimal", "low", "medium", "high"]
+        }
+    }
+
+    public static func effortTitle(_ effort: String) -> String {
+        effort.isEmpty ? "默认" : effort
+    }
+
+    public static func effortDetail(_ effort: String) -> String {
+        switch effort {
+        case "": "使用 CLI 默认思考深度。"
+        case "minimal": "极简推理，响应最快。"
+        case "low": "轻度思考，适合常规日志总结。"
+        case "medium": "平衡速度与推理深度。"
+        case "high": "深度思考，适合复杂提交整理。"
+        case "xhigh": "高强度推理，耗时较长。"
+        case "max": "最大推理深度，耗时最长。"
+        default: "自定义思考深度参数。"
         }
     }
 }

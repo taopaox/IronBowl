@@ -34,8 +34,10 @@ public nonisolated enum AppPaths {
 /// 全应用共享的 SQLite（WAL）。独立版万年历也打开同一个文件。
 public nonisolated final class AppDatabase: Sendable {
     public let pool: DatabasePool
+    public let path: String
 
     public init(url: URL = AppPaths.databaseURL, migrations: [DatabaseMigration]) throws {
+        path = url.path
         var config = Configuration()
         config.foreignKeysEnabled = true
         pool = try DatabasePool(path: url.path, configuration: config)
@@ -63,6 +65,59 @@ public nonisolated final class AppDatabase: Sendable {
                 t.primaryKey("date", .text)
                 t.column("isOffDay", .boolean).notNull()
                 t.column("note", .text).notNull().defaults(to: "")
+            }
+        },
+        DatabaseMigration("core.v2") { db in
+            try db.create(table: "scheduledTask") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("actionID", .text).notNull()
+                t.column("isEnabled", .boolean).notNull().defaults(to: true)
+                t.column("scheduleJSON", .text).notNull()
+                t.column("misfirePolicy", .text).notNull().defaults(to: "runIfMissedToday")
+                t.column("notifyPolicy", .text).notNull().defaults(to: "onSuccessAndFailure")
+                t.column("notifyStyle", .text).notNull().defaults(to: "cornerCard")
+                t.column("parametersJSON", .text).notNull().defaults(to: "{}")
+                t.column("nextRunAt", .datetime)
+                t.column("lastRunAt", .datetime)
+                t.column("lastFiredSlot", .text)
+                t.column("lastStatus", .text)
+                t.column("lastSummary", .text)
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.create(table: "scheduledTaskRun") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("taskID", .text).notNull().indexed()
+                t.column("taskName", .text).notNull()
+                t.column("actionID", .text).notNull()
+                t.column("trigger", .text).notNull()
+                t.column("status", .text).notNull()
+                t.column("startedAt", .datetime).notNull().indexed()
+                t.column("finishedAt", .datetime)
+                t.column("summary", .text).notNull().defaults(to: "")
+                t.column("detail", .text).notNull().defaults(to: "")
+            }
+        },
+        DatabaseMigration("core.v3") { db in
+            try db.create(table: "attendanceClockIn") { t in
+                t.primaryKey("date", .text)          // yyyy-MM-dd
+                t.column("clockIn", .datetime).notNull()
+                t.column("source", .text).notNull().defaults(to: "")
+                t.column("fetchedAt", .datetime).notNull()
+            }
+        },
+        DatabaseMigration("core.v4") { db in
+            try db.create(table: "dailyOvertime") { t in
+                t.primaryKey("date", .text)          // yyyy-MM-dd
+                t.column("hours", .double).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            if try db.tableExists("zentaoDailyOvertime") {
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO dailyOvertime(date, hours, updatedAt)
+                    SELECT date, hours, updatedAt FROM zentaoDailyOvertime WHERE hours > 0
+                    """)
             }
         },
     ]

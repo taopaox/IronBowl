@@ -17,17 +17,60 @@ public nonisolated struct SettingKey<Value: Codable & Sendable>: Sendable {
 /// 设置存储：内存缓存 + SQLite 持久化，@Observable 让界面自动刷新。
 @Observable
 public final class SettingsStore {
+    private static let changeNotification = Notification.Name("com.taopaox.ironbowl.settingsDidChange")
+
     @ObservationIgnored private let database: AppDatabase
+    @ObservationIgnored nonisolated(unsafe) private var observer: NSObjectProtocol?
+    @ObservationIgnored public var onExternalChange: (() -> Void)?
     private var cache: [String: String] = [:]
 
     public init(database: AppDatabase) {
         self.database = database
+        cache = Self.loadAll(from: database)
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        let dbPath = database.path
+        observer = DistributedNotificationCenter.default().addObserver(
+            forName: Self.changeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] note in
+            let payload = note.object as? String
+            Task { @MainActor [weak self] in
+                guard let self, let payload else { return }
+                let parts = payload.split(separator: "|", maxSplits: 1)
+                guard parts.count == 2,
+                      Int32(parts[0]) != myPID,
+                      String(parts[1]) == dbPath else { return }
+                if self.reload() {
+                    self.onExternalChange?()
+                }
+            }
+        }
+    }
+
+    deinit {
+        if let observer {
+            DistributedNotificationCenter.default().removeObserver(observer)
+        }
+    }
+
+    @discardableResult
+    public func reload() -> Bool {
+        let fresh = Self.loadAll(from: database)
+        guard fresh != cache else { return false }
+        cache = fresh
+        return true
+    }
+
+    private static func loadAll(from database: AppDatabase) -> [String: String] {
         let rows = (try? database.pool.read { db in
             try Row.fetchAll(db, sql: "SELECT key, value FROM setting")
         }) ?? []
+        var result: [String: String] = [:]
         for row in rows {
-            cache[row["key"]] = row["value"]
+            result[row["key"]] = row["value"]
         }
+        return result
     }
 
     public subscript<Value>(key: SettingKey<Value>) -> Value {
@@ -50,6 +93,13 @@ public final class SettingsStore {
                     arguments: [name, json]
                 )
             }
+            let payload = "\(ProcessInfo.processInfo.processIdentifier)|\(database.path)"
+            DistributedNotificationCenter.default().postNotificationName(
+                Self.changeNotification,
+                object: payload,
+                userInfo: nil,
+                deliverImmediately: true
+            )
         }
     }
 

@@ -30,3 +30,20 @@ import Testing
     s[key] = false
     #expect(notified.value)
 }
+
+@MainActor @Test func settingsReloadReadsExternalDatabaseWrites() throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "ib-reload-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let db1 = try AppDatabase(url: url, migrations: [])
+    let db2 = try AppDatabase(url: url, migrations: [])
+    let s1 = SettingsStore(database: db1)
+    let s2 = SettingsStore(database: db2)
+    let key = SettingKey<String>("shared.key", default: "init")
+
+    #expect(s2[key] == "init")
+    s1[key] = "updated"
+    #expect(s2[key] == "init")
+    #expect(s2.reload())
+    #expect(s2[key] == "updated")
+    #expect(!s2.reload())
+}

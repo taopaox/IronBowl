@@ -8,6 +8,7 @@ struct ReportView: View {
     @State private var showHistory = false
     @State private var previewMode: PreviewMode = .preview
     @State private var confirmClear = false
+    @State private var showTitaSubmit = false
     @FocusState private var extraNotesFocused: Bool
 
     enum PreviewMode: Hashable {
@@ -66,9 +67,15 @@ struct ReportView: View {
             if model.isZentaoConfigured && !model.syncedFromZentao {
                 await model.refreshLogs()
             }
+            if model.isTitaConfigured {
+                await model.refreshTitaStatus()
+            }
         }
         .onDisappear {
             model.saveEditsIfNeeded()
+        }
+        .sheet(isPresented: $showTitaSubmit) {
+            TitaSubmitSheet(model: model)
         }
         .alert("清空\(model.periodKind.displayName)？", isPresented: $confirmClear) {
             Button("清空", role: .destructive) {
@@ -501,6 +508,18 @@ struct ReportView: View {
                                 Text("·")
                                 Text("\(periodLabel)工时 \(WorkCalendar.hoursText(model.totalHours))h")
                             }
+                            if let status = model.titaStatus {
+                                Button {
+                                    showTitaSubmit = true
+                                } label: {
+                                    Tag(
+                                        "Tita \(status.state.displayName)",
+                                        color: status.state == .onTime ? DS.success : (status.state == .delay ? DS.warning : (status.state == .unSubmit ? DS.brand : DS.textSecondary))
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .help("点击查看或推送到 Tita")
+                            }
                         }
                         .font(DS.caption)
                         .foregroundStyle(DS.textTertiary)
@@ -601,6 +620,17 @@ struct ReportView: View {
                 Label("导出", systemImage: "square.and.arrow.up")
             }
             .buttonStyle(.dsSecondary)
+
+            Button {
+                showTitaSubmit = true
+            } label: {
+                Label(
+                    model.titaStatus?.state.isSubmitted == true ? "更新 Tita" : "推送 Tita",
+                    systemImage: "paperplane"
+                )
+            }
+            .buttonStyle(.dsSecondary)
+            .help("核对并保存草稿或提交到 Tita")
 
             Button {
                 confirmClear = true

@@ -542,3 +542,190 @@ import Testing
     #expect(weeklyPlugin.model?.periodKind == .weekly)
     #expect(monthlyPlugin.model?.periodKind == .monthly)
 }
+
+@Test func titaCredentialParserExtractsCookiesAndIdentifiers() {
+    // 1. Chrome Copy as cURL (-H 'cookie: ...')
+    let curlWithHeader = """
+    curl 'https://www.tita.net/api/v1/880017/804751550/summary/detail?summaryType=26&summaryDate=2026-11-04' \\
+      -H 'accept: application/json, text/plain, */*' \\
+      -H 'cookie: sid=abc123; uid=xyz'
+    """
+    let parsed1 = TitaCredentialParser.parse(curlWithHeader)
+    #expect(parsed1.cookie == "sid=abc123; uid=xyz")
+    #expect(parsed1.baseURL == "https://www.tita.net")
+    #expect(parsed1.tenantID == "880017")
+    #expect(parsed1.userID == "804751550")
+
+    // 2. Chrome Copy as cURL (-b '...')
+    let curlWithB = "curl 'https://www.tita.net/u/804751550/Home/' -b 'token=foo; bar=baz'"
+    let parsed2 = TitaCredentialParser.parse(curlWithB)
+    #expect(parsed2.cookie == "token=foo; bar=baz")
+    #expect(parsed2.userID == "804751550")
+    #expect(parsed2.tenantID == nil)
+
+    // 3. Raw HTTP header block
+    let headerBlock = """
+    Accept: application/json
+    Cookie: a=1; b=2
+    Referer: https://www.tita.net/
+    """
+    let parsed3 = TitaCredentialParser.parse(headerBlock)
+    #expect(parsed3.cookie == "a=1; b=2")
+
+    // 4. Plain cookie string
+    let plain = TitaCredentialParser.parse("  a=1; b=2  ")
+    #expect(plain.cookie == "a=1; b=2")
+}
+
+@Test func titaBSGlobalParserExtractsTenantUserAndName() {
+    let html = """
+    <script>
+    window.BSGlobal = {
+      tenantInfo: { Id: 880017, Name: "某公司" },
+      loginUserInfo: { Id: 804751550, Name: "\\u5f20\\u4e09" },
+      apiPath: "//www.tita.net"
+    };
+    </script>
+    """
+    let info = TitaBSGlobalParser.parse(html: html, finalURL: URL(string: "https://www.tita.net/u/804751550/Home"))
+    #expect(info?.tenantID == "880017")
+    #expect(info?.userID == "804751550")
+    #expect(info?.userName == "张三")
+}
+
+@Test func titaPeriodCodeComputesWeeklyAndMonthlyCodes() {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = .current
+
+    // 2026年11月：周一分别是 11/2(W1), 11/9(W2), 11/16(W3), 11/23(W4), 11/30(W5)
+    let w1 = WeekRange.containing(cal.date(from: DateComponents(year: 2026, month: 11, day: 4))!)
+    let w3 = WeekRange.containing(cal.date(from: DateComponents(year: 2026, month: 11, day: 18))!)
+    let w4 = WeekRange.containing(cal.date(from: DateComponents(year: 2026, month: 11, day: 25))!)
+    let w5CrossMonth = WeekRange.containing(cal.date(from: DateComponents(year: 2026, month: 12, day: 2))!) // 周一为 2026-11-30
+
+    #expect(TitaPeriodCode.weeklySummaryDate(for: w1) == "2026-11-01")
+    #expect(TitaPeriodCode.weeklyStatusDate(for: w1) == "2026/11/01")
+    #expect(TitaPeriodCode.weeklySummaryDate(for: w3) == "2026-11-03")
+    #expect(TitaPeriodCode.weeklySummaryDate(for: w4) == "2026-11-04")
+    #expect(TitaPeriodCode.weeklySummaryDate(for: w5CrossMonth) == "2026-11-05")
+
+    // 2026年6月1日恰好是周一 -> W1
+    let jun1Week = WeekRange.containing(cal.date(from: DateComponents(year: 2026, month: 6, day: 1))!)
+    #expect(TitaPeriodCode.weeklySummaryDate(for: jun1Week) == "2026-06-01")
+
+    let nov = MonthRange.fromMonthKey("2026-11")!
+    #expect(TitaPeriodCode.monthlySummaryDate(for: nov) == "2026-11-01")
+    #expect(TitaPeriodCode.monthlyStatusDate(for: nov) == "2026/11/01")
+
+    let editorURL = TitaPeriodCode.webEditorURL(
+        baseURL: "https://www.tita.net",
+        userID: "804751550",
+        periodKind: .weekly,
+        summaryDate: "2026-11-04",
+        templateID: 1006,
+        isCreate: false
+    )
+    #expect(editorURL?.absoluteString == "https://www.tita.net/u/804751550/Home/#/summary/template?isCreate=false&hideNavTop=true&reportType=26&currentTime=2026-11-04&templateId=1006&activeKey=week")
+}
+
+@Test func titaRichTextConverterAndMapperWorkEndToEnd() async throws {
+    let md = """
+    ## 亮点与成功经验
+
+    ### 饭碗
+    1. 完成 **Tita** 对接 `API` 开发
+    2. 支持自动拆分
+
+    ## 问题与不足
+
+    - 暂无明显阻塞
+
+    ## 改进思考与行动
+
+    - 补充单元测试
+
+    ## 下一步工作计划
+
+    1. 上线验收
+    """
+
+    let mapped = TitaContentMapper.map(markdown: md, toModules: TitaContentMapper.defaultModuleNames)
+    #expect(mapped.count == 4)
+    #expect(mapped[0].contains("完成 **Tita** 对接 `API` 开发"))
+    #expect(mapped[1].contains("暂无明显阻塞"))
+    #expect(mapped[2].contains("补充单元测试"))
+    #expect(mapped[3].contains("上线验收"))
+
+    // 标准周报风格也能自动归类工时和计划
+    let standardMd = """
+    ## 本周完成工作
+
+    1. 完成任务 A
+
+    ## 工时统计
+
+    - 总工时 40h
+
+    ## 问题与风险
+
+    - 联调延迟
+
+    ## 下周工作计划
+
+    1. 推进任务 B
+    """
+    let stdMapped = TitaContentMapper.map(markdown: standardMd, toModules: TitaContentMapper.defaultModuleNames)
+    #expect(stdMapped[0].contains("完成任务 A"))
+    #expect(stdMapped[0].contains("总工时 40h"))
+    #expect(stdMapped[1].contains("联调延迟"))
+    #expect(stdMapped[3].contains("推进任务 B"))
+
+    // HTML 转换验证
+    let converted = TitaRichTextConverter.convert(markdown: mapped[0])
+    #expect(converted.richText.contains("<strong>饭碗</strong>"))
+    #expect(converted.richText.contains("<ol><li class=\"tita-rich-editor-li\"><p style=\"text-align:left\">完成 <strong>Tita</strong> 对接 <code>API</code> 开发</p></li>"))
+    #expect(converted.plainText.contains("完成 Tita 对接 API 开发"))
+    #expect(TitaRichTextConverter.plainTextFromHTML(converted.richText).contains("饭碗"))
+
+    // 风格兜底测试 (.tita)
+    let week = WeekRange.fromStartDateString("2026-11-23")!
+    let input = WeeklyReportInput(
+        week: week,
+        days: [],
+        extraNotes: "补充测试说明",
+        style: .tita,
+        includeHours: true,
+        promptTemplate: WeeklyReportGenerator.defaultPrompt
+    )
+    let out = await WeeklyReportGenerator.generate(input, provider: nil)
+    #expect(out.content.contains("## 亮点与成功经验"))
+    #expect(out.content.contains("## 改进思考与行动"))
+}
+
+@Test func titaSubmitPayloadBuilderPreservesOtherModules() throws {
+    let detail = TitaReportDetail(
+        dailyID: "880017_804751550_26_4_12345",
+        summaryDate: "2026-11-04",
+        summaryType: .weekly,
+        submitState: .unSubmit,
+        templateID: 1006,
+        delayDate: nil,
+        modules: [
+            TitaReportModule(moduleId: 1, moduleName: "心情", moduleType: "select", moduleObjType: 1, sortIndex: 1, isDelete: false, plainText: "", richTextHTML: "", rawObjectDataJSON: "0"),
+            TitaReportModule(moduleId: 2, moduleName: "OKR", moduleType: "table", moduleObjType: 2, sortIndex: 2, isDelete: false, plainText: "", richTextHTML: "", rawObjectDataJSON: "{\"rows\":[]}"),
+            TitaReportModule(moduleId: 3, moduleName: "工作总结（亮点与成功经验）", moduleType: "richtext", moduleObjType: 0, sortIndex: 3, isDelete: false, plainText: "", richTextHTML: "", rawObjectDataJSON: "{}"),
+            TitaReportModule(moduleId: 7, moduleName: "附件", moduleType: "dfs", moduleObjType: 4, sortIndex: 7, isDelete: false, plainText: "", richTextHTML: "", rawObjectDataJSON: "{\"files\":[\"a.pdf\"]}"),
+            TitaReportModule(moduleId: 8, moduleName: "@ta查看", moduleType: "at", moduleObjType: 5, sortIndex: 8, isDelete: false, plainText: "", richTextHTML: "", rawObjectDataJSON: "{\"userIds\":[100]}"),
+        ]
+    )
+
+    let converted = TitaRichTextConverter.convert(markdown: "1. 完成开发")
+    let payload = try TitaSubmitPayloadBuilder.buildSubmitBody(detail: detail, updatedRichTexts: [3: converted])
+
+    #expect(payload["OKRModuleValue"] as? String == "{\"rows\":[]}")
+    #expect(payload["DfsModuleValue"] as? String == "{\"files\":[\"a.pdf\"]}")
+    #expect(payload["AtModuleValue"] as? String == "{\"userIds\":[100]}")
+    let richValues = try #require(payload["ModuleRichValues"] as? [String])
+    #expect(richValues.count == 1)
+    #expect(richValues[0].contains("完成开发"))
+}

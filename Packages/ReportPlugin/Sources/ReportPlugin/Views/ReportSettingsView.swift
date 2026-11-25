@@ -61,5 +61,17 @@ struct ReportSettingsView: View {
                 }
             }
         }
+
+        DSSection("Tita 对接") {
+            let statusText = model.isTitaConfigured
+                ? (model.titaUserName.isEmpty ? "已保存 Cookie（点击管理或测试连接）" : "已连接：\(model.titaUserName)（租户 \(model.titaTenantID)）")
+                : "尚未配置 Tita 登录凭证，支持网页登录提取或粘贴 cURL/Cookie。"
+            DSRow("Tita 周报/月报推送", description: statusText) {
+                Button("管理 Tita 对接") {
+                    model.context.openSettings(ReportPlugin.settingsTitaID)
+                }
+                .buttonStyle(.dsSecondary)
+            }
+        }
     }
 }

@@ -38,6 +38,12 @@ final class WeeklyReportModel {
     var errorMessage: String?
     var copied = false
 
+    // MARK: - Tita 对接状态
+    var titaStatus: TitaPeriodStatus?
+    var isLoadingTitaStatus = false
+    var titaStatusError: String?
+    var isSyncingTita = false
+
     @ObservationIgnored private var rawItemsByDate: [String: [DailyLogItem]] = [:]
     @ObservationIgnored private var autoSaveTask: Task<Void, Never>?
     @ObservationIgnored private var copiedResetTask: Task<Void, Never>?
@@ -83,6 +89,51 @@ final class WeeklyReportModel {
 
     var isZentaoConfigured: Bool {
         dailyLogService.isZentaoConfigured
+    }
+
+    // MARK: - Tita 配置与当前周期编码
+
+    var titaBaseURL: String {
+        settings[ReportKeys.titaBaseURL]
+    }
+
+    var titaCookie: String {
+        settings[ReportKeys.titaCookie]
+    }
+
+    var titaTenantID: String {
+        settings[ReportKeys.titaTenantID]
+    }
+
+    var titaUserID: String {
+        settings[ReportKeys.titaUserID]
+    }
+
+    var titaUserName: String {
+        settings[ReportKeys.titaUserName]
+    }
+
+    var isTitaConfigured: Bool {
+        !titaCookie.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var activeTitaSummaryType: TitaSummaryType {
+        TitaSummaryType(periodKind: periodKind)
+    }
+
+    var activeTitaSummaryDate: String {
+        TitaPeriodCode.summaryDate(for: periodKind, week: week, month: month)
+    }
+
+    var activeTitaStatusDate: String {
+        TitaPeriodCode.statusDate(for: periodKind, week: week, month: month)
+    }
+
+    var activeTitaTemplateID: Int {
+        switch periodKind {
+        case .weekly: settings[ReportKeys.titaWeeklyTemplateID]
+        case .monthly: settings[ReportKeys.titaMonthlyTemplateID]
+        }
     }
 
     // MARK: - 当前周期元信息
@@ -244,6 +295,8 @@ final class WeeklyReportModel {
         clearActiveFilter()
         syncedFromZentao = false
         remoteError = nil
+        titaStatus = nil
+        titaStatusError = nil
         message = nil
         errorMessage = nil
         loadSavedReportForActivePeriod()
@@ -265,6 +318,8 @@ final class WeeklyReportModel {
         clearActiveFilter()
         syncedFromZentao = false
         remoteError = nil
+        titaStatus = nil
+        titaStatusError = nil
         message = nil
         errorMessage = nil
         loadSavedReportForActivePeriod()
@@ -286,6 +341,8 @@ final class WeeklyReportModel {
         clearActiveFilter()
         syncedFromZentao = false
         remoteError = nil
+        titaStatus = nil
+        titaStatusError = nil
         message = nil
         errorMessage = nil
         loadSavedReportForActivePeriod()
@@ -712,5 +769,279 @@ final class WeeklyReportModel {
             extraNotes = ""
         }
         recentMonthlyReports = store.recentMonthlyReports()
+    }
+
+    // MARK: - Tita 直连对接
+
+    struct TitaPreparedEditor: Sendable {
+        let detail: TitaReportDetail?
+        let templateID: Int
+        let modules: [TitaEditableModule]
+        let mood: TitaMood
+        let remoteState: TitaSubmitState
+        let delayDate: String?
+    }
+
+    func makeTitaClient() throws -> TitaClient {
+        try TitaClient(
+            baseURL: titaBaseURL,
+            cookie: titaCookie,
+            tenantID: titaTenantID,
+            userID: titaUserID
+        )
+    }
+
+    @discardableResult
+    func applyTitaCredentialInput(_ raw: String) -> TitaCredentialParser.ParsedCredential {
+        let parsed = TitaCredentialParser.parse(raw)
+        if !parsed.cookie.isEmpty {
+            settings[ReportKeys.titaCookie] = parsed.cookie
+        }
+        if let base = parsed.baseURL, !base.isEmpty {
+            settings[ReportKeys.titaBaseURL] = base
+        }
+        if let tid = parsed.tenantID, !tid.isEmpty {
+            settings[ReportKeys.titaTenantID] = tid
+        }
+        if let uid = parsed.userID, !uid.isEmpty {
+            settings[ReportKeys.titaUserID] = uid
+        }
+        titaStatus = nil
+        titaStatusError = nil
+        return parsed
+    }
+
+    func clearTitaSession() {
+        settings[ReportKeys.titaCookie] = ""
+        settings[ReportKeys.titaTenantID] = ""
+        settings[ReportKeys.titaUserID] = ""
+        settings[ReportKeys.titaUserName] = ""
+        titaStatus = nil
+        titaStatusError = nil
+    }
+
+    @discardableResult
+    func verifyTitaAccount() async throws -> TitaAccountInfo {
+        let client = try makeTitaClient()
+        let info = try await client.verifySession()
+        settings[ReportKeys.titaTenantID] = info.tenantID
+        settings[ReportKeys.titaUserID] = info.userID
+        if !info.userName.isEmpty {
+            settings[ReportKeys.titaUserName] = info.userName
+        }
+
+        // 尽力自动探测当前企业的默认周报/月报模板 ID。
+        if let weeklyTemplates = try? await client.fetchTemplates(summaryType: .weekly),
+           let firstWeekly = weeklyTemplates.first {
+            settings[ReportKeys.titaWeeklyTemplateID] = firstWeekly.templateID
+        }
+        if let monthlyTemplates = try? await client.fetchTemplates(summaryType: .monthly),
+           let firstMonthly = monthlyTemplates.first {
+            settings[ReportKeys.titaMonthlyTemplateID] = firstMonthly.templateID
+        }
+
+        return info
+    }
+
+    func refreshTitaStatus() async {
+        guard isTitaConfigured, !isLoadingTitaStatus else { return }
+        isLoadingTitaStatus = true
+        titaStatusError = nil
+
+        let targetKind = periodKind
+        let targetKey = activePeriodKey
+        let summaryType = activeTitaSummaryType
+        let summaryDate = activeTitaSummaryDate
+        let statusDate = activeTitaStatusDate
+
+        defer { isLoadingTitaStatus = false }
+
+        do {
+            if titaTenantID.isEmpty || titaUserID.isEmpty {
+                _ = try await verifyTitaAccount()
+            }
+            let client = try makeTitaClient()
+            let status = try await client.fetchStatus(
+                summaryType: summaryType,
+                statusDate: statusDate,
+                summaryDate: summaryDate
+            )
+            guard periodKind == targetKind && activePeriodKey == targetKey else { return }
+            titaStatus = status
+            if let remoteTid = status.templateID, remoteTid > 0 {
+                switch targetKind {
+                case .weekly: settings[ReportKeys.titaWeeklyTemplateID] = remoteTid
+                case .monthly: settings[ReportKeys.titaMonthlyTemplateID] = remoteTid
+                }
+            }
+        } catch {
+            guard periodKind == targetKind && activePeriodKey == targetKey else { return }
+            titaStatusError = error.localizedDescription
+        }
+    }
+
+    func prepareTitaEditor() async throws -> TitaPreparedEditor {
+        if titaTenantID.isEmpty || titaUserID.isEmpty {
+            _ = try await verifyTitaAccount()
+        }
+        let client = try makeTitaClient()
+        let summaryType = activeTitaSummaryType
+        let summaryDate = activeTitaSummaryDate
+        let statusDate = activeTitaStatusDate
+
+        let status = try? await client.fetchStatus(
+            summaryType: summaryType,
+            statusDate: statusDate,
+            summaryDate: summaryDate
+        )
+        if let status {
+            titaStatus = status
+        }
+
+        let detail = try await client.fetchDetail(summaryType: summaryType, summaryDate: summaryDate)
+        let templateID = detail?.templateID ?? status?.templateID ?? activeTitaTemplateID
+
+        let moduleNames: [String]
+        let existingTexts: [String]
+        let moduleIDs: [Int?]
+        let sortIndices: [Int]
+
+        if let detail, !detail.richtextModules.isEmpty {
+            let richModules = detail.richtextModules
+            moduleNames = richModules.map(\.moduleName)
+            existingTexts = richModules.map(\.plainText)
+            moduleIDs = richModules.map { Optional($0.moduleId) }
+            sortIndices = richModules.map(\.sortIndex)
+        } else {
+            let templates = (try? await client.fetchTemplates(summaryType: summaryType)) ?? []
+            let matchedTemplate = templates.first { $0.templateID == templateID } ?? templates.first
+            let names = (matchedTemplate?.richtextModuleNames.isEmpty == false)
+                ? matchedTemplate!.richtextModuleNames
+                : TitaContentMapper.defaultModuleNames
+            moduleNames = names
+            existingTexts = Array(repeating: "", count: names.count)
+            moduleIDs = Array(repeating: nil, count: names.count)
+            sortIndices = Array(0..<names.count)
+        }
+
+        let localMapped = TitaContentMapper.map(markdown: reportContent, toModules: moduleNames)
+        let editableModules = moduleNames.enumerated().map { idx, name in
+            let localText = idx < localMapped.count ? localMapped[idx] : ""
+            let remoteText = idx < existingTexts.count ? existingTexts[idx] : ""
+            let prefill = localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? remoteText : localText
+            return TitaEditableModule(
+                id: "\(idx)-\(name)",
+                moduleId: idx < moduleIDs.count ? moduleIDs[idx] : nil,
+                moduleName: name,
+                sortIndex: idx < sortIndices.count ? sortIndices[idx] : idx,
+                text: prefill,
+                existingRemoteText: remoteText
+            )
+        }
+
+        let defaultMood = TitaMood(rawValue: settings[ReportKeys.titaDefaultMood]) ?? .unset
+        let mood = detail?.currentMood ?? defaultMood
+        let remoteState = detail?.submitState ?? status?.state ?? .none
+
+        return TitaPreparedEditor(
+            detail: detail,
+            templateID: templateID,
+            modules: editableModules,
+            mood: mood,
+            remoteState: remoteState,
+            delayDate: detail?.delayDate ?? status?.delayDate
+        )
+    }
+
+    @discardableResult
+    func saveDraftToTita(
+        templateID: Int,
+        modules: [TitaEditableModule],
+        mood: TitaMood
+    ) async throws -> TitaPeriodStatus {
+        saveEditsIfNeeded()
+        isSyncingTita = true
+        defer { isSyncingTita = false }
+
+        if titaTenantID.isEmpty || titaUserID.isEmpty {
+            _ = try await verifyTitaAccount()
+        }
+        let client = try makeTitaClient()
+        let summaryType = activeTitaSummaryType
+        let summaryDate = activeTitaSummaryDate
+        let statusDate = activeTitaStatusDate
+
+        let detail = try await client.saveDraft(
+            summaryType: summaryType,
+            summaryDate: summaryDate,
+            templateID: templateID,
+            moduleTexts: modules.map(\.text),
+            mood: mood
+        )
+        let latestStatus = (try? await client.fetchStatus(
+            summaryType: summaryType,
+            statusDate: statusDate,
+            summaryDate: summaryDate
+        )) ?? TitaPeriodStatus(
+            summaryDate: summaryDate,
+            summaryType: summaryType,
+            state: detail.submitState,
+            dailyID: detail.dailyID,
+            templateID: detail.templateID,
+            delayDate: detail.delayDate
+        )
+        titaStatus = latestStatus
+        titaStatusError = nil
+        errorMessage = nil
+        message = "已将「\(activePeriodTitle)」\(periodKind.displayName)存为 Tita 草稿"
+        return latestStatus
+    }
+
+    @discardableResult
+    func submitToTita(
+        templateID: Int,
+        modules: [TitaEditableModule],
+        mood: TitaMood
+    ) async throws -> TitaPeriodStatus {
+        saveEditsIfNeeded()
+        isSyncingTita = true
+        defer { isSyncingTita = false }
+
+        if titaTenantID.isEmpty || titaUserID.isEmpty {
+            _ = try await verifyTitaAccount()
+        }
+        let client = try makeTitaClient()
+        let summaryType = activeTitaSummaryType
+        let summaryDate = activeTitaSummaryDate
+        let statusDate = activeTitaStatusDate
+
+        let status = try await client.submitReport(
+            summaryType: summaryType,
+            summaryDate: summaryDate,
+            statusDate: statusDate,
+            templateID: templateID,
+            moduleTexts: modules.map(\.text),
+            mood: mood
+        )
+        titaStatus = status
+        titaStatusError = nil
+        errorMessage = nil
+        message = "已成功提交「\(activePeriodTitle)」\(periodKind.displayName)到 Tita（\(status.state.displayName)）"
+        return status
+    }
+
+    func openActiveTitaInBrowser() {
+        let state = titaStatus?.state ?? TitaSubmitState.none
+        let isCreate = state == TitaSubmitState.none
+        if let url = TitaPeriodCode.webEditorURL(
+            baseURL: titaBaseURL,
+            userID: titaUserID,
+            periodKind: periodKind,
+            summaryDate: activeTitaSummaryDate,
+            templateID: activeTitaTemplateID,
+            isCreate: isCreate
+        ) {
+            NSWorkspace.shared.open(url)
+        }
     }
 }

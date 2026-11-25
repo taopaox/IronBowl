@@ -509,6 +509,35 @@ nonisolated enum WeeklyReportGenerator {
                 let otText = overtimeHours > 0 ? "，加班 \(WorkCalendar.hoursText(overtimeHours))h" : ""
                 sections.append("**\(periodLabel)工时**：共 \(WorkCalendar.hoursText(totalHours))h（正常 \(WorkCalendar.hoursText(normalHours))h\(otText)，记录 \(loggedDays) 天）")
             }
+
+        case .tita:
+            var highlightLines: [String] = ["## 亮点与成功经验", ""]
+            if buckets.isEmpty {
+                highlightLines.append("- \(periodLabel)暂无已记录的每日日报")
+            } else {
+                for bucket in buckets {
+                    if buckets.count > 1 || bucket.name != "其他工作" {
+                        let hoursSuffix = includeHours ? "（\(WorkCalendar.hoursText(bucket.hours))h）" : ""
+                        highlightLines.append("### \(bucket.name)\(hoursSuffix)")
+                    }
+                    for (idx, point) in bucket.points.enumerated() {
+                        highlightLines.append("\(idx + 1). \(point)")
+                    }
+                    highlightLines.append("")
+                }
+            }
+            if !trimmedNotes.isEmpty {
+                highlightLines.append(trimmedNotes)
+                highlightLines.append("")
+            }
+            if includeHours {
+                let otText = overtimeHours > 0 ? "，加班 \(WorkCalendar.hoursText(overtimeHours))h" : ""
+                highlightLines.append("- **\(periodLabel)工时**：共 \(WorkCalendar.hoursText(totalHours))h（正常 \(WorkCalendar.hoursText(normalHours))h\(otText)，记录 \(loggedDays) 天）")
+            }
+            sections.append(highlightLines.joined(separator: "\n").trimmingCharacters(in: .newlines))
+            sections.append("## 问题与不足\n\n- 暂无")
+            sections.append("## 改进思考与行动\n\n- 暂无")
+            sections.append("## 下一步工作计划\n\n1. 待补充")
         }
 
         return (title, sections.joined(separator: "\n\n"))

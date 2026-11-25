@@ -6,6 +6,7 @@ import SwiftUI
 public final class ReportPlugin: IronBowlPlugin {
     public static let pluginID = "report"
     public static let settingsGenerateID = "report.generate"
+    public static let settingsTitaID = "report.tita"
 
     public let id = ReportPlugin.pluginID
     public let title = "周报"
@@ -37,6 +38,9 @@ public final class ReportPlugin: IronBowlPlugin {
         return [
             SettingsPage(id: Self.settingsGenerateID, title: "周报生成", systemImage: "doc.text") {
                 AnyView(ReportSettingsView(model: model, periodKind: .weekly))
+            },
+            SettingsPage(id: Self.settingsTitaID, title: "Tita 对接", systemImage: "paperplane") {
+                AnyView(TitaAccountSettings(model: model))
             },
         ]
     }

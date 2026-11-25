@@ -52,13 +52,13 @@ docs/
 | 知识库集成 | [飞书知识库](./plugins/feishu.md) | 方案拦截、上传下载、固定网页到工作台侧边栏 |
 | AI 网页聚合 | [AI 目录](./plugins/ai-web.md) | 侧栏可折叠目录、20 个预设、本地/远程 Logo 管理 |
 | 自动化任务 | [定时任务](./plugins/scheduler.md) | 任务列表、动态动作参数编辑器、执行日志审计与菜单栏倒计时 |
-| 周报与月报 | [周报与月报](./plugins/report.md) | 独立「周报」「月报」菜单：按周/月查询禅道与本地每日日报、AI 提炼与规则兜底生成、预览编辑及导出 |
+| 周报与月报 | [周报与月报](./plugins/report.md) | 独立「周报」「月报」菜单：按周/月查询禅道与本地每日日报、AI 提炼、预览导出及直连 Tita 存草稿/提交 |
 | 宿主应用 | [工作台主应用](./apps/ironbowl.md) · [独立版万年历](./apps/standalone-calendar.md) | 窗口、菜单栏、程序坞策略、开机自启与双应用数据共享 |
 | 开发与测试 | [开发与测试指南](./development/getting-started.md) · [插件开发指南](./development/plugin-guide.md) | XcodeGen、`xcodebuild`、`swift test` 与新插件接入步骤 |
 
 ## 常用本地路径
 
 - **共享数据库**：`~/Library/Application Support/IronBowl/ironbowl.sqlite`
-- **应用日志目录**：`~/Library/Application Support/IronBowl/logs/`（含禅道接口调试日志 `zentao.log`）
+- **应用日志目录**：`~/Library/Application Support/IronBowl/logs/`（含禅道接口调试日志 `zentao.log`、Tita 接口调试日志 `tita.log`）
 - **AI 图标目录**：`~/Library/Application Support/IronBowl/ai-logos/`
 - **默认 Debug 构建产物**：`build/DerivedData/Build/Products/Debug/IronBowl.app` 与 `IronBowlCalendar.app`

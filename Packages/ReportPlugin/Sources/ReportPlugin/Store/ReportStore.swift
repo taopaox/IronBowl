@@ -22,6 +22,7 @@ public nonisolated enum WeeklyReportStyle: String, Codable, Sendable, CaseIterab
     case standard
     case byProject
     case concise
+    case tita
 
     public var id: String { rawValue }
 
@@ -30,6 +31,7 @@ public nonisolated enum WeeklyReportStyle: String, Codable, Sendable, CaseIterab
         case .standard: "标准周报"
         case .byProject: "按项目汇总"
         case .concise: "精简要点"
+        case .tita: "Tita 模板"
         }
     }
 
@@ -38,6 +40,7 @@ public nonisolated enum WeeklyReportStyle: String, Codable, Sendable, CaseIterab
         case .standard: "包含本周完成工作、问题与风险、下周工作计划，适合正式周报。"
         case .byProject: "按禅道项目或模块归类本周产出并附工时明细，适合项目同步。"
         case .concise: "输出紧凑清晰的要点清单，适合直接发到飞书或钉钉群。"
+        case .tita: "按 Tita 周报/月报的四个总结模块输出：亮点与成功经验、问题与不足、改进思考与行动、下一步工作计划。"
         }
     }
 
@@ -49,6 +52,8 @@ public nonisolated enum WeeklyReportStyle: String, Codable, Sendable, CaseIterab
             "采用「按项目汇总」结构，按禅道项目（未关联项目归入其他工作）分小节梳理本周工作成果，每个项目下提炼 2-5 条业务要点，并在文末汇总本周工时概况。"
         case .concise:
             "采用「精简要点」结构，去掉繁琐套话，用简洁的 Markdown 列表直接总结本周核心完成事项与工时结论，方便在聊天群内直接发送。"
+        case .tita:
+            "采用「Tita 模板」结构，严格使用以下四个二级标题输出：`## 亮点与成功经验`（按项目或模块提炼本周核心成果与价值，若需附带工时请在末尾简明列出）、`## 问题与不足`（若日报中无明确阻塞可写暂无）、`## 改进思考与行动`（针对问题或效率提升给出具体改进动作，无明显问题可写持续保持现状并优化细节）、`## 下一步工作计划`。"
         }
     }
 
@@ -60,6 +65,8 @@ public nonisolated enum WeeklyReportStyle: String, Codable, Sendable, CaseIterab
             "采用「按项目汇总」结构，按禅道项目（未关联项目归入其他工作）分小节梳理本月核心产出与关键进度，并在文末汇总本月工时分布。"
         case .concise:
             "采用「精简要点」结构，提炼本月核心成果清单与工时结论，条理紧凑、便于直接在飞书/钉钉汇报或同步。"
+        case .tita:
+            "采用「Tita 模板」结构，严格使用以下四个二级标题输出：`## 亮点与成功经验`（跨周整合同类工作并提炼本月关键交付与里程碑，若需附带工时请在末尾简明列出）、`## 问题与不足`（若无明确阻塞可写暂无）、`## 改进思考与行动`（总结复盘与后续优化举措）、`## 下一步工作计划`。"
         }
     }
 }
@@ -72,6 +79,14 @@ enum ReportKeys {
     static let includeDrafts = SettingKey<Bool>("report.includeDrafts", default: true)
     static let includeHours = SettingKey<Bool>("report.includeHours", default: true)
     static let lastPeriodKind = SettingKey<ReportPeriodKind>("report.lastPeriodKind", default: .weekly)
+    static let titaBaseURL = SettingKey<String>("report.tita.baseURL", default: "https://www.tita.net")
+    static let titaCookie = SettingKey<String>("report.tita.cookie", default: "")
+    static let titaTenantID = SettingKey<String>("report.tita.tenantID", default: "")
+    static let titaUserID = SettingKey<String>("report.tita.userID", default: "")
+    static let titaUserName = SettingKey<String>("report.tita.userName", default: "")
+    static let titaWeeklyTemplateID = SettingKey<Int>("report.tita.weeklyTemplateID", default: 1006)
+    static let titaMonthlyTemplateID = SettingKey<Int>("report.tita.monthlyTemplateID", default: 1007)
+    static let titaDefaultMood = SettingKey<Int>("report.tita.defaultMood", default: 0)
 }
 
 /// 按周保存的周报持久化记录。

@@ -257,6 +257,11 @@ private struct PopoverMonthPane: View {
                 .truncationMode(.tail)
             Spacer(minLength: 4)
             if let onQuit {
+                Text(Bundle.main.displayVersion)
+                    .font(DS.font(11))
+                    .monospacedDigit()
+                    .foregroundStyle(palette.footerText.opacity(0.75))
+                    .help("饭碗万年历 \(Bundle.main.fullVersion)")
                 PopoverFooterQuitButton(palette: palette) {
                     activeMenu = nil
                     dismissMenuBarPopover()

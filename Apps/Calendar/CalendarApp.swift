@@ -21,7 +21,7 @@ struct CalendarApp: App {
 
         Window("饭碗万年历", id: "calendar") {
             if let model = app.plugin.model {
-                CalendarMainView(model: model)
+                CalendarMainView(model: model, versionText: Bundle.main.displayVersion)
                     .frame(minWidth: 860, minHeight: 620)
                     .id(app.fontScale)
                     .environment(\.locale, CN.locale)
@@ -160,7 +160,7 @@ struct StandaloneSettings: View {
     @Bindable var app: StandaloneCalendar
 
     private var pages: [SettingsPage] {
-        app.plugin.settingsPages.map { page in
+        let pluginPages = app.plugin.settingsPages.map { page in
             if page.id == CalendarPlugin.settingsAppearanceID, let model = app.plugin.model {
                 return SettingsPage(id: page.id, title: page.title, systemImage: page.systemImage) {
                     AnyView(StandaloneAppearanceSettings(app: app, model: model))
@@ -168,6 +168,11 @@ struct StandaloneSettings: View {
             }
             return page
         }
+        return pluginPages + [
+            SettingsPage(id: "about", title: "关于", systemImage: "info.circle") {
+                AnyView(StandaloneAboutSettings())
+            }
+        ]
     }
 
     var body: some View {
@@ -182,6 +187,13 @@ struct StandaloneSettings: View {
                     }
                 }
                 Spacer()
+                Text("饭碗万年历 \(Bundle.main.displayVersion)")
+                    .font(DS.font(11.5))
+                    .monospacedDigit()
+                    .foregroundStyle(DS.textTertiary)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 4)
+                    .help("当前版本 \(Bundle.main.fullVersion)")
             }
             .padding(10)
             .frame(width: 180)
@@ -213,5 +225,26 @@ private struct StandaloneAppearanceSettings: View {
             onAppearanceChange: { app.applyAppearance() },
             onFontScaleChange: { DS.fontScale = app.settings[AppSharedKeys.fontScale] }
         )
+    }
+}
+
+private struct StandaloneAboutSettings: View {
+    @State private var copied = false
+
+    var body: some View {
+        DSSection("关于") {
+            DSRow("当前版本", description: "饭碗万年历 · \(Bundle.main.fullVersion)") {
+                Button(copied ? "已复制" : "复制版本信息") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString("饭碗万年历 \(Bundle.main.fullVersion)", forType: .string)
+                    copied = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.5))
+                        copied = false
+                    }
+                }
+                .buttonStyle(.dsSecondary)
+            }
+        }
     }
 }

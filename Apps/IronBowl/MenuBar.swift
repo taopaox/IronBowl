@@ -85,6 +85,11 @@ struct MenuPanel: View {
         let info = app.workCalendar.dayInfo(Date())
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text("饭碗").font(DS.font(15, .semibold))
+            Text(Bundle.main.displayVersion)
+                .font(DS.font(11))
+                .monospacedDigit()
+                .foregroundStyle(DS.textTertiary)
+                .help("当前版本 \(Bundle.main.fullVersion)")
             Spacer()
             Text(CN.monthDay(Date()) + " " + CN.weekday(Date()) + " · " + WorkCalendar.lunarString(Date()))
                 .font(DS.caption).foregroundStyle(DS.textSecondary)

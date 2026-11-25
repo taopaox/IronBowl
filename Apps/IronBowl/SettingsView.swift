@@ -1,3 +1,4 @@
+import AppKit
 import IronBowlKit
 import SwiftUI
 
@@ -63,6 +64,16 @@ struct SettingsView: View {
                     .padding(.bottom, 12)
                 }
                 .scrollIndicators(.never)
+
+                Text("饭碗 \(Bundle.main.displayVersion)")
+                    .font(DS.font(11.5))
+                    .monospacedDigit()
+                    .foregroundStyle(DS.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
+                    .help("当前版本 \(Bundle.main.fullVersion)")
             }
             .frame(width: 220)
             .background(DS.sidebar)
@@ -94,6 +105,7 @@ struct SettingsView: View {
 
 struct GeneralSettings: View {
     @Bindable var app: AppModel
+    @State private var copiedVersion = false
 
     var body: some View {
         let s = app.settings
@@ -116,6 +128,20 @@ struct GeneralSettings: View {
                 DSRow(plugin.title, description: plugin.isComingSoon ? "即将推出" : nil) {
                     DSToggle(isOn: Binding(get: { app.enabledIDs.contains(plugin.id) }, set: { app.setEnabled(plugin.id, $0) }))
                 }
+            }
+        }
+        DSSection("关于") {
+            DSRow("当前版本", description: "饭碗工作台 · \(Bundle.main.fullVersion)") {
+                Button(copiedVersion ? "已复制" : "复制版本信息") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString("饭碗 \(Bundle.main.fullVersion)", forType: .string)
+                    copiedVersion = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.5))
+                        copiedVersion = false
+                    }
+                }
+                .buttonStyle(.dsSecondary)
             }
         }
     }

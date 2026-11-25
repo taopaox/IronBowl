@@ -5,13 +5,25 @@ import SwiftUI
 /// 万年历主页面：左边月历，右边当天详情 + 天气。
 public struct CalendarMainView: View {
     let model: CalendarModel
+    let versionText: String?
 
-    public init(model: CalendarModel) { self.model = model }
+    public init(model: CalendarModel, versionText: String? = nil) {
+        self.model = model
+        self.versionText = versionText
+    }
 
     public var body: some View {
         VStack(spacing: 0) {
             DSPageHeader("万年历", topPadding: 8) {
-                EmptyView()
+                if let versionText, !versionText.isEmpty {
+                    Text(versionText)
+                        .font(DS.font(11.5, .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(DS.textTertiary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(DS.well, in: .capsule)
+                }
             } actions: {
                 if let w = model.weatherShort {
                     Label(w, systemImage: model.weather?.symbol ?? "cloud").font(DS.body).foregroundStyle(DS.textSecondary)

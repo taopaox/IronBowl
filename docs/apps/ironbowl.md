@@ -8,10 +8,10 @@
 | :--- | :--- | :--- |
 | `IronBowlApp.swift` | `IronBowlApp`, `AppDelegate` | 声明主窗口、`设置` 窗口、主菜单栏及独立万年历菜单栏 Scene；关闭主窗口时不退出应用 |
 | `AppModel.swift` | `AppModel`, `AppKeys`, `DockMode` | 持有共享服务（DB/Settings/WorkCalendar/AI/Web/Reminders/SystemMonitor）、管理插件启停、Dock 策略与开机自启 |
-| `MainView.swift` | `MainView`, `Sidebar`, `ResourceCard`, `ResourceDetailPopover`, `TodayCard` | 可收起左侧栏 + 右侧内容区，展示插件列表、目录子项、固定网页、最近日志、系统/饭碗 CPU 与内存占用卡片（含逐进程明细弹层）及下班倒计时 |
+| `MainView.swift` | `MainView`, `Sidebar`, `ResourceCard`, `ResourceDetailPopover`, `TodayCard` | 可收起左侧栏 + 右侧内容区，展示版本号徽标、插件列表、目录子项、固定网页、最近日志、系统/饭碗 CPU 与内存占用卡片（含逐进程明细弹层）及下班倒计时 |
 | `HomeView.swift` | `HomeView` | 首页「今天」：时段问候、插件快捷标签、一句话记日志输入框与插件概览卡片网格 |
-| `MenuBar.swift` | `MenuBarLabel`, `MenuPanel` | 菜单栏图标与可自定义拼接文案，以及点击弹出的快捷面板 |
-| `SettingsView.swift` | `SettingsView` 及各核心设置页 | 左侧搜索与分组导航（通用、外观、工作时间、网页与内存、AI 提供者 + 已启用插件设置页） |
+| `MenuBar.swift` | `MenuBarLabel`, `MenuPanel` | 菜单栏图标与可自定义拼接文案，以及点击弹出的快捷面板（顶部展示当前版本） |
+| `SettingsView.swift` | `SettingsView` 及各核心设置页 | 左侧搜索、分组导航与底部版本号，右侧各核心设置页（通用设置底部含「关于」版本信息与复制按钮） |
 
 ## 窗口与运行形态
 
@@ -27,3 +27,4 @@
 - **主窗口关闭清理**：`AppModel.mainWindow(isOpen: false)` 会调用 `webSessions.detachAllDisplays()`，将可见网页标记为后台以允许按墓碑策略回收内存。
 - **侧栏资源监控**：左下角 `ResourceCard` 位于「今天上班」卡片上方，展示 CPU 与内存占用，支持在「系统」（整机）与「饭碗」（自身主进程、子进程及活跃 `WKWebView` 渲染进程）间切换；切至「饭碗」时会在卡内直接展示 Top 3 占用项，点击可打开 `ResourceDetailPopover` 查看逐进程内存/CPU 明细、按内存或 CPU 排序，并一键休眠后台网页释放内存；采样仅在侧栏可见时通过 `.task` 定时执行（收起或关窗自动停止）。
 - **侧栏下班倒计时卡片（`TodayCard`）**：依据 `WorkCalendar.effectiveWorkEnd(on:)` 与 `offWorkTimeText(on:)` 展示实际下班时间、倒计时与进度条；设置当日加班后，标题切换为紫色「加班 +Xh」、下班时间同步顺延，进度条亦切为紫色；休息日设置加班时显示「加班 +Xh」与「辛苦加班」。
+- **版本展示**：通过 `IronBowlKit` 的 `AppVersionInfo` 与 `Bundle` 扩展（`displayVersion` / `fullVersion`）在侧栏顶部「饭碗」旁、菜单栏面板顶部、设置窗口左侧栏底部以及「通用 → 关于」卡片中展示当前版本号（支持一键复制）。

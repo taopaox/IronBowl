@@ -85,7 +85,14 @@ struct Sidebar: View {
 
             HStack(spacing: 6) {
                 Text("饭碗").font(DS.font(16, .semibold))
-                Text(Bundle.main.shortVersion).font(DS.font(12)).foregroundStyle(DS.textTertiary)
+                Text(Bundle.main.displayVersion)
+                    .font(DS.font(11, .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(DS.textTertiary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(DS.well, in: .capsule)
+                    .help("当前版本 \(Bundle.main.fullVersion)")
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 12)
@@ -888,8 +895,4 @@ private struct TodayCard: View {
         guard total > 0 else { return 0 }
         return min(1, max(0, now.timeIntervalSince(start) / total))
     }
-}
-
-extension Bundle {
-    var shortVersion: String { (infoDictionary?["CFBundleShortVersionString"] as? String) ?? "" }
 }

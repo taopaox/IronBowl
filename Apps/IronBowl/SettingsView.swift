@@ -15,6 +15,7 @@ struct SettingsView: View {
     private var groups: [NavGroup] {
         let core = NavGroup(id: "core", title: "设置", pages: [
             SettingsPage(id: "general", title: "通用", systemImage: "gearshape") { AnyView(GeneralSettings(app: app)) },
+            SettingsPage(id: "appearance", title: "外观", systemImage: "paintpalette") { AnyView(AppearanceSettings(app: app)) },
             SettingsPage(id: "worktime", title: "工作时间", systemImage: "clock") { AnyView(WorkTimeSettings(app: app)) },
             SettingsPage(id: "ai", title: "AI 提供者", systemImage: "sparkles") { AnyView(ProviderSettings(app: app)) },
         ])
@@ -150,6 +151,99 @@ struct MenuBarItemsEditor: View {
         guard list.indices.contains(j) else { return }
         list.swapAt(i, j)
         app.settings[AppKeys.menuBarItems] = list
+    }
+}
+
+// MARK: 外观
+
+struct AppearanceSettings: View {
+    @Bindable var app: AppModel
+
+    var body: some View {
+        DSSection("主题", footer: "主窗口、设置、菜单栏面板和提醒卡片都会一起切换。") {
+            DSBlockRow {
+                HStack(spacing: 14) {
+                    ForEach(AppearanceMode.allCases) { mode in
+                        ThemeCard(mode: mode, selected: app.appearance == mode) { app.appearance = mode }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 主题选择卡：上面是缩略预览，下面是名字。
+private struct ThemeCard: View {
+    let mode: AppearanceMode
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                preview
+                    .frame(height: 84)
+                    .clipShape(.rect(cornerRadius: 10))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(selected ? DS.toggle : DS.border, lineWidth: selected ? 2 : 1)
+                    }
+                HStack(spacing: 5) {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selected ? DS.toggle : DS.textTertiary)
+                    Text(mode.displayName).font(DS.body)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        switch mode {
+        case .light: MiniWindow(dark: false)
+        case .dark: MiniWindow(dark: true)
+        case .system:
+            HStack(spacing: 0) {
+                MiniWindow(dark: false)
+                MiniWindow(dark: true)
+            }
+        }
+    }
+}
+
+/// 缩略窗口：侧栏 + 内容 + 几条线。用固定颜色，不受当前外观影响。
+private struct MiniWindow: View {
+    let dark: Bool
+
+    var body: some View {
+        let side = dark ? Color(white: 0.11) : Color(white: 0.965)
+        let main = dark ? Color(white: 0.08) : .white
+        let line = dark ? Color(white: 0.28) : Color(white: 0.86)
+        let ink = dark ? Color(white: 0.92) : Color(white: 0.1)
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(0..<4) { i in
+                    RoundedRectangle(cornerRadius: 2).fill(i == 0 ? line : line.opacity(0.6)).frame(height: 5)
+                }
+                Spacer()
+            }
+            .padding(7)
+            .frame(width: 34)
+            .frame(maxHeight: .infinity)
+            .background(side)
+            VStack(alignment: .leading, spacing: 6) {
+                RoundedRectangle(cornerRadius: 2).fill(ink).frame(width: 34, height: 6)
+                RoundedRectangle(cornerRadius: 4).stroke(line).frame(height: 20)
+                RoundedRectangle(cornerRadius: 2).fill(line).frame(width: 50, height: 5)
+                Spacer()
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(main)
+        }
     }
 }
 

@@ -17,7 +17,27 @@ enum DockMode: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
+enum AppearanceMode: String, Codable, Sendable, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .system: "跟随系统"
+        case .light: "日间"
+        case .dark: "夜间"
+        }
+    }
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+    }
+}
+
 enum AppKeys {
+    static let appearance = SettingKey<AppearanceMode>("app.appearance", default: .system)
     static let enabledPlugins = SettingKey<[String]?>("app.enabledPlugins", default: nil)
     static let menuBarItems = SettingKey<[String]>("app.menuBarItems", default: ["zentao.status"])
     static let dockMode = SettingKey<DockMode>("app.dockMode", default: .whenWindowOpen)
@@ -74,6 +94,7 @@ final class AppModel {
         )
         startEnabledPlugins()
         applyDockMode()
+        applyAppearance()
         clock = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.now = Date() }
         }
@@ -145,6 +166,21 @@ final class AppModel {
         _ = now // 每 30 秒刷新一次倒计时
         let items = Dictionary(availableMenuBarItems.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         return settings[AppKeys.menuBarItems].compactMap { items[$0]?.text() }.joined(separator: " ")
+    }
+
+    // MARK: 外观
+
+    var appearance: AppearanceMode {
+        get { settings[AppKeys.appearance] }
+        set {
+            settings[AppKeys.appearance] = newValue
+            applyAppearance()
+        }
+    }
+
+    /// 设置整个应用的外观：主窗口、设置、菜单栏面板、提醒卡片都会跟着变。
+    func applyAppearance() {
+        NSApp?.appearance = settings[AppKeys.appearance].nsAppearance
     }
 
     // MARK: 程序坞

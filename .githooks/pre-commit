@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 允许显式环境变量临时放行（仅限应急场景）
+if [[ "${ALLOW_MAIN_COMMIT:-0}" == "1" ]]; then
+  exit 0
+fi
+
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+if [[ "$branch" != "main" ]]; then
+  exit 0
+fi
+
+git_dir="$(git rev-parse --git-dir)"
+# 允许在 main 上执行合并提交（如本地 merge --no-ff dev）
+if [[ -f "$git_dir/MERGE_HEAD" ]]; then
+  exit 0
+fi
+
+echo "" >&2
+echo "❌ 拦截提交：禁止直接在 main 分支上进行开发或直接提交。" >&2
+echo "   main 分支仅用于合并（merge）或接收 Pull Request。" >&2
+echo "   请切换到 dev 分支（或从 dev 切出 feat/*/fix/* 分支）开发后再提 PR 到 main：" >&2
+echo "     git checkout dev" >&2
+echo "" >&2
+exit 1

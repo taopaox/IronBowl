@@ -9,7 +9,13 @@
 ```bash
 brew install xcodegen
 xcodegen generate
+git config core.hooksPath .githooks
 ```
+
+## 分支与协作流
+
+- **`dev` 为日常开发主分支**：新功能与修复均在 `dev`（或从 `dev` 切出的 `feat/*`、`fix/*` 分支）开发提交。
+- **`main` 仅接受合并或 PR**：启用 `.githooks` 后，本地会阻止在 `main` 上直接提交或直接推送非合并提交；向 `main` 发起 PR 时会自动触发预检与版本预览，合入 `main` 后自动升级版本号、编译双应用并发布 GitHub Release。
 
 ## 本地构建与运行
 
@@ -55,6 +61,7 @@ swift test --package-path Packages/ZentaoLogPlugin
 swift test --package-path Packages/CalendarPlugin
 swift test --package-path Packages/FeishuPlugin
 swift test --package-path Packages/AIWebPlugin
+swift test --package-path Packages/SchedulerPlugin
 ```
 
 ### 依赖本机环境的集成测试（默认跳过）

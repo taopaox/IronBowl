@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 允许显式环境变量临时放行（仅限应急场景）
+if [[ "${ALLOW_MAIN_PUSH:-0}" == "1" ]]; then
+  exit 0
+fi
+
+blocked=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [[ "$remote_ref" == "refs/heads/main" ]]; then
+    # 删除远端 main 分支同样禁止
+    if [[ "$local_sha" =~ ^0+$ ]]; then
+      echo "❌ 拦截推送：禁止删除远端 main 分支。" >&2
+      blocked=1
+      continue
+    fi
+
+    # 仅允许合并提交（>= 2 个父提交）或 CI 自动发版提交（chore(release):）推送到 main
+    parents="$(git rev-list --parents -n 1 "$local_sha" 2>/dev/null || true)"
+    parent_count="$(echo "$parents" | wc -w | tr -d ' ')"
+    subject="$(git log -1 --format=%s "$local_sha" 2>/dev/null || true)"
+
+    if (( parent_count >= 3 )) || [[ "$subject" == chore\(release\):* ]]; then
+      continue
+    fi
+
+    echo "" >&2
+    echo "❌ 拦截推送：禁止向 main 分支直接推送普通开发提交（$subject）。" >&2
+    echo "   请推送到 dev 分支后通过 Pull Request 或合并进入 main：" >&2
+    echo "     git push origin dev" >&2
+    echo "" >&2
+    blocked=1
+  fi
+done
+
+if [[ "$blocked" -ne 0 ]]; then
+  exit 1
+fi

@@ -28,6 +28,15 @@ xcodebuild -project IronBowl.xcodeproj -scheme Calendar -configuration Debug -de
 - 每次新增或修改功能、插件行为、数据库迁移、设置键（`SettingKey`）、项目结构或构建/测试流程时，必须同步更新 `docs/` 下对应的文档；新增或调整文档目录时同步更新 `docs/README.md` 索引。
 - 文档内容必须与真实代码一致，仅记录实际存在的源码路径、符号名、表名、设置键和命令，不写推测或过时内容。
 
+## Git 分支规范
+
+- **`main` 分支仅限合并或 PR**：`main` 为受保护发布分支，**严禁在 `main` 分支上直接开发、直接 `git commit` 或直接推送普通开发提交**，仅允许通过 GitHub Pull Request 或从 `dev` 分支合并进入。
+- **日常在 `dev` 分支开发**：所有新功能开发与缺陷修复均在 `dev` 分支（或从 `dev` 切出的 `feat/*`、`fix/*` 分支）完成，验证通过后合入 `dev`，再由 `dev` 向 `main` 发起 PR 或合并，合并后自动触发 GitHub Actions 编译与发版。
+- **启用本地分支保护钩子**：仓库在 `.githooks/` 下提供 `pre-commit` 与 `pre-push` 拦截脚本，克隆或初始化工作区后确保执行：
+  ```bash
+  git config core.hooksPath .githooks
+  ```
+
 ## Git 提交规范
 
 - 开发一个功能提交一次：每完成一个独立功能（或一次独立修复）并验证构建与测试通过、同步更新相关文档后，立即执行一次独立的 `git commit`，避免将多个不相关的功能改动混在同一次提交中。

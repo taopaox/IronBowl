@@ -2,16 +2,33 @@ import AppKit
 import IronBowlKit
 import SwiftUI
 
+/// 插件设置页。注意不能再套 TabView：设置窗口本身就是 TabView，嵌套后 macOS 会把子页摊到窗口工具栏上。
 struct LogSettingsView: View {
     let model: LogModel
     let scheduler: LogReminderScheduler
+    @State private var page: Page = .zentao
+
+    enum Page: String, CaseIterable, Identifiable {
+        case zentao = "禅道", repos = "仓库与映射", generate = "生成", reminder = "提醒"
+        var id: String { rawValue }
+    }
 
     var body: some View {
-        TabView {
-            ZentaoAccountSettings(model: model).tabItem { Label("禅道", systemImage: "person.badge.key") }
-            RepoSettings(model: model).tabItem { Label("仓库与映射", systemImage: "folder") }
-            GenerateSettings(model: model).tabItem { Label("生成", systemImage: "sparkles") }
-            ReminderSettings(model: model, scheduler: scheduler).tabItem { Label("提醒", systemImage: "bell") }
+        VStack(spacing: 0) {
+            Picker("", selection: $page) {
+                ForEach(Page.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .padding(.top, 12)
+
+            switch page {
+            case .zentao: ZentaoAccountSettings(model: model)
+            case .repos: RepoSettings(model: model)
+            case .generate: GenerateSettings(model: model)
+            case .reminder: ReminderSettings(model: model, scheduler: scheduler)
+            }
         }
     }
 }

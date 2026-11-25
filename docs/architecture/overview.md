@@ -94,7 +94,8 @@ flowchart LR
 3. `FeishuPlugin`（`feishu`）
 4. `AIWebPlugin`（`aiweb`）
 5. `SchedulerPlugin`（`scheduler`）
-6. `ReportPlugin`（`report`）
-7. `ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist")`
+6. `ReportPlugin`（`report`，周报）
+7. `MonthlyReportPlugin`（`report.monthly`，月报）
+8. `ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist")`
 
 当应用版本升级引入新插件 ID 时，`AppModel` 会比对 `app.knownPlugins` 与 `app.enabledPlugins`，自动将新增插件加入已启用列表，避免老用户升级后看不到新插件。

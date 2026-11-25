@@ -2,15 +2,15 @@ import Foundation
 import IronBowlKit
 import SwiftUI
 
-/// 周报月报插件：查询本周或本月每日日报并生成周报、月报。
+/// 周报插件：查询本周每日日报并生成周报。
 public final class ReportPlugin: IronBowlPlugin {
     public static let pluginID = "report"
     public static let settingsGenerateID = "report.generate"
 
     public let id = ReportPlugin.pluginID
-    public let title = "周报月报"
+    public let title = "周报"
     public let systemImage = "doc.text"
-    public var migrations: [DatabaseMigration] { ReportMigrations.all }
+    public var migrations: [DatabaseMigration] { [ReportMigrations.weekly] }
 
     var model: WeeklyReportModel?
     private var context: PluginContext?
@@ -19,7 +19,7 @@ public final class ReportPlugin: IronBowlPlugin {
 
     public func start(context: PluginContext) {
         self.context = context
-        self.model = WeeklyReportModel(context: context)
+        self.model = WeeklyReportModel(context: context, lockedPeriodKind: .weekly)
     }
 
     public func stop() {
@@ -35,8 +35,8 @@ public final class ReportPlugin: IronBowlPlugin {
     public var settingsPages: [SettingsPage] {
         guard let model else { return [] }
         return [
-            SettingsPage(id: Self.settingsGenerateID, title: "周报与月报", systemImage: "doc.text") {
-                AnyView(ReportSettingsView(model: model))
+            SettingsPage(id: Self.settingsGenerateID, title: "周报生成", systemImage: "doc.text") {
+                AnyView(ReportSettingsView(model: model, periodKind: .weekly))
             },
         ]
     }
@@ -48,13 +48,6 @@ public final class ReportPlugin: IronBowlPlugin {
                 model.context.openPlugin(Self.pluginID)
                 Task {
                     await model.goToCurrentWeek()
-                    await model.generate()
-                }
-            },
-            QuickAction(id: "report.monthly", title: "生成本月月报", systemImage: "calendar.badge.clock") {
-                model.context.openPlugin(Self.pluginID)
-                Task {
-                    await model.goToCurrentMonth()
                     await model.generate()
                 }
             },
@@ -79,9 +72,67 @@ public final class ReportPlugin: IronBowlPlugin {
                 },
                 action: {
                     model.context.openPlugin(Self.pluginID)
-                    Task { await model.switchPeriodKind(.weekly) }
                 }
             ),
+        ]
+    }
+}
+
+/// 月报插件：独立侧边栏菜单，查询本月每日日报并生成月报。
+public final class MonthlyReportPlugin: IronBowlPlugin {
+    public static let pluginID = "report.monthly"
+    public static let settingsGenerateID = "report.monthly.generate"
+
+    public let id = MonthlyReportPlugin.pluginID
+    public let title = "月报"
+    public let systemImage = "doc.richtext"
+    public var migrations: [DatabaseMigration] { [ReportMigrations.monthly] }
+
+    var model: WeeklyReportModel?
+    private var context: PluginContext?
+
+    public init() {}
+
+    public func start(context: PluginContext) {
+        self.context = context
+        self.model = WeeklyReportModel(context: context, lockedPeriodKind: .monthly)
+    }
+
+    public func stop() {
+        model = nil
+        context = nil
+    }
+
+    public func makeMainView() -> AnyView {
+        guard let model else { return AnyView(ProgressView()) }
+        return AnyView(ReportView(model: model))
+    }
+
+    public var settingsPages: [SettingsPage] {
+        guard let model else { return [] }
+        return [
+            SettingsPage(id: Self.settingsGenerateID, title: "月报生成", systemImage: "doc.richtext") {
+                AnyView(ReportSettingsView(model: model, periodKind: .monthly))
+            },
+        ]
+    }
+
+    public var quickActions: [QuickAction] {
+        guard let model else { return [] }
+        return [
+            QuickAction(id: "report.monthly", title: "生成本月月报", systemImage: "doc.richtext") {
+                model.context.openPlugin(Self.pluginID)
+                Task {
+                    await model.goToCurrentMonth()
+                    await model.generate()
+                }
+            },
+        ]
+    }
+
+    public var homeCards: [HomeCard] {
+        guard let model else { return [] }
+        return [
             HomeCard(
                 id: "report.monthly",
                 label: "本月月报",
@@ -97,7 +148,6 @@ public final class ReportPlugin: IronBowlPlugin {
                 },
                 action: {
                     model.context.openPlugin(Self.pluginID)
-                    Task { await model.switchPeriodKind(.monthly) }
                 }
             ),
         ]

@@ -73,6 +73,7 @@ final class AppModel {
             AIWebPlugin(),
             SchedulerPlugin(),
             ReportPlugin(),
+            MonthlyReportPlugin(),
             ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist"),
         ]
         self.plugins = plugins

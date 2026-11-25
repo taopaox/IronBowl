@@ -111,39 +111,40 @@ nonisolated struct MonthlyReportRecord: Sendable, Hashable, Codable, Identifiabl
 
 /// 周报/月报插件数据库迁移。
 enum ReportMigrations {
-    static let all: [DatabaseMigration] = [
-        DatabaseMigration("report.v1") { db in
-            try db.create(table: "weeklyReport") { t in
-                t.primaryKey("weekStart", .text)
-                t.column("weekEnd", .text).notNull()
-                t.column("title", .text).notNull()
-                t.column("content", .text).notNull()
-                t.column("extraNotes", .text).notNull().defaults(to: "")
-                t.column("style", .text).notNull()
-                t.column("providerName", .text).notNull().defaults(to: "")
-                t.column("totalHours", .double).notNull().defaults(to: 0)
-                t.column("generatedAt", .datetime).notNull()
-                t.column("updatedAt", .datetime).notNull()
-            }
-            try db.create(index: "idx_weeklyReport_updatedAt", on: "weeklyReport", columns: ["updatedAt"])
-        },
-        DatabaseMigration("report.v2") { db in
-            try db.create(table: "monthlyReport") { t in
-                t.primaryKey("monthKey", .text)
-                t.column("periodStart", .text).notNull()
-                t.column("periodEnd", .text).notNull()
-                t.column("title", .text).notNull()
-                t.column("content", .text).notNull()
-                t.column("extraNotes", .text).notNull().defaults(to: "")
-                t.column("style", .text).notNull()
-                t.column("providerName", .text).notNull().defaults(to: "")
-                t.column("totalHours", .double).notNull().defaults(to: 0)
-                t.column("generatedAt", .datetime).notNull()
-                t.column("updatedAt", .datetime).notNull()
-            }
-            try db.create(index: "idx_monthlyReport_updatedAt", on: "monthlyReport", columns: ["updatedAt"])
-        },
-    ]
+    static let weekly = DatabaseMigration("report.v1") { db in
+        try db.create(table: "weeklyReport") { t in
+            t.primaryKey("weekStart", .text)
+            t.column("weekEnd", .text).notNull()
+            t.column("title", .text).notNull()
+            t.column("content", .text).notNull()
+            t.column("extraNotes", .text).notNull().defaults(to: "")
+            t.column("style", .text).notNull()
+            t.column("providerName", .text).notNull().defaults(to: "")
+            t.column("totalHours", .double).notNull().defaults(to: 0)
+            t.column("generatedAt", .datetime).notNull()
+            t.column("updatedAt", .datetime).notNull()
+        }
+        try db.create(index: "idx_weeklyReport_updatedAt", on: "weeklyReport", columns: ["updatedAt"])
+    }
+
+    static let monthly = DatabaseMigration("report.v2") { db in
+        try db.create(table: "monthlyReport") { t in
+            t.primaryKey("monthKey", .text)
+            t.column("periodStart", .text).notNull()
+            t.column("periodEnd", .text).notNull()
+            t.column("title", .text).notNull()
+            t.column("content", .text).notNull()
+            t.column("extraNotes", .text).notNull().defaults(to: "")
+            t.column("style", .text).notNull()
+            t.column("providerName", .text).notNull().defaults(to: "")
+            t.column("totalHours", .double).notNull().defaults(to: 0)
+            t.column("generatedAt", .datetime).notNull()
+            t.column("updatedAt", .datetime).notNull()
+        }
+        try db.create(index: "idx_monthlyReport_updatedAt", on: "monthlyReport", columns: ["updatedAt"])
+    }
+
+    static let all: [DatabaseMigration] = [weekly, monthly]
 }
 
 /// 周报/月报数据库读写。

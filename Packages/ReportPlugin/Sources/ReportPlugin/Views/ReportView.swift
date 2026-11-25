@@ -83,7 +83,11 @@ struct ReportView: View {
     // MARK: - 顶栏
 
     private var headerBar: some View {
-        let totalHistoryCount = model.recentReports.count + model.recentMonthlyReports.count
+        let totalHistoryCount: Int = if let locked = model.lockedPeriodKind {
+            locked == .weekly ? model.recentReports.count : model.recentMonthlyReports.count
+        } else {
+            model.recentReports.count + model.recentMonthlyReports.count
+        }
         let periodLabel = model.periodKind == .weekly
             ? "第 \(model.week.weekOfYear) 周 · \(model.week.shortRangeText)"
             : model.month.title
@@ -92,15 +96,20 @@ struct ReportView: View {
         let generateTitle = model.hasReportContent ? "重新生成" : "生成\(model.periodKind.displayName)"
 
         return HStack(spacing: 12) {
-            DSTabs(
-                selection: Binding(
-                    get: { model.periodKind },
-                    set: { next in
-                        Task<Void, Never> { await model.switchPeriodKind(next) }
-                    }
-                ),
-                options: ReportPeriodKind.allCases.map { ($0, $0.displayName) }
-            )
+            if model.lockedPeriodKind != nil {
+                Text(model.periodKind.displayName)
+                    .font(DS.pageTitle)
+            } else {
+                DSTabs(
+                    selection: Binding(
+                        get: { model.periodKind },
+                        set: { next in
+                            Task<Void, Never> { await model.switchPeriodKind(next) }
+                        }
+                    ),
+                    options: ReportPeriodKind.allCases.map { ($0, $0.displayName) }
+                )
+            }
 
             HStack(spacing: 2) {
                 Button {
@@ -159,7 +168,7 @@ struct ReportView: View {
                 }
             }
             .buttonStyle(.dsGhost)
-            .help("查看历史周报与月报")
+            .help("查看历史\(model.lockedPeriodKind?.displayName ?? "周报与月报")")
             .popover(isPresented: $showHistory, arrowEdge: .bottom) {
                 ReportHistoryPopover(model: model, isPresented: $showHistory)
             }
@@ -1060,20 +1069,35 @@ private struct ReportHistoryPopover: View {
     @State private var tab: ReportPeriodKind = .weekly
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                DSTabs(selection: $tab, options: [
-                    (.weekly, "周报 (\(model.recentReports.count))"),
-                    (.monthly, "月报 (\(model.recentMonthlyReports.count))"),
-                ])
-                Spacer()
+        let activeTab = model.lockedPeriodKind ?? tab
+        return VStack(alignment: .leading, spacing: 0) {
+            if let locked = model.lockedPeriodKind {
+                let count = locked == .weekly ? model.recentReports.count : model.recentMonthlyReports.count
+                HStack {
+                    Text(locked == .weekly ? "历史周报" : "历史月报")
+                        .font(DS.font(14, .semibold))
+                    Spacer()
+                    Text("共 \(count) 份")
+                        .font(DS.caption)
+                        .foregroundStyle(DS.textTertiary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+            } else {
+                HStack(spacing: 8) {
+                    DSTabs(selection: $tab, options: [
+                        (.weekly, "周报 (\(model.recentReports.count))"),
+                        (.monthly, "月报 (\(model.recentMonthlyReports.count))"),
+                    ])
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
 
             Divider().overlay(DS.border)
 
-            if tab == .weekly {
+            if activeTab == .weekly {
                 weeklyList
             } else {
                 monthlyList

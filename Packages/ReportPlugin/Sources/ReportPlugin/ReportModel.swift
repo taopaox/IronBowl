@@ -10,6 +10,7 @@ final class WeeklyReportModel {
     let context: PluginContext
     let store: ReportStore
     let dailyLogService: ZentaoDailyLogService
+    let lockedPeriodKind: ReportPeriodKind?
 
     var periodKind: ReportPeriodKind
     var week: WeekRange
@@ -41,11 +42,12 @@ final class WeeklyReportModel {
     @ObservationIgnored private var autoSaveTask: Task<Void, Never>?
     @ObservationIgnored private var copiedResetTask: Task<Void, Never>?
 
-    init(context: PluginContext) {
+    init(context: PluginContext, lockedPeriodKind: ReportPeriodKind? = nil) {
         self.context = context
         self.store = ReportStore(db: context.database)
         self.dailyLogService = ZentaoDailyLogService(database: context.database, settings: context.settings)
-        self.periodKind = context.settings[ReportKeys.lastPeriodKind]
+        self.lockedPeriodKind = lockedPeriodKind
+        self.periodKind = lockedPeriodKind ?? context.settings[ReportKeys.lastPeriodKind]
         self.week = WeekRange.containing(Date())
         self.month = MonthRange.containing(Date())
         self.providerKind = context.providers.defaultKind
@@ -232,10 +234,13 @@ final class WeeklyReportModel {
     // MARK: - 周期切换与日报查询
 
     func switchPeriodKind(_ kind: ReportPeriodKind) async {
+        if let lockedPeriodKind, kind != lockedPeriodKind { return }
         guard kind != periodKind else { return }
         saveEditsIfNeeded()
         periodKind = kind
-        settings[ReportKeys.lastPeriodKind] = kind
+        if lockedPeriodKind == nil {
+            settings[ReportKeys.lastPeriodKind] = kind
+        }
         clearActiveFilter()
         syncedFromZentao = false
         remoteError = nil
@@ -253,7 +258,9 @@ final class WeeklyReportModel {
         }
         saveEditsIfNeeded()
         periodKind = .weekly
-        settings[ReportKeys.lastPeriodKind] = .weekly
+        if lockedPeriodKind == nil {
+            settings[ReportKeys.lastPeriodKind] = .weekly
+        }
         week = newWeek
         clearActiveFilter()
         syncedFromZentao = false
@@ -272,7 +279,9 @@ final class WeeklyReportModel {
         }
         saveEditsIfNeeded()
         periodKind = .monthly
-        settings[ReportKeys.lastPeriodKind] = .monthly
+        if lockedPeriodKind == nil {
+            settings[ReportKeys.lastPeriodKind] = .monthly
+        }
         month = newMonth
         clearActiveFilter()
         syncedFromZentao = false
@@ -338,8 +347,10 @@ final class WeeklyReportModel {
         rawItemsByDate = localMap
         rebuildDays(using: localMap, periodKind: periodKind, week: week, month: month)
         if periodKind == .monthly {
+            recentMonthlyReports = store.recentMonthlyReports()
             monthWeeklySummaries = store.weeklyReports(matchingWeekStarts: month.weeks.map(\.id))
         } else {
+            recentReports = store.recentReports()
             monthWeeklySummaries = []
         }
     }
@@ -368,7 +379,10 @@ final class WeeklyReportModel {
         remoteError = result.remoteError
         rebuildDays(using: result.itemsByDate, periodKind: targetKind, week: targetWeek, month: targetMonth)
         if targetKind == .monthly {
+            recentMonthlyReports = store.recentMonthlyReports()
             monthWeeklySummaries = store.weeklyReports(matchingWeekStarts: targetMonth.weeks.map(\.id))
+        } else {
+            recentReports = store.recentReports()
         }
     }
 

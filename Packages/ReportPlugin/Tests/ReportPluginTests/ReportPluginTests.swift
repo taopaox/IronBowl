@@ -496,3 +496,49 @@ import Testing
     #expect(model.hasReportContent)
     #expect(model.reportContent.contains("月初需求设计"))
 }
+
+@MainActor @Test func weeklyAndMonthlyPluginsHaveDistinctIDsMigrationsAndLockedModes() async throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "report-dual-plugins-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let weeklyPlugin = ReportPlugin()
+    let monthlyPlugin = MonthlyReportPlugin()
+
+    #expect(weeklyPlugin.id == "report")
+    #expect(monthlyPlugin.id == "report.monthly")
+    #expect(weeklyPlugin.title == "周报")
+    #expect(monthlyPlugin.title == "月报")
+
+    let combinedMigrations = weeklyPlugin.migrations + monthlyPlugin.migrations
+    #expect(Set(combinedMigrations.map(\.identifier)).count == 2)
+
+    let db = try AppDatabase(url: url, migrations: ZentaoLogPlugin().migrations + combinedMigrations)
+    let settings = SettingsStore(database: db)
+    let context = PluginContext(
+        database: db,
+        settings: settings,
+        reminders: ReminderCenter(),
+        workCalendar: WorkCalendar(database: db, settings: settings),
+        providers: AIProviderStore(settings: settings),
+        openPlugin: { _ in },
+        openSettings: { _ in }
+    )
+
+    weeklyPlugin.start(context: context)
+    monthlyPlugin.start(context: context)
+    defer {
+        weeklyPlugin.stop()
+        monthlyPlugin.stop()
+    }
+
+    #expect(weeklyPlugin.model?.lockedPeriodKind == .weekly)
+    #expect(weeklyPlugin.model?.periodKind == .weekly)
+    #expect(monthlyPlugin.model?.lockedPeriodKind == .monthly)
+    #expect(monthlyPlugin.model?.periodKind == .monthly)
+
+    // 锁定模式下不会相互切换周期
+    await weeklyPlugin.model?.switchPeriodKind(.monthly)
+    await monthlyPlugin.model?.switchPeriodKind(.weekly)
+    #expect(weeklyPlugin.model?.periodKind == .weekly)
+    #expect(monthlyPlugin.model?.periodKind == .monthly)
+}

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ReportSettingsView: View {
     let model: WeeklyReportModel
+    var periodKind: ReportPeriodKind = .weekly
 
     var body: some View {
         let s = model.settings
@@ -23,39 +24,41 @@ struct ReportSettingsView: View {
             }
         }
 
-        DSSection(
-            "周报生成提示词",
-            footer: "占位符：{{weekRange}} 周次与日期区间，{{totalHours}} 本周工时汇总，{{styleInstruction}} 风格要求，{{dailyLogs}} 本周每日日报，{{extraNotes}} 补充说明。"
-        ) {
-            DSBlockRow {
-                TextEditor(text: s.binding(ReportKeys.prompt))
-                    .font(DS.mono(13.5))
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 220)
-            }
-            DSRow("恢复默认周报提示词") {
-                Button("恢复默认") {
-                    s[ReportKeys.prompt] = WeeklyReportGenerator.defaultPrompt
+        if periodKind == .weekly {
+            DSSection(
+                "周报生成提示词",
+                footer: "占位符：{{weekRange}} 周次与日期区间，{{totalHours}} 本周工时汇总，{{styleInstruction}} 风格要求，{{dailyLogs}} 本周每日日报，{{extraNotes}} 补充说明。"
+            ) {
+                DSBlockRow {
+                    TextEditor(text: s.binding(ReportKeys.prompt))
+                        .font(DS.mono(13.5))
+                        .scrollContentBackground(.hidden)
+                        .frame(minHeight: 240)
                 }
-                .buttonStyle(.dsSecondary)
-            }
-        }
-
-        DSSection(
-            "月报生成提示词",
-            footer: "占位符：{{monthRange}} 月份与日期区间，{{totalHours}} 本月工时汇总，{{styleInstruction}} 风格要求，{{dailyLogs}} 本月每日日报，{{weeklyReports}} 本月已有周报参考，{{extraNotes}} 补充说明。"
-        ) {
-            DSBlockRow {
-                TextEditor(text: s.binding(ReportKeys.monthlyPrompt))
-                    .font(DS.mono(13.5))
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 220)
-            }
-            DSRow("恢复默认月报提示词") {
-                Button("恢复默认") {
-                    s[ReportKeys.monthlyPrompt] = WeeklyReportGenerator.defaultMonthlyPrompt
+                DSRow("恢复默认周报提示词") {
+                    Button("恢复默认") {
+                        s[ReportKeys.prompt] = WeeklyReportGenerator.defaultPrompt
+                    }
+                    .buttonStyle(.dsSecondary)
                 }
-                .buttonStyle(.dsSecondary)
+            }
+        } else {
+            DSSection(
+                "月报生成提示词",
+                footer: "占位符：{{monthRange}} 月份与日期区间，{{totalHours}} 本月工时汇总，{{styleInstruction}} 风格要求，{{dailyLogs}} 本月每日日报，{{weeklyReports}} 本月已有周报参考，{{extraNotes}} 补充说明。"
+            ) {
+                DSBlockRow {
+                    TextEditor(text: s.binding(ReportKeys.monthlyPrompt))
+                        .font(DS.mono(13.5))
+                        .scrollContentBackground(.hidden)
+                        .frame(minHeight: 240)
+                }
+                DSRow("恢复默认月报提示词") {
+                    Button("恢复默认") {
+                        s[ReportKeys.monthlyPrompt] = WeeklyReportGenerator.defaultMonthlyPrompt
+                    }
+                    .buttonStyle(.dsSecondary)
+                }
             }
         }
     }

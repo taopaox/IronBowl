@@ -1,19 +1,19 @@
-# 周报月报插件（`ReportPlugin`）
+# 周报与月报插件（`ReportPlugin` & `MonthlyReportPlugin`）
 
-`ReportPlugin`（`Packages/ReportPlugin`）负责按周（周一至周日）或按月（自然月 1 日至月末）汇总每日工作日报，并生成结构化周报与月报，支持复用禅道远端工时、本地已提交记录、未提交草稿与本月已有周报，提供 AI 智能提炼与本地规则兜底汇总。
+`Packages/ReportPlugin` 同时提供两个独立侧边栏插件——**周报**（`ReportPlugin`，ID：`report`）与 **月报**（`MonthlyReportPlugin`，ID：`report.monthly`），复用同一套日报查询与生成底座，分别按周（周一至周日）或按自然月（1 日至月末）汇总每日工作日报并生成结构化报告，支持复用禅道远端工时、本地已提交记录、未提交草稿与本月已有周报，提供 AI 智能提炼与本地规则兜底汇总。
 
 ## 模块组成
 
 | 文件 | 核心符号 | 职责 |
 | :--- | :--- | :--- |
-| `ReportPlugin.swift` | `ReportPlugin` | 插件入口（ID：`report`，标题「周报月报」）、首页快捷操作「生成本周周报 / 生成本月月报」、首页概览卡片「本周周报 / 本月月报」与设置页入口 |
-| `ReportModel.swift` | `WeeklyReportModel` | `@Observable` 业务状态：周/月模式切换、上下周与上下月切换、调用 `ZentaoDailyLogService` 查区间日报、生成/编辑/自动保存、历史列表、复制与导出 Markdown |
+| `ReportPlugin.swift` | `ReportPlugin`, `MonthlyReportPlugin` | 两个独立侧边栏插件入口：周报（ID：`report`，锁定 `.weekly`）与月报（ID：`report.monthly`，锁定 `.monthly`），各自提供对应设置页、首页快捷操作与概览卡片 |
+| `ReportModel.swift` | `WeeklyReportModel` | `@Observable` 业务状态：支持 `lockedPeriodKind` 锁定周/月模式、上下周与上下月切换、调用 `ZentaoDailyLogService` 查区间日报、生成/编辑/自动保存、历史列表、复制与导出 Markdown |
 | `Model/WeekRange.swift` | `WeekRange` | 按中国工作周（周一至周日）与 ISO 周历计算起止日期、周次标题、上下周偏移及「本周 / 上周」标签 |
 | `Model/MonthRange.swift` | `MonthRange`, `MonthWeekSlice` | 按自然月（1 日至月末）计算起止日期、周分片（`weeks`）、上下月偏移及「本月 / 上月」标签 |
-| `Store/ReportStore.swift` | `ReportPeriodKind`, `WeeklyReportStyle`, `ReportKeys`, `WeeklyReportRecord`, `MonthlyReportRecord`, `ReportMigrations`, `ReportStore` | 设置键、数据库迁移 `report.v1`（`weeklyReport`）与 `report.v2`（`monthlyReport`）及读写操作 |
+| `Store/ReportStore.swift` | `ReportPeriodKind`, `WeeklyReportStyle`, `ReportKeys`, `WeeklyReportRecord`, `MonthlyReportRecord`, `ReportMigrations`, `ReportStore` | 设置键、拆分迁移 `ReportMigrations.weekly`（`report.v1` / `weeklyReport`）与 `ReportMigrations.monthly`（`report.v2` / `monthlyReport`）及读写操作 |
 | `Generator/WeeklyReportGenerator.swift` | `DailyReportDay`, `WeeklyReportInput`, `MonthlyReportInput`, `WeeklyReportOutput`, `WeeklyReportGenerator` | 周报/月报提示词模板渲染、只读 JSON Schema AI 生成与 3 种风格的规则兜底汇总 |
-| `Views/ReportView.swift` | `ReportView` | 响应式双栏周报月报工作区：顶栏支持「周报 / 月报」模式与历史切换，左栏展示周期汇总、7 天/按周分片筛选条与每日日报明细，右栏常驻展示补充说明与文档纸张式预览/编辑区 |
-| `Views/ReportSettingsView.swift` | `ReportSettingsView` | 设置页「周报月报 → 周报与月报」：默认风格、草稿/工时开关与周报/月报自定义提示词编辑 |
+| `Views/ReportView.swift` | `ReportView` | 响应式双栏工作区：顶栏在独立菜单中固定展示「周报」或「月报」与对应历史弹层，左栏展示周期汇总、7 天/按周分片筛选条与每日日报明细，右栏常驻展示补充说明与文档纸张式预览/编辑区 |
+| `Views/ReportSettingsView.swift` | `ReportSettingsView` | 按 `periodKind` 分别呈现「周报 → 周报生成」与「月报 → 月报生成」设置页：默认风格、草稿/工时开关与对应提示词编辑 |
 
 ## 周期日报查询机制
 
@@ -42,7 +42,7 @@
   - `weeklyReport`（迁移 `report.v1`，主键 `weekStart` `yyyy-MM-dd`）
   - `monthlyReport`（迁移 `report.v2`，主键 `monthKey` `yyyy-MM`）
 - **设置键**：
-  - `report.lastPeriodKind`（默认 `.weekly`）
+  - `report.lastPeriodKind`（默认 `.weekly`，用于未锁定模式）
   - `report.style`（默认 `.standard`）
   - `report.includeDrafts`（默认 `true`）
   - `report.includeHours`（默认 `true`）

@@ -407,14 +407,15 @@ struct ReportView: View {
                 }
                 TextEditor(text: $model.extraNotes)
                     .font(DS.body)
+                    .lineSpacing(4)
                     .scrollContentBackground(.hidden)
                     .focused($extraNotesFocused)
-                    .frame(minHeight: DS.s(68), maxHeight: DS.s(124))
+                    .frame(minHeight: DS.s(120), maxHeight: DS.s(220))
                     .onChange(of: model.extraNotes) {
                         model.scheduleAutoSave()
                     }
             }
-            .padding(8)
+            .padding(10)
             .background(DS.well.opacity(0.55), in: .rect(cornerRadius: DS.controlRadius))
         }
         .padding(14)

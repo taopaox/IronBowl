@@ -982,60 +982,8 @@ private struct DailyReportItemRow: View {
 private struct MarkdownReportPreview: View {
     let markdown: String
 
-    private enum Block: Identifiable {
-        case heading(id: Int, level: Int, text: String)
-        case bullet(id: Int, marker: String, text: String)
-        case paragraph(id: Int, text: String)
-
-        var id: Int {
-            switch self {
-            case .heading(let id, _, _), .bullet(let id, _, _), .paragraph(let id, _): id
-            }
-        }
-    }
-
-    private var blocks: [Block] {
-        let lines = markdown.components(separatedBy: .newlines)
-        var out: [Block] = []
-        var paragraphBuffer: [String] = []
-
-        func flushParagraph() {
-            let joined = paragraphBuffer.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !joined.isEmpty {
-                out.append(.paragraph(id: out.count, text: joined))
-            }
-            paragraphBuffer.removeAll()
-        }
-
-        for rawLine in lines {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty {
-                flushParagraph()
-                continue
-            }
-            if line.hasPrefix("### ") {
-                flushParagraph()
-                out.append(.heading(id: out.count, level: 3, text: String(line.dropFirst(4))))
-            } else if line.hasPrefix("## ") {
-                flushParagraph()
-                out.append(.heading(id: out.count, level: 2, text: String(line.dropFirst(3))))
-            } else if line.hasPrefix("# ") {
-                flushParagraph()
-                out.append(.heading(id: out.count, level: 1, text: String(line.dropFirst(2))))
-            } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
-                flushParagraph()
-                out.append(.bullet(id: out.count, marker: "•", text: String(line.dropFirst(2))))
-            } else if let dotRange = line.range(of: #"^\d+\.\s+"#, options: .regularExpression) {
-                flushParagraph()
-                let num = line[..<dotRange.upperBound].trimmingCharacters(in: .whitespaces)
-                let content = String(line[dotRange.upperBound...])
-                out.append(.bullet(id: out.count, marker: num, text: content))
-            } else {
-                paragraphBuffer.append(line)
-            }
-        }
-        flushParagraph()
-        return out
+    private var blocks: [ReportMarkdownBlock] {
+        ReportMarkdown.parseBlocks(markdown)
     }
 
     var body: some View {
@@ -1060,7 +1008,7 @@ private struct MarkdownReportPreview: View {
                             .foregroundStyle(DS.text)
                             .padding(.top, level == 1 ? 4 : 6)
                     }
-                case .bullet(_, let marker, let text):
+                case .bullet(_, let indentLevel, let marker, let text):
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(marker)
                             .font(DS.body.monospacedDigit())
@@ -1072,7 +1020,31 @@ private struct MarkdownReportPreview: View {
                             .lineSpacing(5)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.leading, 4)
+                    .padding(.leading, CGFloat(4 + indentLevel * 18))
+                case .blockquote(_, let text):
+                    HStack(alignment: .top, spacing: 10) {
+                        RoundedRectangle(cornerRadius: 1.5)
+                            .fill(DS.borderStrong)
+                            .frame(width: 3)
+                        Text(inlineMarkdown(text))
+                            .font(DS.body)
+                            .foregroundStyle(DS.textSecondary)
+                            .lineSpacing(5)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 2)
+                case .codeBlock(_, let code):
+                    Text(code)
+                        .font(DS.mono(12.5))
+                        .foregroundStyle(DS.text)
+                        .lineSpacing(4)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(DS.well, in: .rect(cornerRadius: DS.controlRadius))
+                case .divider:
+                    Divider()
+                        .overlay(DS.border)
+                        .padding(.vertical, 4)
                 case .paragraph(_, let text):
                     Text(inlineMarkdown(text))
                         .font(DS.body)
@@ -1087,7 +1059,7 @@ private struct MarkdownReportPreview: View {
     }
 
     private func inlineMarkdown(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+        ReportMarkdown.attributedInline(text)
     }
 }
 

@@ -10,6 +10,7 @@
 | `ReportModel.swift` | `WeeklyReportModel` | `@Observable` 业务状态：支持 `lockedPeriodKind` 锁定周/月模式、上下周与上下月切换、调用 `ZentaoDailyLogService` 查区间日报、生成/编辑/自动保存、历史列表、复制/导出 Markdown 与 Tita 状态查询/草稿保存/提交 |
 | `Model/WeekRange.swift` | `WeekRange` | 按中国工作周（周一至周日）与 ISO 周历计算起止日期、周次标题、上下周偏移及「本周 / 上周」标签 |
 | `Model/MonthRange.swift` | `MonthRange`, `MonthWeekSlice` | 按自然月（1 日至月末）计算起止日期、周分片（`weeks`）、上下月偏移及「本月 / 上月」标签 |
+| `Model/ReportMarkdown.swift` | `ReportMarkdownBlock`, `ReportMarkdown` | 面向中文标点相邻 `**加粗**` 与多级嵌套列表的轻量 Markdown 块级/行内解析器 |
 | `Store/ReportStore.swift` | `ReportPeriodKind`, `WeeklyReportStyle`, `ReportKeys`, `WeeklyReportRecord`, `MonthlyReportRecord`, `ReportMigrations`, `ReportStore` | 设置键（含 Tita 配置）、拆分迁移 `ReportMigrations.weekly`（`report.v1` / `weeklyReport`）与 `ReportMigrations.monthly`（`report.v2` / `monthlyReport`）及读写操作 |
 | `Generator/WeeklyReportGenerator.swift` | `DailyReportDay`, `WeeklyReportInput`, `MonthlyReportInput`, `WeeklyReportOutput`, `WeeklyReportGenerator` | 周报/月报提示词模板渲染、只读 JSON Schema AI 生成与 4 种风格的规则兜底汇总（含 `tita` 模板风格） |
 | `Tita/TitaModels.swift` | `TitaSummaryType`, `TitaSubmitState`, `TitaMood`, `TitaAccountInfo`, `TitaPeriodStatus`, `TitaTemplateSummary`, `TitaReportDetail`, `TitaEditableModule`, `TitaSearchFeedItem`, `TitaHistorySyncResult`, `TitaError` | Tita 周报（`26`）/月报（`27`）接口数据模型、历史列表模型与状态枚举 |

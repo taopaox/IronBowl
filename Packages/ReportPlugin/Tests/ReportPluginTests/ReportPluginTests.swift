@@ -889,6 +889,73 @@ import Testing
     #expect(wrappedMd.contains("事项 | 已完成"))
 }
 
+@Test func reportMarkdownRendersCJKPunctuationBoldAndNestedLists() {
+    // 1. 中文标点紧邻汉字时的加粗（CommonMark 原生解析会失败，自定义解析器应正确去掉 ** 并加粗）
+    let sample = "**考试系统与教学内容管理：完成相关功能开发。**完成考试系统 AI 防作弊功能开发，并测试**（重点）**功能。"
+    let attr = ReportMarkdown.attributedInline(sample)
+    let plain = String(attr.characters)
+    #expect(!plain.contains("**"))
+    #expect(plain == "考试系统与教学内容管理：完成相关功能开发。完成考试系统 AI 防作弊功能开发，并测试（重点）功能。")
+
+    let boldRuns = attr.runs.filter { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true }
+    #expect(boldRuns.count == 2)
+    #expect(String(attr[boldRuns[0].range].characters) == "考试系统与教学内容管理：完成相关功能开发。")
+    #expect(String(attr[boldRuns[1].range].characters) == "（重点）")
+
+    // 2. 行内代码、链接、删除线、斜体与孤立星号安全兜底
+    let mixed = "完成 `API` 联调，详见[文档](https://example.com)，以及 ~~旧逻辑~~ 和 *补充*（注意 2 * 3）。"
+    let mixedAttr = ReportMarkdown.attributedInline(mixed)
+    let mixedPlain = String(mixedAttr.characters)
+    #expect(mixedPlain == "完成 API 联调，详见文档，以及 旧逻辑 和 补充（注意 2 * 3）。")
+    #expect(mixedAttr.runs.contains { $0.inlinePresentationIntent?.contains(.code) == true && String(mixedAttr[$0.range].characters) == "API" })
+    #expect(mixedAttr.runs.contains { $0.link?.absoluteString == "https://example.com" && String(mixedAttr[$0.range].characters) == "文档" })
+    #expect(mixedAttr.runs.contains { $0.strikethroughStyle == .single && String(mixedAttr[$0.range].characters) == "旧逻辑" })
+    #expect(mixedAttr.runs.contains { $0.inlinePresentationIntent?.contains(.emphasized) == true && String(mixedAttr[$0.range].characters) == "补充" })
+
+    // 3. 嵌套列表缩进与块级元素
+    let md = """
+    ## 工作总结
+
+    1. 一级编号
+      - 二级要点
+        - 三级要点
+    > 引用说明
+    ---
+    ```swift
+    let x = 1
+    ```
+    """
+    let blocks = ReportMarkdown.parseBlocks(md)
+    #expect(blocks.count == 7)
+    if case .bullet(_, let indent1, let marker1, _) = blocks[1] {
+        #expect(indent1 == 0)
+        #expect(marker1 == "1.")
+    } else {
+        Issue.record("Expected level-1 ordered bullet")
+    }
+    if case .bullet(_, let indent2, _, _) = blocks[2] {
+        #expect(indent2 == 1)
+    } else {
+        Issue.record("Expected level-2 bullet")
+    }
+    if case .bullet(_, let indent3, _, _) = blocks[3] {
+        #expect(indent3 == 2)
+    } else {
+        Issue.record("Expected level-3 bullet")
+    }
+    if case .blockquote(_, let quote) = blocks[4] {
+        #expect(quote == "引用说明")
+    } else {
+        Issue.record("Expected blockquote")
+    }
+    #expect(blocks[5] == .divider(id: 5))
+    if case .codeBlock(_, let code) = blocks[6] {
+        #expect(code == "let x = 1")
+    } else {
+        Issue.record("Expected codeBlock")
+    }
+}
+
 @MainActor @Test func titaHistorySyncMergesAndProtectsLocalEdits() throws {
     let url = FileManager.default.temporaryDirectory.appending(path: "tita-history-sync-\(UUID().uuidString).sqlite")
     defer { try? FileManager.default.removeItem(at: url) }

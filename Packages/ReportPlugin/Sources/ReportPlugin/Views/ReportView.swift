@@ -8,7 +8,7 @@ struct ReportView: View {
     @State private var previewMode: PreviewMode = .preview
     @State private var confirmClear = false
     @State private var showTitaSubmit = false
-    @State private var notesExpanded = false
+    @State private var notesExpanded = true
     @State private var titaStampToken = 0
 
     enum PreviewMode: Hashable {
@@ -245,10 +245,7 @@ struct ReportView: View {
             JournalMonthWeekStrip(model: model, palette: p)
         }
 
-        // 4. 淡黄和纸便利贴（补充说明）
-        JournalExtraNotesSticky(model: model, palette: p, expanded: $notesExpanded)
-
-        // 5. 每日手账摘录
+        // 4. 每日手账摘录
         HStack(spacing: 6) {
             Text("每日摘录")
                 .font(DS.font(12.5, .bold))
@@ -411,6 +408,8 @@ struct ReportView: View {
         statusBanners
 
         reportStatusBanner(palette: p)
+
+        JournalExtraNotesSticky(model: model, palette: p, expanded: $notesExpanded)
 
         if model.hasReportContent || previewMode == .edit {
             if previewMode == .preview {
@@ -821,28 +820,35 @@ private struct JournalExtraNotesSticky: View {
 
     var body: some View {
         let trimmed = model.extraNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hint = model.periodKind == .weekly
+            ? "非代码事项、会议评审、风险或下周计划，生成时自动融入"
+            : "里程碑成果、跨团队协作、风险或下月计划，生成时自动融入"
         let placeholder = model.periodKind == .weekly
-            ? "非代码事项、会议评审、风险或下周计划，生成时自动融入…"
-            : "里程碑成果、跨团队协作、风险或下月计划，生成时自动融入…"
+            ? "例如：周三参加产品评审并确定二期排期；下周重点联调导出与权限模块…"
+            : "例如：本月完成核心模块上线并牵头跨团队联调；下月重点推进性能优化与新版本规划…"
 
         JournalStickyNote(palette: palette) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
                     Button {
                         withAnimation(.snappy(duration: 0.18)) {
                             expanded.toggle()
                         }
                     } label: {
-                        HStack(spacing: 5) {
+                        HStack(spacing: 6) {
                             Image(systemName: "pin.fill")
-                                .font(DS.font(11))
+                                .font(DS.font(12))
                                 .foregroundStyle(palette.stampAmber)
                             Text("补充说明便利贴")
-                                .font(DS.font(12.5, .bold))
+                                .font(DS.font(13.5, .bold))
                                 .foregroundStyle(palette.ink)
+                            Text(hint)
+                                .font(DS.font(11.5))
+                                .foregroundStyle(palette.inkTertiary)
+                                .lineLimit(1)
                             Spacer(minLength: 4)
-                            Text(expanded ? "收起" : "编辑")
-                                .font(DS.font(11))
+                            Text(expanded ? "收起" : "展开")
+                                .font(DS.font(11.5, .medium))
                                 .foregroundStyle(palette.inkSecondary)
                         }
                         .contentShape(.rect)
@@ -855,25 +861,38 @@ private struct JournalExtraNotesSticky: View {
                             model.scheduleAutoSave()
                         }
                         .buttonStyle(.plain)
-                        .font(DS.font(11))
+                        .font(DS.font(11.5, .medium))
                         .foregroundStyle(palette.stampRed)
                     }
                 }
 
                 if expanded {
-                    TextEditor(text: $model.extraNotes)
-                        .font(DS.font(12.5))
-                        .lineSpacing(4)
-                        .scrollContentBackground(.hidden)
-                        .frame(minHeight: 84, maxHeight: 150)
-                        .padding(6)
-                        .background(palette.paper.opacity(0.55), in: .rect(cornerRadius: 6))
-                        .onChange(of: model.extraNotes) {
-                            model.scheduleAutoSave()
+                    ZStack(alignment: .topLeading) {
+                        if model.extraNotes.isEmpty {
+                            Text(placeholder)
+                                .font(DS.body)
+                                .foregroundStyle(palette.inkTertiary)
+                                .padding(.top, 2)
+                                .padding(.leading, 5)
+                                .allowsHitTesting(false)
                         }
+                        TextEditor(text: $model.extraNotes)
+                            .font(DS.body)
+                            .lineSpacing(5)
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: DS.s(130), maxHeight: DS.s(220))
+                            .onChange(of: model.extraNotes) {
+                                model.scheduleAutoSave()
+                            }
+                    }
+                    .padding(10)
+                    .background(palette.paper.opacity(0.65), in: .rect(cornerRadius: 8))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8).strokeBorder(palette.stickyBorder)
+                    }
                 } else {
                     Text(trimmed.isEmpty ? placeholder : trimmed)
-                        .font(DS.font(12))
+                        .font(DS.font(12.5))
                         .foregroundStyle(trimmed.isEmpty ? palette.inkTertiary : palette.inkSecondary)
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)

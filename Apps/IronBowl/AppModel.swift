@@ -155,6 +155,7 @@ final class AppModel {
         clock?.tolerance = 5
         Task {
             await providers.autodetectMissingPaths()
+            await providers.loadAllModels()
             await workCalendar.updateIfNeeded()
             await workCalendar.syncAttendanceIfNeeded()
         }

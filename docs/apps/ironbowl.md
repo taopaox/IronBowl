@@ -9,7 +9,7 @@
 | `IronBowlApp.swift` | `IronBowlApp`, `AppDelegate` | 声明主窗口、`设置` 窗口、主菜单栏及独立万年历菜单栏 Scene；关闭主窗口时不退出应用 |
 | `AppModel.swift` | `AppModel`, `AppKeys`, `DockMode` | 持有共享服务（DB/Settings/WorkCalendar/AI/Chat/Web/Reminders/SystemMonitor）、管理插件启停、Dock 策略与开机自启 |
 | `MainView.swift` | `MainView`, `Sidebar`, `ResourceCard`, `ResourceDetailPopover`, `TodayCard` | 可收起左侧栏 + 右侧内容区，展示版本号徽标、未分组插件与目录子项、插件分组（如「汇报」包含日报、周报、月报）、固定网页、系统/饭碗 CPU 与内存占用卡片（含逐进程明细弹层）及下班倒计时 |
-| `HomeView.swift` | `HomeView` | 首页「今天」T3 Code 风格工作台：顶栏（目录与读写/只读权限切换、详略选择器、插入卡片）、欢迎卡片网格（含一键对话生成日报/周报/月报快捷胶囊）与底部多模式输入器（优先路由工作台插件业务指令，未命中走 AI 对话，或切到「记日志」） |
+| `HomeView.swift` | `HomeView` | 首页「今天」T3 Code 风格工作台：顶栏（目录与读写/只读权限切换、详略选择器、插入卡片）、欢迎卡片网格（含一键对话生成日报/周报/月报快捷胶囊）与底部多模式输入器（支持双选择 AI 提供商与模型、按对话记忆模型，或切到「记日志」） |
 | `HomeChatSidebar.swift` | `HomeChatSidebar` | 「今天」页内可折叠多对话列表栏（搜索、置顶、按天分组、运行状态、重命名、Finder 打开目录、删除） |
 | `HomeChatTimeline.swift` | `HomeChatTimeline` | 对话时间线、基于 `DSMarkdownView` 的完整 Markdown 渲染、实时功能卡片与失败重试 |
 | `HomeChatActivityView.swift` | `HomeChatActivityView` | 可折叠命令/工具/思考/文件改动输出详情、退出码与原始 JSONL 事件查看器 |

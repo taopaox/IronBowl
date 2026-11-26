@@ -152,5 +152,10 @@ public nonisolated final class AppDatabase: Sendable {
                 t.column("updatedAt", .datetime).notNull()
             }
         },
+        DatabaseMigration("core.v6") { db in
+            try db.alter(table: "chatThread") { t in
+                t.add(column: "model", .text).notNull().defaults(to: "")
+            }
+        },
     ]
 }

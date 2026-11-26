@@ -429,11 +429,11 @@ struct ProviderSettings: View {
 struct ProviderEditor: View {
     let store: AIProviderStore
     let config: AIProviderConfig
-    @State private var models: [(id: String, name: String)] = []
     @State private var testing = false
     @State private var testResult: String?
 
     var body: some View {
+        let models = store.models(for: config.kind)
         DSSection(config.kind.displayName, footer: config.kind == .codex ? "Codex 需要先在终端运行一次 codex login 登录。" : nil) {
             DSRow("程序路径", description: "留空会用登录 shell 自动查找。") {
                 HStack(spacing: 6) {
@@ -447,15 +447,13 @@ struct ProviderEditor: View {
             DSRow("模型", description: "留空用 CLI 自己的默认模型。") {
                 HStack(spacing: 6) {
                     TextField("", text: bind(\.model), prompt: Text("默认")).textFieldStyle(.ds).frame(width: 220)
-                    if config.kind == .agy {
-                        DSPicker(
-                            selection: bind(\.model),
-                            options: [DSPickerOption("", title: "默认", subtitle: "使用 CLI 默认模型。")] + models.map {
-                                DSPickerOption($0.id, title: $0.name, subtitle: $0.id == $0.name ? nil : $0.id)
-                            }
-                        )
-                            .task { if models.isEmpty { models = await AIRunner.listModels(config: config) } }
-                    }
+                    DSPicker(
+                        selection: bind(\.model),
+                        options: [DSPickerOption("", title: "默认", subtitle: "使用 CLI 默认模型。")] + models.map {
+                            DSPickerOption($0.id, title: $0.name, subtitle: $0.detail ?? ($0.id == $0.name ? nil : $0.id))
+                        }
+                    )
+                    .task { await store.loadModels(for: config.kind) }
                 }
             }
             DSRow("思考深度") {

@@ -29,8 +29,9 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `core.v2` | `scheduledTaskRun` | `id` (自增 INT) | `taskID` (索引), `taskName`, `actionID`, `trigger`, `status`, `startedAt` (索引), `finishedAt`, `summary`, `detail` | 定时任务历史执行记录 |
 | `core.v3` | `attendanceClockIn` | `date` (TEXT, `yyyy-MM-dd`) | `clockIn` (DATETIME), `source` (TEXT，目前为 `dingtalk`), `fetchedAt` (DATETIME) | 每天的上班打卡时间，供 `WorkCalendar` 按弹性规则折算下班时间 |
 | `core.v4` | `dailyOvertime` | `date` (TEXT, `yyyy-MM-dd`) | `hours` (DOUBLE), `updatedAt` (DATETIME) | 按天记录的计划加班小时数，供 `WorkCalendar` 顺延实际下班时间与 `ZentaoLogPlugin` 统计目标工时（建表时自动迁入既有 `zentaoDailyOvertime` 数据） |
-| `core.v5` | `chatThread` | `id` (TEXT) | `title`, `providerKind`, `workspacePath`, `permissionMode`, `remoteSessionID`, `isPinned`, `createdAt`, `updatedAt`（索引） | 首页「今天」多对话工作台的对话线程、绑定工作目录与 CLI 会话 ID |
+| `core.v5` | `chatThread` | `id` (TEXT) | `title`, `providerKind`, `model`（`core.v6` 新增）, `workspacePath`, `permissionMode`, `remoteSessionID`, `isPinned`, `createdAt`, `updatedAt`（索引） | 首页「今天」多对话工作台的对话线程、绑定工作目录、模型选择与 CLI 会话 ID |
 | `core.v5` | `chatMessage` | `id` (TEXT) | `threadID`（外键级联删除+索引）, `role`, `content`, `status`, `providerKind`, `modelName`, `durationSeconds`, `usageJSON`, `activitiesJSON`, `rawEventsJSON`, `cardsJSON`, `errorMessage`, `createdAt`（索引）, `updatedAt` | 对话消息正文、命令/工具执行明细、原始 JSONL 事件与插入的功能卡片快照 |
+| `core.v6` | `chatThread` | `id` (TEXT) | 新增列 `model` (TEXT, NOT NULL, DEFAULT `''`) | 按对话持久化各自选用的模型 ID |
 
 ### 禅道日志插件迁移（`LogMigrations`）
 
@@ -83,7 +84,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `WorkCalendar` | `holiday.source` / `holiday.frequency` | `.holidayCNjsDelivr` / `.yearly` | 节假日数据源与更新频率 |
 | `WorkCalendar` | `holiday.lastFetch` | `nil` | 上次成功拉取节假日的时间 |
 | `AIProviderStore` | `ai.providers` / `ai.default` | `[agy, codex]` / `.agy` | AI CLI 配置与默认提供者 |
-| `ChatKeys` | `chat.defaultWorkspace` / `chat.detailLevel` / `chat.sidebarCollapsed` / `chat.lastThreadID` | `""` / `.all` / `false` / `nil` | 首页对话默认工作目录、输出详略级别、对话栏折叠与上次选中对话 ID |
+| `ChatKeys` | `chat.defaultWorkspace` / `chat.detailLevel` / `chat.sidebarCollapsed` / `chat.lastThreadID` / `chat.lastModelByProvider` | `""` / `.all` / `false` / `nil` / `[:]` | 首页对话默认工作目录、输出详略级别、对话栏折叠、上次选中对话 ID 及各提供商记忆模型 |
 | `WebKeys` | `web.tombstone.enabled` | `true` | 是否开启后台网页墓碑休眠 |
 | `WebKeys` | `web.tombstone.idleMinutes` | `15` | 后台闲置休眠分钟数（0 表示不按时长） |
 | `WebKeys` | `web.tombstone.maxLiveCount` | `4` | 最多同时保活网页数（0 表示不限） |

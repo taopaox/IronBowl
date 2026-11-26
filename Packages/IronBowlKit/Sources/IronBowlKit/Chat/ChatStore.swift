@@ -51,6 +51,21 @@ public final class ChatStore {
         }
     }
 
+    public func preferredModel(for kind: AIProviderKind) -> String {
+        settings[ChatKeys.lastModelByProvider][kind.rawValue] ?? ""
+    }
+
+    public func setPreferredModel(_ model: String, for kind: AIProviderKind) {
+        var map = settings[ChatKeys.lastModelByProvider]
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            map.removeValue(forKey: kind.rawValue)
+        } else {
+            map[kind.rawValue] = trimmed
+        }
+        settings[ChatKeys.lastModelByProvider] = map
+    }
+
     public var selectedThread: ChatThread? {
         guard let selectedThreadID else { return nil }
         return threads.first { $0.id == selectedThreadID }
@@ -119,15 +134,19 @@ public final class ChatStore {
     public func createThread(
         title: String = "新对话",
         providerKind: AIProviderKind? = nil,
+        model: String? = nil,
         workspacePath: String? = nil,
         permissionMode: ChatPermissionMode = .agent
     ) -> ChatThread {
         let now = Date()
+        let resolvedProvider = providerKind ?? providers.defaultKind
+        let resolvedModel = model ?? preferredModel(for: resolvedProvider)
         let resolvedWorkspace = (workspacePath?.isEmpty == false) ? workspacePath! : defaultWorkspacePath
         defaultWorkspacePath = resolvedWorkspace
         let thread = ChatThread(
             title: title,
-            providerKind: providerKind ?? providers.defaultKind,
+            providerKind: resolvedProvider,
+            model: resolvedModel,
             workspacePath: resolvedWorkspace,
             permissionMode: permissionMode,
             remoteSessionID: nil,
@@ -169,16 +188,33 @@ public final class ChatStore {
     public func updateThread(
         _ id: String,
         providerKind: AIProviderKind? = nil,
+        model: String? = nil,
         workspacePath: String? = nil,
         permissionMode: ChatPermissionMode? = nil
     ) {
         guard let idx = threads.firstIndex(where: { $0.id == id }) else { return }
         var changed = false
+        var switchedProvider = false
         if let providerKind, threads[idx].providerKind != providerKind {
             threads[idx].providerKind = providerKind
             // 切换底层 CLI 提供者后清空远端 session ID，下一轮自动带最近上下文续聊。
             threads[idx].remoteSessionID = nil
+            switchedProvider = true
             changed = true
+        }
+        if let model {
+            let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+            if threads[idx].model != trimmed {
+                threads[idx].model = trimmed
+                changed = true
+            }
+            setPreferredModel(trimmed, for: threads[idx].providerKind)
+        } else if switchedProvider {
+            let nextModel = preferredModel(for: threads[idx].providerKind)
+            if threads[idx].model != nextModel {
+                threads[idx].model = nextModel
+                changed = true
+            }
         }
         if let workspacePath, !workspacePath.isEmpty, threads[idx].workspacePath != workspacePath {
             threads[idx].workspacePath = workspacePath
@@ -271,6 +307,7 @@ public final class ChatStore {
         _ rawText: String,
         attachedCards: [ChatCardAttachment] = [],
         providerKind: AIProviderKind,
+        model: String = "",
         workspacePath: String,
         permissionMode: ChatPermissionMode,
         in explicitThreadID: String? = nil,
@@ -282,6 +319,7 @@ public final class ChatStore {
         let thread = resolveOrCreateThread(
             titleSeed: text,
             providerKind: providerKind,
+            model: model,
             workspacePath: workspacePath,
             permissionMode: permissionMode,
             in: explicitThreadID
@@ -334,6 +372,7 @@ public final class ChatStore {
         _ rawText: String,
         attachedCards: [ChatCardAttachment] = [],
         providerKind: AIProviderKind,
+        model: String = "",
         workspacePath: String,
         permissionMode: ChatPermissionMode,
         in explicitThreadID: String? = nil
@@ -344,6 +383,7 @@ public final class ChatStore {
         let thread = resolveOrCreateThread(
             titleSeed: text,
             providerKind: providerKind,
+            model: model,
             workspacePath: workspacePath,
             permissionMode: permissionMode,
             in: explicitThreadID
@@ -368,14 +408,19 @@ public final class ChatStore {
         )
         appendMessage(userMessage, to: thread.id)
 
-        let config = providers.config(providerKind)
+        var config = providers.config(providerKind)
+        if !thread.model.isEmpty {
+            config.model = thread.model
+        }
+        let resolvedModelLabel = providers.modelDisplayName(id: config.model, for: providerKind)
+            ?? (config.model.isEmpty ? nil : config.model)
         let assistantMessage = ChatMessage(
             threadID: thread.id,
             role: .assistant,
             content: "",
             status: .streaming,
             providerKind: providerKind,
-            modelName: config.model.isEmpty ? nil : config.model
+            modelName: resolvedModelLabel
         )
         appendMessage(assistantMessage, to: thread.id)
 
@@ -462,6 +507,7 @@ public final class ChatStore {
             userMsg.content,
             attachedCards: userMsg.cards,
             providerKind: thread.providerKind,
+            model: thread.model,
             workspacePath: thread.workspacePath,
             permissionMode: thread.permissionMode,
             in: threadID
@@ -635,6 +681,7 @@ public final class ChatStore {
     private func resolveOrCreateThread(
         titleSeed: String,
         providerKind: AIProviderKind,
+        model: String,
         workspacePath: String,
         permissionMode: ChatPermissionMode,
         in explicitThreadID: String?
@@ -642,8 +689,8 @@ public final class ChatStore {
         if let tid = explicitThreadID ?? selectedThreadID,
            let existing = threads.first(where: { $0.id == tid }) {
             var thread = existing
-            if thread.providerKind != providerKind || thread.workspacePath != workspacePath || thread.permissionMode != permissionMode {
-                updateThread(tid, providerKind: providerKind, workspacePath: workspacePath, permissionMode: permissionMode)
+            if thread.providerKind != providerKind || thread.model != model || thread.workspacePath != workspacePath || thread.permissionMode != permissionMode {
+                updateThread(tid, providerKind: providerKind, model: model, workspacePath: workspacePath, permissionMode: permissionMode)
                 thread = threads.first(where: { $0.id == tid }) ?? thread
             }
             if (messagesByThread[thread.id] ?? []).isEmpty || thread.title == "新对话" {
@@ -655,6 +702,7 @@ public final class ChatStore {
         return createThread(
             title: Self.makeTitle(from: titleSeed),
             providerKind: providerKind,
+            model: model,
             workspacePath: workspacePath,
             permissionMode: permissionMode
         )
@@ -823,6 +871,7 @@ private nonisolated struct ChatThreadRow: Codable, FetchableRecord, PersistableR
     var id: String
     var title: String
     var providerKind: String
+    var model: String
     var workspacePath: String
     var permissionMode: String
     var remoteSessionID: String?
@@ -834,6 +883,7 @@ private nonisolated struct ChatThreadRow: Codable, FetchableRecord, PersistableR
         id = thread.id
         title = thread.title
         providerKind = thread.providerKind.rawValue
+        model = thread.model
         workspacePath = thread.workspacePath
         permissionMode = thread.permissionMode.rawValue
         remoteSessionID = thread.remoteSessionID
@@ -847,6 +897,7 @@ private nonisolated struct ChatThreadRow: Codable, FetchableRecord, PersistableR
             id: id,
             title: title,
             providerKind: AIProviderKind(rawValue: providerKind) ?? .agy,
+            model: model,
             workspacePath: workspacePath,
             permissionMode: ChatPermissionMode(rawValue: permissionMode) ?? .agent,
             remoteSessionID: remoteSessionID,

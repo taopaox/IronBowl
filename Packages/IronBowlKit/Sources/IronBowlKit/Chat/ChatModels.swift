@@ -350,6 +350,7 @@ public nonisolated struct ChatThread: Codable, Sendable, Identifiable, Equatable
     public var id: String
     public var title: String
     public var providerKind: AIProviderKind
+    public var model: String
     public var workspacePath: String
     public var permissionMode: ChatPermissionMode
     public var remoteSessionID: String?
@@ -361,6 +362,7 @@ public nonisolated struct ChatThread: Codable, Sendable, Identifiable, Equatable
         id: String = UUID().uuidString,
         title: String,
         providerKind: AIProviderKind,
+        model: String = "",
         workspacePath: String,
         permissionMode: ChatPermissionMode = .agent,
         remoteSessionID: String? = nil,
@@ -371,6 +373,7 @@ public nonisolated struct ChatThread: Codable, Sendable, Identifiable, Equatable
         self.id = id
         self.title = title
         self.providerKind = providerKind
+        self.model = model
         self.workspacePath = workspacePath
         self.permissionMode = permissionMode
         self.remoteSessionID = remoteSessionID
@@ -412,4 +415,5 @@ public nonisolated enum ChatKeys {
     public static let detailLevel = SettingKey<ChatOutputDetailLevel>("chat.detailLevel", default: .all)
     public static let sidebarCollapsed = SettingKey<Bool>("chat.sidebarCollapsed", default: false)
     public static let lastThreadID = SettingKey<String?>("chat.lastThreadID", default: nil)
+    public static let lastModelByProvider = SettingKey<[String: String]>("chat.lastModelByProvider", default: [:])
 }

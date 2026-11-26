@@ -31,6 +31,7 @@ struct HomeView: View {
     @State private var pendingCards: [ChatCardAttachment] = []
     @State private var draftWorkspacePath = ""
     @State private var draftPermissionMode: ChatPermissionMode = .agent
+    @State private var draftModel = ""
     @State private var sendingQuickLog = false
     @State private var showTopCardPicker = false
     @State private var showComposerCardPicker = false
@@ -60,6 +61,43 @@ struct HomeView: View {
 
     private var activeProviderKind: AIProviderKind {
         activeThread?.providerKind ?? app.providers.defaultKind
+    }
+
+    private var activeModel: String {
+        activeThread?.model ?? draftModel
+    }
+
+    private var modelPickerOptions: [DSPickerOption<String>] {
+        let configuredDefault = app.providers.config(activeProviderKind).model
+        let defaultName = configuredDefault.isEmpty
+            ? "默认模型"
+            : (app.providers.modelDisplayName(id: configuredDefault, for: activeProviderKind) ?? configuredDefault)
+        let defaultTitle = configuredDefault.isEmpty ? "默认模型" : "默认（\(defaultName)）"
+        let defaultSubtitle = configuredDefault.isEmpty
+            ? "使用 \(activeProviderKind.shortName) CLI 默认模型。"
+            : "当前默认配置为：\(configuredDefault)"
+
+        var options: [DSPickerOption<String>] = [
+            DSPickerOption("", title: defaultTitle, subtitle: defaultSubtitle, triggerTitle: defaultName),
+        ]
+        let known = app.providers.models(for: activeProviderKind)
+        for item in known {
+            options.append(DSPickerOption(
+                item.id,
+                title: item.name,
+                subtitle: item.detail ?? (item.id == item.name ? nil : item.id),
+                triggerTitle: item.name
+            ))
+        }
+        if !activeModel.isEmpty, !known.contains(where: { $0.id == activeModel }) {
+            options.append(DSPickerOption(
+                activeModel,
+                title: activeModel,
+                subtitle: "当前对话已选模型",
+                triggerTitle: activeModel
+            ))
+        }
+        return options
     }
 
     private var isCurrentRunning: Bool {
@@ -108,6 +146,12 @@ struct HomeView: View {
             if draftWorkspacePath.isEmpty {
                 draftWorkspacePath = app.chat.defaultWorkspacePath
             }
+            if draftModel.isEmpty {
+                draftModel = app.chat.preferredModel(for: app.providers.defaultKind)
+            }
+        }
+        .task(id: activeProviderKind) {
+            await app.providers.loadModels(for: activeProviderKind)
         }
         .sheet(isPresented: $renamingCurrentThread) {
             if let thread = activeThread {
@@ -477,9 +521,31 @@ struct HomeView: View {
                                 set: { setProviderKind($0) }
                             ),
                             options: AIProviderKind.allCases.map {
-                                DSPickerOption($0, title: $0.displayName, subtitle: $0.detail)
+                                DSPickerOption($0, title: $0.displayName, subtitle: $0.detail, triggerTitle: $0.shortName)
                             }
                         )
+
+                        DSPicker(
+                            selection: Binding(
+                                get: { activeModel },
+                                set: { setModel($0) }
+                            ),
+                            options: modelPickerOptions
+                        )
+                        .help("切换当前对话使用的模型")
+
+                        Button {
+                            Task { await app.providers.loadModels(for: activeProviderKind, force: true) }
+                        } label: {
+                            if app.providers.loadingModels.contains(activeProviderKind) {
+                                ProgressView().controlSize(.mini).frame(width: 14, height: 14)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(DS.font(11.5))
+                            }
+                        }
+                        .buttonStyle(.dsGhost)
+                        .help("刷新 \(activeProviderKind.shortName) 可用模型列表")
                     } else {
                         Text("将调用禅道日志插件解析并添加到今天草稿")
                             .font(DS.caption)
@@ -553,6 +619,7 @@ struct HomeView: View {
         app.chat.startNewDraft()
         inputMode = .chat
         pendingCards = []
+        draftModel = app.chat.preferredModel(for: app.providers.defaultKind)
         focused = true
     }
 
@@ -583,8 +650,21 @@ struct HomeView: View {
 
     private func setProviderKind(_ kind: AIProviderKind) {
         app.providers.defaultKind = kind
+        let rememberedModel = app.chat.preferredModel(for: kind)
         if let threadID = activeThread?.id {
-            app.chat.updateThread(threadID, providerKind: kind)
+            app.chat.updateThread(threadID, providerKind: kind, model: rememberedModel)
+        } else {
+            draftModel = rememberedModel
+        }
+        Task { await app.providers.loadModels(for: kind) }
+    }
+
+    private func setModel(_ model: String) {
+        app.chat.setPreferredModel(model, for: activeProviderKind)
+        if let threadID = activeThread?.id {
+            app.chat.updateThread(threadID, model: model)
+        } else {
+            draftModel = model
         }
     }
 
@@ -635,6 +715,7 @@ struct HomeView: View {
                     text,
                     attachedCards: cardsToAttach,
                     providerKind: activeProviderKind,
+                    model: activeModel,
                     workspacePath: activeWorkspacePath,
                     permissionMode: activePermissionMode,
                     in: activeThread?.id
@@ -647,6 +728,7 @@ struct HomeView: View {
                     text,
                     attachedCards: cardsToAttach,
                     providerKind: activeProviderKind,
+                    model: activeModel,
                     workspacePath: activeWorkspacePath,
                     permissionMode: activePermissionMode,
                     in: activeThread?.id

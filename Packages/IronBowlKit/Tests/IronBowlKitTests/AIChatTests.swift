@@ -237,8 +237,27 @@ import Testing
     #expect(store.threads.first?.providerKind == .codex)
     #expect(store.threads.first?.remoteSessionID == nil)
 
-    store.deleteThread(thread.id)
-    #expect(store.threads.isEmpty)
+    // 对话级模型记忆与跨提供商切换隔离
+    store.updateThread(thread.id, model: "gpt-6.2-sol")
+    #expect(store.threads.first?.model == "gpt-6.2-sol")
+    #expect(store.preferredModel(for: .codex) == "gpt-6.2-sol")
+
+    // 重新打开数据库后确认 model 字段持久化
+    let reloadedStore = ChatStore(database: db, settings: settings, providers: providers)
+    #expect(reloadedStore.threads.first?.model == "gpt-6.2-sol")
+
+    reloadedStore.updateThread(thread.id, providerKind: .agy)
+    #expect(reloadedStore.threads.first?.providerKind == .agy)
+    #expect(reloadedStore.threads.first?.model == "")
+
+    reloadedStore.updateThread(thread.id, model: "gemini-4-neon-high")
+    #expect(reloadedStore.preferredModel(for: .agy) == "gemini-4-neon-high")
+
+    reloadedStore.updateThread(thread.id, providerKind: .codex)
+    #expect(reloadedStore.threads.first?.model == "gpt-6.2-sol")
+
+    reloadedStore.deleteThread(thread.id)
+    #expect(reloadedStore.threads.isEmpty)
     let remainingMessages = try db.pool.read { rdb in
         try Int.fetchOne(rdb, sql: "SELECT COUNT(*) FROM chatMessage WHERE threadID = ?", arguments: [thread.id])
     }

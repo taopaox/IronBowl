@@ -17,7 +17,9 @@
 2. **命令行参数策略（`AIChatRunner.buildArguments`）**：
    - **`agy`**：使用 `-p <prompt> --output-format stream-json`，续聊时追加 `--resume <conversation_id>`；`ChatPermissionMode.agent` 传 `--dangerously-skip-permissions`，`.readOnly` 传 `--sandbox`。
    - **`codex`**：首次会话使用 `exec --skip-git-repo-check -s <workspace-write|read-only> -c approval_policy="never" --json -C <workspacePath>`；续聊使用 `exec resume --skip-git-repo-check --json -c sandbox_mode="..." -c approval_policy="never" <thread_id> <prompt>`（工作目录通过子进程 `cwd` 传入）。
-3. **上下文兜底**：若用户中途切换 `providerKind`（`ChatStore.updateThread` 会清空 `remoteSessionID`）或尚无远端会话 ID，`ChatStore.composePrompt` 会自动拼接最近最多 6 条历史消息及随条附加的功能卡片信息。
+3. **上下文兜底与对话级模型**：
+   - 若用户中途切换 `providerKind`（`ChatStore.updateThread` 会清空 `remoteSessionID` 并切到新提供者的记忆模型 `chat.lastModelByProvider`）或尚无远端会话 ID，`ChatStore.composePrompt` 会自动拼接最近最多 6 条历史消息及随条附加的功能卡片信息。
+   - 每个对话线程（`ChatThread.model`）独立记录所用模型 ID；为空时自动回退到设置页配置的默认模型或 CLI 自身默认模型。
 
 ## 输出详情与详略模式
 

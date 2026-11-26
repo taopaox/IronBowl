@@ -239,6 +239,16 @@ public final class WorkCalendar {
         return Calendar.current.isDate(end, inSameDayAs: date) ? hhmm : "次日 \(hhmm)"
     }
 
+    /// 某天的上班时间文字：当天有打卡记录时显示实际打卡时间（HH:mm），否则显示配置的固定上班时间（work.start）。
+    public func onWorkTimeText(on date: Date = Date()) -> String {
+        if let clockIn = clockIn(on: date) {
+            let f = DateFormatter()
+            f.dateFormat = "HH:mm"
+            return f.string(from: clockIn)
+        }
+        return settings[Self.startKey]
+    }
+
     /// 某天按弹性规则折算后的上班时刻（下班倒计时进度条的起点）。
     public func workStart(on date: Date = Date()) -> Date? {
         time(settings[Self.startKey], on: date).map { $0.addingTimeInterval(flexOffset(on: date)) }

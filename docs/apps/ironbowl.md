@@ -26,5 +26,5 @@
   - 两个状态栏 `MenuBarExtra(.window)` 面板均挂载了 `.menuBarPopoverDismissable()`：在 `MenuPanel` 点击「今天」、各插件入口、「设置」或「退出饭碗」，以及在万年历弹层点击离开弹层的操作后，会立即收起弹出面板。
 - **主窗口关闭清理**：`AppModel.mainWindow(isOpen: false)` 会调用 `webSessions.detachAllDisplays()`，将可见网页标记为后台以允许按墓碑策略回收内存。
 - **侧栏资源监控**：左下角 `ResourceCard` 位于「今天上班」卡片上方，展示 CPU 与内存占用，支持在「系统」（整机）与「饭碗」（自身主进程、子进程及活跃 `WKWebView` 渲染进程）间切换；切至「饭碗」时会在卡内直接展示 Top 3 占用项，点击可打开 `ResourceDetailPopover` 查看逐进程内存/CPU 明细、按内存或 CPU 排序，并一键休眠后台网页释放内存；采样仅在侧栏可见时通过 `.task` 定时执行（收起或关窗自动停止）。
-- **侧栏下班倒计时卡片（`TodayCard`）**：依据 `WorkCalendar.effectiveWorkEnd(on:)` 与 `offWorkTimeText(on:)` 展示实际下班时间、倒计时与进度条；设置当日加班后，标题切换为紫色「加班 +Xh」、下班时间同步顺延，进度条亦切为紫色；休息日设置加班时显示「加班 +Xh」与「辛苦加班」。
+- **侧栏下班倒计时卡片（`TodayCard`）**：依据 `WorkCalendar.onWorkTimeText(on:)`、`offWorkTimeText(on:)` 与 `effectiveWorkEnd(on:)` 展示今日上班时间（有打卡时显示实际打卡时间，否则显示配置上班时间）、实际下班时间以及 `距下班 X小时Y分` 剩余时长与进度条；有打卡记录时右上角显示「已打卡」，设置当日加班后右上角切换为紫色「加班 +Xh」、下班时间同步顺延，进度条亦切为紫色；休息日设置加班时显示「加班 +Xh」与「辛苦加班」。
 - **版本展示**：通过 `IronBowlKit` 的 `AppVersionInfo` 与 `Bundle` 扩展（`displayVersion` / `fullVersion`）在侧栏顶部「饭碗」旁、菜单栏面板顶部、设置窗口左侧栏底部以及「通用 → 关于」卡片中展示当前版本号（支持一键复制）。

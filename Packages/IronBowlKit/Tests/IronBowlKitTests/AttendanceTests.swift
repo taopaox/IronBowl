@@ -68,21 +68,41 @@ private func time(_ day: String, _ hhmm: String, second: Int = 0) -> Date {
     let day = time("2026-11-25", "12:00")
 
     #expect(cal.workEnd(on: day) == time("2026-11-25", "17:30"))
+    #expect(cal.onWorkTimeText(on: day) == "08:30")
     #expect(cal.scheduleText(on: day) == "08:30–17:30")
 
     cal.setClockIn(time("2026-11-25", "08:12", second: 40), on: day)
     #expect(cal.workEnd(on: day) == time("2026-11-25", "17:12"))
     #expect(cal.workStart(on: day) == time("2026-11-25", "08:12"))
+    #expect(cal.onWorkTimeText(on: day) == "08:12")
     #expect(cal.scheduleText(on: day) == "打卡 08:12 · 17:12 下班")
+
+    // 打卡早于弹性下限时，onWorkTimeText 仍展示实际打卡时间。
+    cal.setClockIn(time("2026-11-25", "07:45"), on: day)
+    #expect(cal.onWorkTimeText(on: day) == "07:45")
+    #expect(cal.workEnd(on: day) == time("2026-11-25", "17:00"))
 
     // 重新打开数据库后仍然生效。
     let reopened = WorkCalendar(database: db, settings: settings)
-    #expect(reopened.workEnd(on: day) == time("2026-11-25", "17:12"))
+    #expect(reopened.workEnd(on: day) == time("2026-11-25", "17:00"))
+    #expect(reopened.onWorkTimeText(on: day) == "07:45")
     // 别的日期不受影响。
     #expect(reopened.workEnd(on: time("2026-11-26", "12:00")) == time("2026-11-26", "17:30"))
+    #expect(reopened.onWorkTimeText(on: time("2026-11-26", "12:00")) == "08:30")
 
     cal.setClockIn(nil, on: day)
     #expect(cal.workEnd(on: day) == time("2026-11-25", "17:30"))
+    #expect(cal.onWorkTimeText(on: day) == "08:30")
+}
+
+@Test func remainingTimeTextFormatsHumanReadableDurations() {
+    let base = time("2026-11-26", "09:00")
+    #expect(remainingTimeText(to: time("2026-11-26", "17:25"), from: base) == "8小时25分")
+    #expect(remainingTimeText(to: time("2026-11-26", "11:00"), from: base) == "2小时")
+    #expect(remainingTimeText(to: time("2026-11-26", "09:23"), from: base) == "23分钟")
+    #expect(remainingTimeText(to: time("2026-11-26", "09:00", second: 30), from: base) == "不到1分钟")
+    #expect(remainingTimeText(to: base, from: base) == "0分钟")
+    #expect(remainingTimeText(to: time("2026-11-26", "08:50"), from: base) == "0分钟")
 }
 
 // MARK: 容错

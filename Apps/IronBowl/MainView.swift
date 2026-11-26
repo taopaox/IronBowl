@@ -846,7 +846,7 @@ private struct ResourceMeterRow: View {
     }
 }
 
-/// 侧栏底部的小卡：今日工时 + 下班倒计时。
+/// 侧栏底部的小卡：今日上班时间、下班时间与下班倒计时。
 private struct TodayCard: View {
     let app: AppModel
 
@@ -857,49 +857,89 @@ private struct TodayCard: View {
         let info = cal.dayInfo(now)
         let ot = cal.overtimeHours(on: now)
         let end = cal.effectiveWorkEnd(on: now)
-        VStack(alignment: .leading, spacing: 4) {
+        let hasClockIn = cal.clockIn(on: now) != nil
+
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
                 if info.isWorkday {
-                    Text(ot > 0 ? "加班 +\(WorkCalendar.hoursText(ot))h" : "今天上班")
-                        .font(DS.font(12.5))
-                        .foregroundStyle(ot > 0 ? .purple : DS.textSecondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    if let endText = cal.offWorkTimeText(on: now) {
-                        Text("\(endText) 下班")
-                            .font(DS.font(11.5).monospacedDigit())
-                            .foregroundStyle(ot > 0 ? .purple : DS.textTertiary)
-                            .lineLimit(1)
-                    }
-                } else {
-                    Text(info.name ?? "今天休息")
-                        .font(DS.font(12.5))
+                    Text("今天上班")
+                        .font(DS.font(12))
                         .foregroundStyle(DS.textSecondary)
                         .lineLimit(1)
                     Spacer(minLength: 4)
                     if ot > 0 {
                         Text("加班 +\(WorkCalendar.hoursText(ot))h")
-                            .font(DS.font(11.5).monospacedDigit())
+                            .font(DS.font(11.5, .medium).monospacedDigit())
+                            .foregroundStyle(.purple)
+                            .lineLimit(1)
+                    } else if hasClockIn {
+                        Text("已打卡")
+                            .font(DS.font(11))
+                            .foregroundStyle(DS.success)
+                            .lineLimit(1)
+                    }
+                } else {
+                    Text(info.name ?? "今天休息")
+                        .font(DS.font(12))
+                        .foregroundStyle(DS.textSecondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if ot > 0 {
+                        Text("加班 +\(WorkCalendar.hoursText(ot))h")
+                            .font(DS.font(11.5, .medium).monospacedDigit())
                             .foregroundStyle(.purple)
                             .lineLimit(1)
                     }
                 }
             }
-            if info.isWorkday, let end, end > now {
-                Text("距下班 \(countdown(to: end, from: now))").font(DS.font(15, .semibold)).monospacedDigit()
-                ProgressView(value: workProgress(end: end, now: now))
-                    .progressViewStyle(.linear)
-                    .tint(ot > 0 ? .purple : DS.brand)
-            } else if !info.isWorkday && ot > 0 {
+
+            if info.isWorkday {
+                if let end, end > now {
+                    Text("距下班 \(remainingTimeText(to: end, from: now))")
+                        .font(DS.font(15, .semibold))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    let progress = min(1, max(0, workProgress(end: end, now: now)))
+                    GeometryReader { geo in
+                        let width = progress > 0 ? max(4, geo.size.width * progress) : 0
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(DS.well)
+                            if width > 0 {
+                                Capsule().fill(ot > 0 ? .purple : DS.brand).frame(width: width)
+                            }
+                        }
+                    }
+                    .frame(height: 4)
+                } else {
+                    Text("已下班，辛苦了")
+                        .font(DS.font(15, .semibold))
+                }
+
+                HStack(spacing: 4) {
+                    Text("上班 \(cal.onWorkTimeText(on: now))")
+                        .font(DS.font(11.5).monospacedDigit())
+                        .foregroundStyle(DS.textSecondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if let endText = cal.offWorkTimeText(on: now) {
+                        Text("下班 \(endText)")
+                            .font(DS.font(11.5).monospacedDigit())
+                            .foregroundStyle(ot > 0 ? .purple : DS.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+            } else if ot > 0 {
                 Text("辛苦加班").font(DS.font(15, .semibold))
             } else {
-                Text(info.isWorkday ? "已下班，辛苦了" : "好好休息").font(DS.font(15, .semibold))
+                Text("好好休息").font(DS.font(15, .semibold))
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DS.card, in: .rect(cornerRadius: 10))
         .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(DS.border) }
+        .help(info.isWorkday ? cal.scheduleText(on: now) : (info.name ?? "今天休息"))
     }
 
     func workProgress(end: Date, now: Date) -> Double {

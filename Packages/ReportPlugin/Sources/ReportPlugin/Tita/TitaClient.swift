@@ -52,7 +52,7 @@ private final class TitaRedirectDelegate: NSObject, URLSessionTaskDelegate, Send
 }
 
 /// 直连 Tita（`www.tita.net`）周报/月报 HTTP 客户端，基于用户浏览器或内置网页登录提取的 Cookie 鉴权。
-public nonisolated actor TitaClient {
+public actor TitaClient {
     private let baseURL: URL
     private let cookie: String
     private var tenantID: String

@@ -32,6 +32,7 @@ xcodebuild -project IronBowl.xcodeproj -scheme Calendar -configuration Debug -de
 
 - **`main` 分支仅限合并或 PR**：`main` 为受保护发布分支，**严禁在 `main` 分支上直接开发、直接 `git commit` 或直接推送普通开发提交**，仅允许通过 GitHub Pull Request 或从 `dev` 分支合并进入。
 - **日常在 `dev` 分支开发**：所有新功能开发与缺陷修复均在 `dev` 分支（或从 `dev` 切出的 `feat/*`、`fix/*` 分支）完成，验证通过后合入 `dev`，再由 `dev` 向 `main` 发起 PR 或合并，合并后自动触发 GitHub Actions 编译与发版。
+- **发版合入支持自提 PR 并直接合并**：当需要从 `dev` 合入 `main` 时，通过 `gh pr create --base main --head dev` 创建 PR 后可直接执行 `gh pr merge <PR号> --merge`（严禁加 `--delete-branch`，保留 `dev` 分支）自行同意并合并，无需等待人工手动审批；`main` 发版流水线完成后将 `origin/main` 的版本提交同步回 `dev`。
 - **启用本地分支保护钩子**：仓库在 `.githooks/` 下提供 `pre-commit` 与 `pre-push` 拦截脚本，克隆或初始化工作区后确保执行：
   ```bash
   git config core.hooksPath .githooks

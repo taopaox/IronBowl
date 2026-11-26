@@ -26,12 +26,13 @@
    - 右页右上角展示 `JournalStampBadge` 橡皮印章（待提交草稿 / 已入账 / 待填报），顶部配备 `JournalSpreadShell` 状态胶囊、右页贯通状态色带与 `JournalStatusBanner` 横幅（明显区分「今日未写」「草稿待交」「今日已写」与「休息日」），提供单一聚焦操作栏（`生成草稿`、`手写一条`、朱红主按钮 `盖章提交禅道`）；同时通过 `ZentaoLogPlugin.sidebarBadge` 在左侧栏显示「今日未写」或「草稿」角标；每条草稿与已入账记录支持通过 `JournalHighlight.toggle` 使用荧光笔标黄重点，并自动同步至周报/月报的每日摘录高亮显示。
    - 每日加班时长通过 `WorkCalendar.setOvertimeHours(_:on:)` 持久化到核心表 `dailyOvertime`（`core.v4`），选择或清除加班后会立即顺延或恢复左页工时刻度、侧栏 `TodayCard`、首页下班卡及菜单栏「离下班还有多久」的实际下班时间。
 2. **正常上班时间与加班工时分别生成独立日志**（`DraftGenerator.generate`）：
+   - 手动生成、对话卡片重新生成和定时任务共用同一规则。保留手写、一句话记录、手动摘录和编辑过的草稿，旧版草稿也保留。扣除这些条目的工时，并跳过已被保留条目引用的 Git 提交。生成期间若草稿有变动，本次结果作废，可再次生成。
    - 分别扣减当天已记录的正常工时与加班工时，得到独立的 `normalBudget` 和 `overtimeBudget`，且正常草稿与加班草稿分批构建，**同一任务在正常与加班时段不会合并成同一条**。
    - 当同时存在 `normalBudget > 0` 与 `overtimeBudget > 0` 时，仍按正常下班时刻 `WorkCalendar.workEnd(on:)` 拆分提交（`splitActivities`）：
      - 下班前后均有提交时，分别以「正常工作时段」与「加班时段」提交调用 AI，各自生成正常日志（`isOvertime = false`）与加班日志（`isOvertime = true`）。
      - 仅单侧有提交时，用全部有效提交生成正常工时日志，并基于主工作摘要合成一条独立的加班日志（`isOvertime = true`）。
    - 若正常工时已录满或休息日仅设置加班，则仅生成 `isOvertime = true` 的加班草稿。
-   - 全部待提交草稿按顺序通过 `recomputeLefts` 对同一任务逐条扣减剩余工时 `left`。
+   - 手动指定的任务剩余工时会沿用，其余待提交草稿按顺序通过 `recomputeLefts` 对同一任务逐条扣减剩余工时 `left`。
 
 ## 禅道接口适配（`ZentaoClient`）
 
@@ -60,7 +61,7 @@
 - **默认调度**：`仅工作日 17:00`（跟随 `WorkCalendar` 节假日与调休补班），错过策略为 `.runIfMissedToday`，可在「定时任务」侧边栏页面随时修改时间、周期、开关或手动试跑。
 - **防重复提交校验**：执行前先联网拉取禅道最新任务列表与当天远端已记工时，并与本地 `zentaoSubmission` 合并比对；若今日已有已提交工时则自动跳过并静默记录；若联网同步失败则直接中止并报错，避免误重复提交。
 - **可配边界参数**：
-  - `draftStrategy`（默认 `regenerate`）：支持「重新扫描并生成覆盖后提交」「直接提交已有草稿」「保留草稿并跳过」。
+  - `draftStrategy`（默认 `regenerate`）：支持「保留手写修改，重新生成后提交」「直接提交已有草稿」「保留草稿并跳过」。
   - `allowFallbackOnAIFailure`（默认 `true`）：AI 生成失败时允许使用提交信息拼接结果自动提交；关闭后仅保存草稿并通知人工确认。
   - `requireMappedTask`（默认 `false`）：开启后若存在未关联项目的仓库落到兜底任务，则暂停自动提交并提醒确认。
 - **无提交保护**：当日未扫描到任何 Git 提交时不会提交空日志，而是记录跳过并强制弹窗提醒用户前往日志页手动补写。

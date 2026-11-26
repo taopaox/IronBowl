@@ -621,3 +621,63 @@ import Testing
     let out2 = await DraftGenerator.generate(withoutOvertime, provider: nil)
     #expect(out2.entries.isEmpty)
 }
+
+@MainActor @Test func regenerationReservesManualAndLegacyDraftsAndSkipsTheirCommits() async throws {
+    let day = Date()
+    let meeting = DraftEntry(taskID: 10, hours: 1, left: 0, work: "需求评审", isManual: true)
+    // 缺少 allowsRegeneration 的 JSON 与旧版落盘格式相同。
+    let old = DraftEntry(taskID: 10, hours: 1.5, left: 0, work: "已校对的记录", commitHashes: ["old"])
+    let legacy = try JSONDecoder().decode(DraftEntry.self, from: JSONEncoder().encode(old))
+    let overtime = DraftEntry(taskID: 10, hours: 0.5, left: 3, work: "值班交接", isOvertime: true, isManual: true, manualLeft: 3)
+    let untouched = DraftEntry(taskID: 10, hours: 8, left: 0, work: "旧的自动摘要", allowsRegeneration: true)
+    let tasks = [ZentaoTask(id: 10, name: "联调", projectID: 1, projectName: "项目", status: "doing", left: 20, consumed: 0)]
+    var input = DraftInput(
+        date: WorkCalendar.dayString(day), isWorkday: true, offDayOvertime: true, defaultHours: 8,
+        activities: [RepoActivity(repoPath: "/repo", commits: [
+            GitCommit(hash: "old", date: day, subject: "已校对的工作", files: []),
+            GitCommit(hash: "new", date: day, subject: "新增导出功能", files: [])
+        ])],
+        mappings: [:], openTasks: tasks, lastTasks: [:], fallbackTaskID: 10,
+        recorded: [ZentaoEstimate(taskID: 10, date: WorkCalendar.dayString(day), consumed: 2, left: 20, work: "已提交", account: "a")],
+        diffs: [:], promptTemplate: "", overtimeHours: 1.5,
+        pendingDrafts: [meeting, legacy, overtime, untouched]
+    )
+    for _ in 0..<2 {
+        let result = await DraftGenerator.generate(input, provider: nil)
+        let pending = result.entries.filter { !$0.isRecorded }
+        #expect(Array(pending.prefix(3).map(\.id)) == [meeting.id, legacy.id, overtime.id])
+        let generated = pending.filter { $0.allowsRegeneration == true }
+        #expect(generated.map(\.hours) == [3.5, 1])
+        #expect(generated.flatMap(\.commitHashes) == ["new"])
+        #expect(pending[2].left == 3)
+        #expect(!pending.contains { $0.id == untouched.id })
+        input.pendingDrafts = pending
+    }
+    input.activities = []
+    let noGit = await DraftGenerator.generate(input, provider: nil)
+    #expect(noGit.entries.filter { !$0.isRecorded }.map(\.id) == [meeting.id, legacy.id, overtime.id])
+}
+
+@MainActor @Test func editingGeneratedDraftSurvivesPersistenceAndRegeneration() async throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "draft-edits-\(UUID()).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let db = try AppDatabase(url: url, migrations: LogMigrations.all)
+    let settings = SettingsStore(database: db)
+    let context = PluginContext(database: db, settings: settings, reminders: ReminderCenter(),
+                                workCalendar: WorkCalendar(database: db, settings: settings),
+                                providers: AIProviderStore(settings: settings), openPlugin: { _ in }, openSettings: { _ in })
+    let model = LogModel(context: context)
+    let draft = DraftEntry(taskID: 5, hours: 2, left: 4, work: "生成的摘要", allowsRegeneration: true)
+    model.drafts = [draft]
+    var edited = draft
+    edited.work = "人工校对"
+    edited.left = 1
+    model.updatePendingDraft(edited, forDateString: model.dateString)
+    let reloaded = LogModel(context: context)
+    // 空仓库也必须保留用户编辑，不需要连接禅道或 AI。
+    settings[LogKeys.gitRoot] = url.path
+    await reloaded.generate()
+    let retained = try #require(reloaded.pendingDrafts.first)
+    #expect(retained.id == draft.id && retained.work == edited.work)
+    #expect(retained.allowsRegeneration == false && retained.manualLeft == 1)
+}

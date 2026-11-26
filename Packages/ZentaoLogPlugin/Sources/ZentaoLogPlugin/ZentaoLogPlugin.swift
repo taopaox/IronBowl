@@ -62,7 +62,7 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
                     title: "已有未提交草稿时",
                     description: "触发时如果今天已经存在尚未提交的草稿，如何处理。",
                     kind: .choice([
-                        .init(value: AutoLogDraftStrategy.regenerate.rawValue, title: "重新扫描并生成覆盖后提交", subtitle: "拉取最新 Git 提交重新生成草稿并提交（推荐）。"),
+                        .init(value: AutoLogDraftStrategy.regenerate.rawValue, title: "保留手写修改，重新生成后提交", subtitle: "保留手写和改过的草稿，只给尚未摘录的提交分配剩余工时。"),
                         .init(value: AutoLogDraftStrategy.submitExisting.rawValue, title: "直接提交已有草稿", subtitle: "不再重新扫描和调用 AI，直接提交现有草稿。"),
                         .init(value: AutoLogDraftStrategy.skip.rawValue, title: "保留草稿并跳过", subtitle: "不覆盖手动编辑中的草稿，等手动确认提交。"),
                     ]),

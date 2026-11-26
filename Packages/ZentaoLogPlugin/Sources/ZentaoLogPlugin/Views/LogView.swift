@@ -386,11 +386,14 @@ struct LogView: View {
                             .foregroundStyle(p.inkSecondary)
                     }
 
-                    ForEach($model.drafts) { $entry in
-                        if !$entry.wrappedValue.isRecorded {
-                            JournalDraftCard(model: model, entry: $entry, palette: p) {
-                                model.removeDraft(id: entry.id)
-                            }
+                    ForEach(model.pendingDrafts) { draft in
+                        let dateString = model.dateString
+                        let entry = Binding(
+                            get: { model.pendingEntries(forDateString: dateString).first { $0.id == draft.id } ?? draft },
+                            set: { model.updatePendingDraft($0, forDateString: dateString) }
+                        )
+                        JournalDraftCard(model: model, entry: entry, palette: p) {
+                            model.removePendingDraft(id: draft.id, forDateString: dateString)
                         }
                     }
                 }
@@ -708,7 +711,6 @@ private struct JournalDraftCard: View {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 6) {
                     DSPicker(selection: $entry.taskID, options: taskOptions, width: 240)
-                        .onChange(of: entry.taskID) { recompute() }
                     if entry.isFallback { Tag("兜底", color: palette.stampAmber) }
                     if entry.isOvertime { Tag("加班", color: palette.stampPurple) }
                     if entry.isManual { Tag("手写", color: palette.inkSecondary) }
@@ -766,7 +768,6 @@ private struct JournalDraftCard: View {
                         .font(DS.font(12))
                         .foregroundStyle(palette.inkSecondary)
                     DSStepper(value: $entry.hours, in: 0...24, step: 0.5) { "\(hoursText($0)) h" }
-                        .onChange(of: entry.hours) { recompute() }
 
                     Text("剩余")
                         .font(DS.font(12))
@@ -799,11 +800,6 @@ private struct JournalDraftCard: View {
         }
     }
 
-    private func recompute() {
-        if let i = model.drafts.firstIndex(where: { $0.id == entry.id }) {
-            model.recomputeLeft(for: i)
-        }
-    }
 }
 
 private struct JournalRecordedCard: View {

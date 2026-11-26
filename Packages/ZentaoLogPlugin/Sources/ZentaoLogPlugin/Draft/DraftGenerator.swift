@@ -16,6 +16,9 @@ public nonisolated struct DraftEntry: Sendable, Identifiable, Hashable, Codable 
     public var isOvertime = false
     /// 手动添加（没有提交记录的工作）。
     public var isManual = false
+    /// 仅明确标记的、尚未被用户修改的自动草稿允许重建。旧版 JSON 缺少此字段。
+    var allowsRegeneration: Bool?
+    var manualLeft: Double?
     /// 禅道里已经有的记录，只展示、不再提交。
     public var isRecorded = false
 }
@@ -36,6 +39,7 @@ nonisolated struct DraftInput: Sendable {
     var overtimeHours: Double = 0
     var workEnd: Date? = nil
     var localSubmissions: [Submission] = []
+    var pendingDrafts: [DraftEntry] = []
 }
 
 nonisolated struct DraftOutput: Sendable {
@@ -106,7 +110,7 @@ nonisolated enum DraftGenerator {
             entries[i].isFallback = taskID != nil && taskID == fallbackTaskID
             guard !entries[i].isRecorded, let id = taskID, let task = tasksByID[id] else { continue }
             let currentLeft = remaining[id] ?? task.left
-            let nextLeft = max(0, currentLeft - entries[i].hours)
+            let nextLeft = entries[i].manualLeft ?? max(0, currentLeft - entries[i].hours)
             entries[i].left = nextLeft
             remaining[id] = nextLeft
         }
@@ -244,16 +248,24 @@ nonisolated enum DraftGenerator {
         let baseNormalHours = input.isWorkday ? input.defaultHours : 0
         let plannedOvertimeHours = max(0, input.overtimeHours)
         let totalTarget = baseNormalHours + plannedOvertimeHours
-        let recordedNormal = mergedRecorded.filter { !$0.isOvertime }.reduce(0) { $0 + $1.hours }
-        let recordedOvertime = mergedRecorded.filter(\.isOvertime).reduce(0) { $0 + $1.hours }
+        var preserved = input.pendingDrafts.filter { !$0.isRecorded && $0.allowsRegeneration != true }
+        recomputeLefts(&preserved, tasks: input.openTasks, fallbackTaskID: input.fallbackTaskID)
+        let accounted = mergedRecorded + preserved
+        let recordedNormal = accounted.filter { !$0.isOvertime }.reduce(0) { $0 + $1.hours }
+        let recordedOvertime = accounted.filter(\.isOvertime).reduce(0) { $0 + $1.hours }
         let totalRecorded = recordedNormal + recordedOvertime
         let totalRemaining = max(0, totalTarget - totalRecorded)
         let normalBudget = min(totalRemaining, max(0, baseNormalHours - recordedNormal))
         let overtimeBudget = max(0, totalRemaining - normalBudget)
 
-        let active = input.activities.filter { !(input.mappings[$0.repoPath]?.excluded ?? false) }
+        let coveredHashes = Set(preserved.flatMap(\.commitHashes))
+        let active = input.activities.compactMap { activity -> RepoActivity? in
+            guard input.mappings[activity.repoPath]?.excluded != true else { return nil }
+            let commits = activity.commits.filter { !coveredHashes.contains($0.hash) }
+            return commits.isEmpty ? nil : RepoActivity(repoPath: activity.repoPath, commits: commits)
+        }
         guard !active.isEmpty, normalBudget > 0 || overtimeBudget > 0 else {
-            return DraftOutput(entries: mergedRecorded, usedAI: false, aiError: nil, aiSeconds: nil)
+            return DraftOutput(entries: accounted, usedAI: false, aiError: nil, aiSeconds: nil)
         }
 
         let tasksByID = Dictionary(uniqueKeysWithValues: input.openTasks.map { ($0.id, $0) })
@@ -367,6 +379,8 @@ nonisolated enum DraftGenerator {
             )
         }
 
+        for i in entries.indices { entries[i].allowsRegeneration = true }
+        entries = preserved + entries
         recomputeLefts(&entries, tasks: input.openTasks, fallbackTaskID: input.fallbackTaskID)
         return DraftOutput(entries: mergedRecorded + entries, usedAI: usedAI, aiError: aiError, aiSeconds: aiSeconds)
     }
@@ -486,7 +500,7 @@ nonisolated enum DraftGenerator {
     /// 按权重分配总工时，0.5 小时取整，总和不变；每个仓库至少 0.5（总量够的话）。
     static func allocate(total: Double, weights: [Double]) -> [Double] {
         guard !weights.isEmpty else { return [] }
-        let units = Int((total * 2).rounded())
+        let units = Int((total * 2).rounded(.down))
         let sum = weights.reduce(0, +)
         guard units > 0, sum > 0 else { return weights.map { _ in 0 } }
         var shares = weights.map { Double(units) * $0 / sum }

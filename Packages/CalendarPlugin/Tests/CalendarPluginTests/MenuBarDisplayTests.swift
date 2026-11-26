@@ -457,3 +457,143 @@ func calendarMenuBarPolicySuppressesEmbeddedItemWhenStandaloneIsRunning() {
     #expect(CalendarMenuBarPolicy.shouldShowEmbeddedMenuBar(settingEnabled: false, isStandaloneRunning: false) == false)
     #expect(CalendarMenuBarPolicy.shouldShowEmbeddedMenuBar(settingEnabled: false, isStandaloneRunning: true) == false)
 }
+
+@MainActor @Test func menuBarStyleCatalogAndPersistence() throws {
+    let styles = CalendarMenuBarStyle.allCases
+    #expect(styles.count == 20)
+    #expect(Set(styles.map(\.id)).count == 20)
+    #expect(Set(styles.map(\.code)).count == 20)
+    #expect(styles.map(\.code) == (1...20).map { String(format: "%02d", $0) })
+    #expect(Set(styles.map(\.category)) == Set(CalendarMenuBarStyleCategory.allCases))
+    #expect(styles.allSatisfy { !$0.displayName.isEmpty && !$0.subtitle.isEmpty })
+
+    let url = FileManager.default.temporaryDirectory.appending(path: "ib-cal-styles-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let db = try AppDatabase(url: url, migrations: [])
+    let settings = SettingsStore(database: db)
+    #expect(settings[CalendarKeys.menuBarStyle] == .nativeMinimal)
+    #expect(settings[CalendarKeys.menuBarHolidayBadge] == true)
+
+    for style in styles {
+        settings[CalendarKeys.menuBarStyle] = style
+        let reloaded = SettingsStore(database: db)
+        #expect(reloaded[CalendarKeys.menuBarStyle] == style)
+    }
+
+    settings[CalendarKeys.menuBarHolidayBadge] = false
+    let reloaded = SettingsStore(database: db)
+    #expect(reloaded[CalendarKeys.menuBarHolidayBadge] == false)
+}
+
+@MainActor @Test func menuBarRendererAll20StylesDarkLightAndFallback() throws {
+    func hasVisiblePixels(_ image: NSImage) -> Bool {
+        guard let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first,
+              let data = rep.bitmapData else { return false }
+        let totalBytes = rep.bytesPerRow * rep.pixelsHigh
+        for offset in stride(from: 3, to: totalBytes, by: 4) where data[offset] > 0 {
+            return true
+        }
+        return false
+    }
+
+    let date = makeDate(hour: 18, minute: 27, second: 35)
+    let weather = WeatherSnapshot(
+        city: "深圳",
+        temperature: 22.0,
+        text: "晴",
+        symbol: "sun.max",
+        days: [],
+        fetchedAt: date,
+        aqi: 42,
+        aqiCategory: "优"
+    )
+
+    let fullConfig = MenuBarDisplayConfig(
+        showLogo: true,
+        timeEnabled: true,
+        timeShowIcon: true,
+        timeUse24Hour: true,
+        timeShowPeriod: true,
+        timeShowSeconds: true,
+        dateEnabled: true,
+        dateShowLunar: true,
+        dateShowSolar: true,
+        dateShowWeekday: true,
+        showHolidayBadge: true,
+        weatherEnabled: true,
+        weatherShowWeather: true,
+        weatherShowAQI: true
+    )
+    let fullSnapshot = CalendarMenuBarSnapshot.make(
+        at: date,
+        weather: weather,
+        holidayBadge: "休",
+        config: fullConfig
+    )
+
+    for style in CalendarMenuBarStyle.allCases {
+        for isDark in [true, false] {
+            let img = CalendarMenuBarRenderer.renderImage(
+                snapshot: fullSnapshot,
+                style: style,
+                isDark: isDark,
+                scale: 2.0
+            )
+            #expect(img.size.height == CalendarMenuBarRenderer.barHeight)
+            #expect(img.size.width >= 18)
+            let rep = try #require(img.representations.compactMap { $0 as? NSBitmapImageRep }.first)
+            #expect(rep.pixelsHigh == 44)
+            #expect(rep.pixelsWide == Int(ceil(img.size.width * 2)))
+            #expect(hasVisiblePixels(img))
+        }
+    }
+
+    // 原生极简排印无 Logo 且无角标时应保持模板图
+    let minimalNoLogo = CalendarMenuBarSnapshot.make(
+        at: date,
+        weather: weather,
+        holidayBadge: nil,
+        config: MenuBarDisplayConfig(showLogo: false, showHolidayBadge: false)
+    )
+    let minimalImg = CalendarMenuBarRenderer.renderImage(
+        snapshot: minimalNoLogo,
+        style: .nativeMinimal,
+        isDark: true,
+        scale: 2.0
+    )
+    #expect(minimalImg.isTemplate == true)
+
+    // 彩色风格应输出非模板图
+    let neonImg = CalendarMenuBarRenderer.renderImage(
+        snapshot: minimalNoLogo,
+        style: .cyberNeon,
+        isDark: true,
+        scale: 2.0
+    )
+    #expect(neonImg.isTemplate == false)
+
+    // 所有字段关闭时优雅回退到日历图标
+    let emptyConfig = MenuBarDisplayConfig(
+        showLogo: false,
+        timeEnabled: false,
+        dateEnabled: false,
+        weatherEnabled: false
+    )
+    let emptySnapshot = CalendarMenuBarSnapshot.make(
+        at: date,
+        weather: nil,
+        holidayBadge: "休",
+        config: emptyConfig
+    )
+    #expect(emptySnapshot.hasAnyContent == false)
+    let fallbackImg = CalendarMenuBarRenderer.renderImage(
+        snapshot: emptySnapshot,
+        style: .liquidGlass,
+        isDark: true,
+        scale: 2.0
+    )
+    #expect(fallbackImg.size.height == CalendarMenuBarRenderer.barHeight)
+    #expect(fallbackImg.isTemplate == true)
+    #expect(hasVisiblePixels(fallbackImg))
+}

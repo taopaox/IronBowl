@@ -36,6 +36,7 @@ enum CalendarKeys {
     static let refreshMinutes = SettingKey<Int>("weather.refreshMinutes", default: 30)
     /// 菜单栏日历：是否显示，以及显示哪些内容。
     static let menuBarEnabled = SettingKey<Bool>("calendar.menuBar.enabled", default: true)
+    static let menuBarStyle = SettingKey<CalendarMenuBarStyle>("calendar.menuBar.style", default: .nativeMinimal)
     static let menuBarLogo = SettingKey<Bool>("calendar.menuBar.logo", default: false)
     // 时间选项
     static let menuBarTime = SettingKey<Bool>("calendar.menuBar.time", default: true)
@@ -48,6 +49,7 @@ enum CalendarKeys {
     static let menuBarLunar = SettingKey<Bool>("calendar.menuBar.lunar", default: false)
     static let menuBarDate = SettingKey<Bool>("calendar.menuBar.date", default: true)
     static let menuBarWeekday = SettingKey<Bool>("calendar.menuBar.weekday", default: true)
+    static let menuBarHolidayBadge = SettingKey<Bool>("calendar.menuBar.holidayBadge", default: true)
     // 天气选项
     static let menuBarWeatherSection = SettingKey<Bool>("calendar.menuBar.weatherSection", default: true)
     static let menuBarWeather = SettingKey<Bool>("calendar.menuBar.weather", default: true)
@@ -70,6 +72,7 @@ public nonisolated struct MenuBarDisplayConfig: Sendable, Equatable {
     public var dateShowLunar: Bool
     public var dateShowSolar: Bool
     public var dateShowWeekday: Bool
+    public var showHolidayBadge: Bool
 
     public var weatherEnabled: Bool
     public var weatherShowWeather: Bool
@@ -86,6 +89,7 @@ public nonisolated struct MenuBarDisplayConfig: Sendable, Equatable {
         dateShowLunar: Bool = false,
         dateShowSolar: Bool = true,
         dateShowWeekday: Bool = true,
+        showHolidayBadge: Bool = true,
         weatherEnabled: Bool = true,
         weatherShowWeather: Bool = true,
         weatherShowAQI: Bool = false
@@ -100,6 +104,7 @@ public nonisolated struct MenuBarDisplayConfig: Sendable, Equatable {
         self.dateShowLunar = dateShowLunar
         self.dateShowSolar = dateShowSolar
         self.dateShowWeekday = dateShowWeekday
+        self.showHolidayBadge = showHolidayBadge
         self.weatherEnabled = weatherEnabled
         self.weatherShowWeather = weatherShowWeather
         self.weatherShowAQI = weatherShowAQI
@@ -303,9 +308,24 @@ public final class CalendarModel {
             dateShowLunar: settings[CalendarKeys.menuBarLunar],
             dateShowSolar: settings[CalendarKeys.menuBarDate],
             dateShowWeekday: settings[CalendarKeys.menuBarWeekday],
+            showHolidayBadge: settings[CalendarKeys.menuBarHolidayBadge],
             weatherEnabled: settings[CalendarKeys.menuBarWeatherSection],
             weatherShowWeather: settings[CalendarKeys.menuBarWeather],
             weatherShowAQI: settings[CalendarKeys.menuBarAQI]
+        )
+    }
+
+    public var menuBarStyle: CalendarMenuBarStyle {
+        get { settings[CalendarKeys.menuBarStyle] }
+        set { settings[CalendarKeys.menuBarStyle] = newValue }
+    }
+
+    public var menuBarSnapshot: CalendarMenuBarSnapshot {
+        CalendarMenuBarSnapshot.make(
+            at: now,
+            weather: weather,
+            holidayBadge: dayBadge(now),
+            config: menuBarConfig
         )
     }
 

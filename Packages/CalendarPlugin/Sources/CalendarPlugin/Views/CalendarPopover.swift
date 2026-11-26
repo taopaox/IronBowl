@@ -2,182 +2,7 @@ import AppKit
 import IronBowlKit
 import SwiftUI
 
-enum CalendarAssets {
-    static let logoImage: NSImage? = {
-        guard let url = Bundle.module.url(forResource: "CalendarLogo", withExtension: "png") else {
-            return nil
-        }
-        return NSImage(contentsOf: url)
-    }()
-}
-
-/// 菜单栏日历图像渲染器：将各显示段（Logo、天气图标、温度、AQI、日期、星期、农历、时钟图标、时间）
-/// 离线绘制为固定高度的 `NSImage`（无全彩 Logo 时为模板图，含全彩 Logo 时按系统浅/深色自适应文字色调），避免 `MenuBarExtra` 动态文本插值在 macOS 上出现截断或消失。
-public enum CalendarMenuBarRenderer {
-    public static let barHeight: CGFloat = 22
-
-    private enum MeasuredSegment {
-        case logo(NSImage, NSSize)
-        case symbol(NSImage, NSSize)
-        case text(NSAttributedString, NSSize)
-
-        var width: CGFloat {
-            switch self {
-            case .logo(_, let size): size.width
-            case .symbol(_, let size): size.width
-            case .text(_, let size): size.width
-            }
-        }
-
-        var isSymbol: Bool {
-            if case .symbol = self { return true }
-            return false
-        }
-    }
-
-    public static func renderImage(
-        segments: [MenuBarSegment],
-        logoImage: NSImage? = nil,
-        isDark: Bool = true,
-        scale: CGFloat? = nil
-    ) -> NSImage {
-        let effective = segments.isEmpty ? [MenuBarSegment.symbol("calendar")] : segments
-        let resolvedScale = max(1.0, scale ?? max(2.0, NSScreen.screens.map(\.backingScaleFactor).max() ?? 2.0))
-        let resolvedLogo = logoImage ?? CalendarAssets.logoImage
-        let hasColorLogo = effective.contains(.logo) && resolvedLogo != nil
-        let fontSize: CGFloat = 13
-        let horizontalPadding: CGFloat = 1
-        let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .medium)
-        let foregroundColor: NSColor = if hasColorLogo {
-            isDark
-                ? NSColor(srgbRed: 248 / 255, green: 250 / 255, blue: 252 / 255, alpha: 1)
-                : NSColor(srgbRed: 15 / 255, green: 23 / 255, blue: 42 / 255, alpha: 1)
-        } else {
-            .black
-        }
-        let symbolConfig = NSImage.SymbolConfiguration(pointSize: fontSize, weight: .medium, scale: .medium)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [foregroundColor]))
-        let textAttributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: foregroundColor,
-        ]
-
-        let measured: [MeasuredSegment] = effective.map { segment in
-            switch segment {
-            case .logo:
-                if let resolvedLogo {
-                    let targetHeight: CGFloat = 17
-                    let rawSize = resolvedLogo.size
-                    let width = (rawSize.height > 0 && rawSize.width > 0)
-                        ? ceil(targetHeight * (rawSize.width / rawSize.height))
-                        : targetHeight
-                    return .logo(resolvedLogo, NSSize(width: width, height: targetHeight))
-                }
-                let symbol = (NSImage(systemSymbolName: "calendar", accessibilityDescription: nil) ?? NSImage())
-                    .withSymbolConfiguration(symbolConfig) ?? NSImage()
-                let rawSize = symbol.size
-                let size = (rawSize.width > 0 && rawSize.height > 0) ? rawSize : NSSize(width: 14, height: 14)
-                return .symbol(symbol, size)
-            case .symbol(let name):
-                let symbol = (NSImage(systemSymbolName: name, accessibilityDescription: nil)
-                    ?? NSImage(systemSymbolName: "calendar", accessibilityDescription: nil)
-                    ?? NSImage())
-                    .withSymbolConfiguration(symbolConfig) ?? NSImage()
-                let rawSize = symbol.size
-                let size = (rawSize.width > 0 && rawSize.height > 0) ? rawSize : NSSize(width: 14, height: 14)
-                return .symbol(symbol, size)
-            case .text(let value):
-                let attr = NSAttributedString(string: value, attributes: textAttributes)
-                let size = attr.size()
-                return .text(attr, NSSize(width: ceil(size.width), height: size.height))
-            }
-        }
-
-        var contentWidth: CGFloat = 0
-        for (index, item) in measured.enumerated() {
-            if index > 0 {
-                contentWidth += gap(after: measured[index - 1], before: item)
-            }
-            contentWidth += item.width
-        }
-
-        let totalWidth = max(18, ceil(contentWidth + horizontalPadding * 2))
-        let logicalSize = NSSize(width: totalWidth, height: barHeight)
-        let pixelWidth = max(1, Int(ceil(logicalSize.width * resolvedScale)))
-        let pixelHeight = max(1, Int(ceil(logicalSize.height * resolvedScale)))
-
-        guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: pixelWidth,
-            pixelsHigh: pixelHeight,
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) else {
-            let fallback = NSImage(systemSymbolName: "calendar", accessibilityDescription: nil) ?? NSImage()
-            fallback.isTemplate = true
-            return fallback
-        }
-        rep.size = logicalSize
-
-        if let ctx = NSGraphicsContext(bitmapImageRep: rep) {
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = ctx
-            ctx.imageInterpolation = .high
-            ctx.cgContext.setShouldAntialias(true)
-            ctx.cgContext.setAllowsAntialiasing(true)
-            ctx.cgContext.setShouldSmoothFonts(false)
-
-            var x = horizontalPadding
-            for (index, item) in measured.enumerated() {
-                if index > 0 {
-                    x += gap(after: measured[index - 1], before: item)
-                }
-                switch item {
-                case .logo(let logo, let size):
-                    let y = ((barHeight - size.height) / 2).rounded(.toNearestOrAwayFromZero)
-                    logo.draw(
-                        in: NSRect(x: x, y: y, width: size.width, height: size.height),
-                        from: .zero,
-                        operation: .sourceOver,
-                        fraction: 1.0
-                    )
-                    x += size.width
-                case .symbol(let symbolImage, let size):
-                    let y = ((barHeight - size.height) / 2).rounded(.toNearestOrAwayFromZero)
-                    symbolImage.draw(
-                        in: NSRect(x: x, y: y, width: size.width, height: size.height),
-                        from: .zero,
-                        operation: .sourceOver,
-                        fraction: 1.0
-                    )
-                    x += size.width
-                case .text(let attr, let size):
-                    let y = (barHeight - size.height) / 2
-                    attr.draw(at: NSPoint(x: x, y: y))
-                    x += size.width
-                }
-            }
-            ctx.flushGraphics()
-            NSGraphicsContext.restoreGraphicsState()
-        }
-
-        let image = NSImage(size: logicalSize)
-        image.addRepresentation(rep)
-        image.isTemplate = !hasColorLogo
-        return image
-    }
-
-    private static func gap(after previous: MeasuredSegment, before next: MeasuredSegment) -> CGFloat {
-        (previous.isSymbol && !next.isSymbol) ? 3 : 5
-    }
-}
-
-/// 菜单栏日历的标签：通过离线图像稳定渲染 Logo + 天气图标/温度/AQI + 日期/星期/农历 + 时间图标/时间。
+/// 菜单栏日历的标签：按所选风格通过离线图像渲染器绘制为固定高度 22pt 的 Retina 图像。
 public struct CalendarMenuBarLabel: View {
     let model: CalendarModel
     @Environment(\.colorScheme) private var colorScheme
@@ -186,9 +11,13 @@ public struct CalendarMenuBarLabel: View {
 
     public var body: some View {
         let isDark = (model.appAppearance == .system ? colorScheme : model.systemColorScheme) == .dark
-        Image(nsImage: CalendarMenuBarRenderer.renderImage(segments: model.menuBarSegments, isDark: isDark))
-            .onAppear { model.syncClockTimer() }
-            .onChange(of: model.needsSecondTick) { model.syncClockTimer() }
+        Image(nsImage: CalendarMenuBarRenderer.renderImage(
+            snapshot: model.menuBarSnapshot,
+            style: model.menuBarStyle,
+            isDark: isDark
+        ))
+        .onAppear { model.syncClockTimer() }
+        .onChange(of: model.needsSecondTick) { model.syncClockTimer() }
     }
 }
 

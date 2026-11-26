@@ -12,16 +12,29 @@ public nonisolated enum MenuBarCardTone: Sendable, Equatable {
     case slate
     case white
 
-    var nsColor: NSColor {
-        switch self {
-        case .amber:  NSColor(srgbRed: 251 / 255, green: 191 / 255, blue: 36 / 255, alpha: 1)   // #FBBF24
-        case .purple: NSColor(srgbRed: 192 / 255, green: 132 / 255, blue: 252 / 255, alpha: 1)  // #C084FC
-        case .green:  NSColor(srgbRed: 52 / 255, green: 211 / 255, blue: 153 / 255, alpha: 1)   // #34D399
-        case .rose:   NSColor(srgbRed: 251 / 255, green: 113 / 255, blue: 133 / 255, alpha: 1)  // #FB7185
-        case .sky:    NSColor(srgbRed: 56 / 255, green: 189 / 255, blue: 248 / 255, alpha: 1)   // #38BDF8
-        case .indigo: NSColor(srgbRed: 165 / 255, green: 180 / 255, blue: 252 / 255, alpha: 1)  // #A5B4FC
-        case .slate:  NSColor(srgbRed: 203 / 255, green: 213 / 255, blue: 225 / 255, alpha: 1)  // #CBD5E1
-        case .white:  NSColor(srgbRed: 248 / 255, green: 250 / 255, blue: 252 / 255, alpha: 1)  // #F8FAFC
+    func nsColor(isDark: Bool) -> NSColor {
+        if isDark {
+            switch self {
+            case .amber:  NSColor(srgbRed: 251 / 255, green: 191 / 255, blue: 36 / 255, alpha: 1)   // #FBBF24
+            case .purple: NSColor(srgbRed: 192 / 255, green: 132 / 255, blue: 252 / 255, alpha: 1)  // #C084FC
+            case .green:  NSColor(srgbRed: 52 / 255, green: 211 / 255, blue: 153 / 255, alpha: 1)   // #34D399
+            case .rose:   NSColor(srgbRed: 251 / 255, green: 113 / 255, blue: 133 / 255, alpha: 1)  // #FB7185
+            case .sky:    NSColor(srgbRed: 56 / 255, green: 189 / 255, blue: 248 / 255, alpha: 1)   // #38BDF8
+            case .indigo: NSColor(srgbRed: 165 / 255, green: 180 / 255, blue: 252 / 255, alpha: 1)  // #A5B4FC
+            case .slate:  NSColor(srgbRed: 203 / 255, green: 213 / 255, blue: 225 / 255, alpha: 1)  // #CBD5E1
+            case .white:  NSColor(srgbRed: 248 / 255, green: 250 / 255, blue: 252 / 255, alpha: 1)  // #F8FAFC
+            }
+        } else {
+            switch self {
+            case .amber:  NSColor(srgbRed: 180 / 255, green: 83 / 255, blue: 9 / 255, alpha: 1)     // #B45309
+            case .purple: NSColor(srgbRed: 126 / 255, green: 34 / 255, blue: 206 / 255, alpha: 1)   // #7E22CE
+            case .green:  NSColor(srgbRed: 4 / 255, green: 120 / 255, blue: 87 / 255, alpha: 1)     // #047857
+            case .rose:   NSColor(srgbRed: 190 / 255, green: 18 / 255, blue: 60 / 255, alpha: 1)    // #BE123C
+            case .sky:    NSColor(srgbRed: 3 / 255, green: 105 / 255, blue: 161 / 255, alpha: 1)    // #0369A1
+            case .indigo: NSColor(srgbRed: 67 / 255, green: 56 / 255, blue: 202 / 255, alpha: 1)    // #4338CA
+            case .slate:  NSColor(srgbRed: 71 / 255, green: 85 / 255, blue: 105 / 255, alpha: 1)    // #475569
+            case .white:  NSColor(srgbRed: 15 / 255, green: 23 / 255, blue: 42 / 255, alpha: 1)     // #0F172A
+            }
         }
     }
 }
@@ -35,7 +48,7 @@ public nonisolated enum MenuBarCardSegment: Sendable, Equatable {
 }
 
 /// 主状态栏「双行微缩仪表卡」离线渲染器。
-/// 绘制为 22pt 高的全彩非模板 `NSImage`（`isTemplate = false`），在浅色与深色菜单栏上均保持高对比度。
+/// 绘制为 22pt 高的透明底全彩非模板 `NSImage`（`isTemplate = false`），无深色底框，并根据深浅色自适应高对比度文字色调。
 public enum MenuBarCardRenderer {
     public static let barHeight: CGFloat = 22
 
@@ -55,6 +68,7 @@ public enum MenuBarCardRenderer {
         segments: [MenuBarCardSegment],
         icon: String = "🍚",
         iconImage: NSImage? = nil,
+        isDark: Bool = true,
         scale: CGFloat? = nil
     ) -> NSImage {
         let resolvedScale = max(1.0, scale ?? max(2.0, NSScreen.screens.map(\.backingScaleFactor).max() ?? 2.0))
@@ -64,18 +78,26 @@ public enum MenuBarCardRenderer {
         let inlineFont = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold)
 
         let iconAttr = NSAttributedString(string: icon, attributes: [.font: iconFont])
-        let iconSize = iconImage != nil ? NSSize(width: 16, height: 16) : iconAttr.size()
+        let iconSize: NSSize
+        if let iconImage {
+            let iconHeight: CGFloat = 19
+            let raw = iconImage.size
+            let iconWidth = (raw.height > 0 && raw.width > 0) ? ceil(iconHeight * (raw.width / raw.height)) : iconHeight
+            iconSize = NSSize(width: iconWidth, height: iconHeight)
+        } else {
+            iconSize = iconAttr.size()
+        }
 
         let measured: [MeasuredSegment] = segments.map { segment in
             switch segment {
             case .stacked(let top, let bottom, let topTone):
                 let topAttr = NSAttributedString(
                     string: top,
-                    attributes: [.font: topFont, .foregroundColor: topTone.nsColor]
+                    attributes: [.font: topFont, .foregroundColor: topTone.nsColor(isDark: isDark)]
                 )
                 let bottomAttr = NSAttributedString(
                     string: bottom,
-                    attributes: [.font: bottomFont, .foregroundColor: MenuBarCardTone.white.nsColor]
+                    attributes: [.font: bottomFont, .foregroundColor: MenuBarCardTone.white.nsColor(isDark: isDark)]
                 )
                 let width = ceil(max(topAttr.size().width, bottomAttr.size().width))
                 return .stacked(top: topAttr, bottom: bottomAttr, width: width)
@@ -83,19 +105,19 @@ public enum MenuBarCardRenderer {
             case .inline(let text, let tone):
                 let attr = NSAttributedString(
                     string: text,
-                    attributes: [.font: inlineFont, .foregroundColor: tone.nsColor]
+                    attributes: [.font: inlineFont, .foregroundColor: tone.nsColor(isDark: isDark)]
                 )
                 return .inline(attr: attr, size: attr.size())
             }
         }
 
-        let horizontalPadding: CGFloat = 7
+        let horizontalPadding: CGFloat = 2
         let iconGap: CGFloat = 5
         let dividerGap: CGFloat = 5
 
         let totalWidth: CGFloat
         if measured.isEmpty {
-            totalWidth = max(24, ceil(iconSize.width + 10))
+            totalWidth = max(22, ceil(iconSize.width + 2))
         } else {
             let segmentsWidth = measured.reduce(CGFloat(0)) { $0 + $1.width }
             let dividersWidth = CGFloat(max(0, measured.count - 1)) * (dividerGap * 2 + 1)
@@ -132,16 +154,6 @@ public enum MenuBarCardRenderer {
             ctx.cgContext.setAllowsAntialiasing(true)
             ctx.cgContext.setShouldSmoothFonts(false)
 
-            // 深石板底色卡片 + 1px 柔和白边
-            let cardRect = NSRect(x: 0.5, y: 0.5, width: totalWidth - 1, height: barHeight - 1)
-            let cardPath = NSBezierPath(roundedRect: cardRect, xRadius: 5.5, yRadius: 5.5)
-            NSColor(srgbRed: 15 / 255, green: 23 / 255, blue: 42 / 255, alpha: 0.94).setFill()
-            cardPath.fill()
-
-            NSColor(white: 1, alpha: 0.18).setStroke()
-            cardPath.lineWidth = 1
-            cardPath.stroke()
-
             let iconY = (barHeight - iconSize.height) / 2
             let drawIcon: (CGFloat) -> Void = { iconX in
                 if let iconImage {
@@ -166,7 +178,7 @@ public enum MenuBarCardRenderer {
                 for (index, item) in measured.enumerated() {
                     if index > 0 {
                         x += dividerGap
-                        NSColor(white: 1, alpha: 0.16).setFill()
+                        NSColor(white: isDark ? 1 : 0, alpha: isDark ? 0.22 : 0.18).setFill()
                         NSRect(x: x, y: (barHeight - 11) / 2, width: 1, height: 11).fill()
                         x += 1 + dividerGap
                     }

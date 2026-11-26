@@ -19,7 +19,7 @@ struct CalendarApp: App {
         .menuBarExtraStyle(.window)
 
 
-        Window("饭碗万年历", id: "calendar") {
+        Window("万年历", id: "calendar") {
             if let model = app.plugin.model {
                 CalendarMainView(model: model, versionText: Bundle.main.displayVersion)
                     .frame(minWidth: 860, minHeight: 620)
@@ -31,7 +31,7 @@ struct CalendarApp: App {
         .defaultLaunchBehavior(.suppressed)
         .commands {
             CommandGroup(replacing: .appInfo) {
-                Button("关于饭碗万年历") {
+                Button("关于万年历") {
                     NSApp.orderFrontStandardAboutPanel(options: [
                         .credits: AppBrand.aboutCredits(),
                     ])
@@ -210,7 +210,7 @@ struct StandaloneSettings: View {
                 }
                 Spacer()
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("饭碗万年历 \(Bundle.main.displayVersion)")
+                    Text("万年历 \(Bundle.main.displayVersion)")
                         .font(DS.font(11.5))
                         .monospacedDigit()
                         .foregroundStyle(DS.textTertiary)
@@ -244,7 +244,7 @@ private struct StandaloneGeneralSettings: View {
 
     var body: some View {
         DSSection("启动", footer: "开机自动启动由 macOS「系统设置 → 通用 → 登录项与扩展」统一管理。") {
-            DSLaunchAtLoginRow(controller: app.launchAtLogin, appName: "饭碗万年历")
+            DSLaunchAtLoginRow(controller: app.launchAtLogin, appName: "万年历")
         }
     }
 }
@@ -280,7 +280,7 @@ private struct StandaloneAboutSettings: View {
 
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
-                                Text("饭碗万年历")
+                                Text("万年历")
                                     .font(DS.font(15, .semibold))
                                 Text(Bundle.main.displayVersion)
                                     .font(DS.font(11, .medium))
@@ -299,10 +299,10 @@ private struct StandaloneAboutSettings: View {
                     DSSloganView(style: .banner)
                 }
             }
-            DSRow("当前版本", description: "饭碗万年历 · \(Bundle.main.fullVersion)") {
+            DSRow("当前版本", description: "万年历 · \(Bundle.main.fullVersion)") {
                 Button(copied ? "已复制" : "复制版本信息") {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString("饭碗万年历 \(Bundle.main.fullVersion)", forType: .string)
+                    NSPasteboard.general.setString("万年历 \(Bundle.main.fullVersion)", forType: .string)
                     copied = true
                     Task {
                         try? await Task.sleep(for: .seconds(1.5))

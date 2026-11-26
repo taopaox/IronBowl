@@ -280,7 +280,7 @@ private struct PopoverMonthPane: View {
                     .font(DS.font(11))
                     .monospacedDigit()
                     .foregroundStyle(palette.footerText.opacity(0.75))
-                    .help("饭碗万年历 \(Bundle.main.fullVersion)")
+                    .help("万年历 \(Bundle.main.fullVersion)")
                 PopoverFooterQuitButton(palette: palette) {
                     activeMenu = nil
                     dismissMenuBarPopover()

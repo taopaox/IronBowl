@@ -1,6 +1,6 @@
 # 万年历插件（`CalendarPlugin`）
 
-`CalendarPlugin`（`Packages/CalendarPlugin`）同时服务于工作台主应用与独立版「饭碗万年历」，提供公历/农历对照、24 节气、节日、法定调休角标、天气预报与多主题菜单栏弹层。
+`CalendarPlugin`（`Packages/CalendarPlugin`）同时服务于工作台主应用与独立版「万年历」，提供公历/农历对照、24 节气、节日、法定调休角标、天气预报与多主题菜单栏弹层。
 
 ## 模块组成
 

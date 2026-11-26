@@ -113,7 +113,7 @@ struct CalendarStatusBarSettings: View {
                 DSRow("在状态栏显示日历") { DSToggle(isOn: s.binding(CalendarKeys.menuBarEnabled)) }
                 if model.isStandaloneCalendarRunning {
                     DSBlockRow {
-                        DSBanner(.info, "检测到独立版「饭碗万年历」正在运行，主工作台已自动隐藏内置状态栏日历以避免重复显示；退出独立版后会自动恢复。")
+                        DSBanner(.info, "检测到独立版「万年历」正在运行，主工作台已自动隐藏内置状态栏日历以避免重复显示；退出独立版后会自动恢复。")
                     }
                 }
                 if s[CalendarKeys.menuBarEnabled] {

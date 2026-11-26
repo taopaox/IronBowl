@@ -129,14 +129,6 @@ struct Sidebar: View {
                             )
                         }
                     }
-
-                    let recents = app.enabledPlugins.flatMap(\.sidebarRecents)
-                    if !recents.isEmpty {
-                        DSSidebarSection("最近日志")
-                        ForEach(recents) { item in
-                            RecentRow(item: item)
-                        }
-                    }
                 }
                 .padding(.horizontal, 10)
             }
@@ -393,28 +385,6 @@ private struct PinnedSidebarRow: View {
         if let onDelete = item.onDelete {
             Button("删除", role: .destructive) { onDelete() }
         }
-    }
-}
-
-private struct RecentRow: View {
-    let item: SidebarRecent
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: item.action) {
-            HStack {
-                Text(item.title).font(DS.font(13.5)).lineLimit(1)
-                Spacer(minLength: 6)
-                Text(item.trailing).font(DS.font(12)).foregroundStyle(DS.textTertiary)
-            }
-            .foregroundStyle(DS.text)
-            .padding(.horizontal, 10)
-            .frame(height: 26)
-            .background(hovering ? DS.hover : .clear, in: .rect(cornerRadius: DS.controlRadius))
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
     }
 }
 

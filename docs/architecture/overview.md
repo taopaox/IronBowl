@@ -67,7 +67,6 @@ flowchart LR
   - `makeMainView()`：插件主内容区视图。
   - `settingsPages`：自动注入设置窗口左侧插件分组。
   - `menuBarItems`：暴露给菜单栏和「设置 → 通用 → 菜单栏显示」的可选信息项。
-  - `sidebarRecents`：显示在主窗口侧边栏「最近日志」分区。
   - `sidebarPinnedItems`：显示在主窗口侧边栏「固定网页」分区（支持重命名、排序、休眠与右键菜单）。
   - `sidebarChildren`：配合 `isSidebarDirectory == true` 在侧栏插件项下方缩进展示可折叠子项。
   - `quickActions` / `homeCards` / `handleHomeInput(_:)`：注入首页「今天」的快捷标签、概览卡片与一句话输入处理链。

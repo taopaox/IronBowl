@@ -327,7 +327,7 @@ import Testing
     #expect(logModel1.drafts[0].work == "1. 完成草稿切页保留")
     #expect(logModel1.drafts[0].hours == 4)
 
-    // 再次点击今天（模拟从其他页面通过侧栏「最近日志 → 今天」返回）
+    // 再次点击今天（模拟重复选中今天日期）
     await logModel1.select(date: today)
     #expect(logModel1.drafts.count == 1)
     #expect(logModel1.drafts[0].work == "1. 完成草稿切页保留")

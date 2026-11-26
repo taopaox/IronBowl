@@ -6,7 +6,7 @@
 
 | 文件 | 核心符号 | 职责 |
 | :--- | :--- | :--- |
-| `ZentaoLogPlugin.swift` | `ZentaoLogPlugin`, `LogReminderScheduler` | 插件入口（左侧栏归入「汇报」分组并显示为「日报」，设置与菜单栏保留「禅道日志」）、侧栏最近 7 天日志、首页快捷操作/一句话记日志、菜单栏状态与提醒调度 |
+| `ZentaoLogPlugin.swift` | `ZentaoLogPlugin`, `LogReminderScheduler` | 插件入口（左侧栏归入「汇报」分组并显示为「日报」，设置与菜单栏保留「禅道日志」）、首页快捷操作/一句话记日志、菜单栏状态与提醒调度 |
 | `LogModel.swift` | `LogModel` | `@Observable` 业务状态：扫描、任务/已写工时同步、草稿读写、当日工时/加班、提交与 AI 解析 |
 | `DailyLogQuery.swift` | `ZentaoDailyLogService`, `DailyLogItem`, `DailyLogRangeResult` | 面向周报等跨天插件的只读区间日报查询服务（融合禅道远端、本地已提交与未提交草稿并去重） |
 | `Git/GitScanner.swift` | `GitScanner`, `RepoActivity`, `GitCommit` | 多层级发现 Git 仓库、按作者邮箱和本地当天 00:00–24:00 扫描提交（跨仓库按哈希去重） |

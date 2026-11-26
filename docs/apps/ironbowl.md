@@ -8,7 +8,7 @@
 | :--- | :--- | :--- |
 | `IronBowlApp.swift` | `IronBowlApp`, `AppDelegate` | 声明主窗口、`设置` 窗口、主菜单栏及独立万年历菜单栏 Scene；关闭主窗口时不退出应用 |
 | `AppModel.swift` | `AppModel`, `AppKeys`, `DockMode` | 持有共享服务（DB/Settings/WorkCalendar/AI/Web/Reminders/SystemMonitor）、管理插件启停、Dock 策略与开机自启 |
-| `MainView.swift` | `MainView`, `Sidebar`, `ResourceCard`, `ResourceDetailPopover`, `TodayCard` | 可收起左侧栏 + 右侧内容区，展示版本号徽标、未分组插件与目录子项、插件分组（如「汇报」包含日报、周报、月报）、固定网页、最近日志、系统/饭碗 CPU 与内存占用卡片（含逐进程明细弹层）及下班倒计时 |
+| `MainView.swift` | `MainView`, `Sidebar`, `ResourceCard`, `ResourceDetailPopover`, `TodayCard` | 可收起左侧栏 + 右侧内容区，展示版本号徽标、未分组插件与目录子项、插件分组（如「汇报」包含日报、周报、月报）、固定网页、系统/饭碗 CPU 与内存占用卡片（含逐进程明细弹层）及下班倒计时 |
 | `HomeView.swift` | `HomeView` | 首页「今天」：时段问候、插件快捷标签、一句话记日志输入框与插件概览卡片网格 |
 | `MenuBar.swift` | `MenuBarLabel`, `MenuPanel` | 菜单栏图标与可自定义拼接文案，以及点击弹出的快捷面板（顶部展示当前版本） |
 | `SettingsView.swift` | `SettingsView` 及各核心设置页 | 左侧搜索、分组导航与底部版本号，右侧各核心设置页（通用设置底部含「关于」版本信息与复制按钮） |

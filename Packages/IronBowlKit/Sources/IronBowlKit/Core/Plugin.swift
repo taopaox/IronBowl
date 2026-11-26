@@ -28,8 +28,6 @@ public protocol IronBowlPlugin: AnyObject {
     var settingsPages: [SettingsPage] { get }
     /// 插件能提供给菜单栏显示的信息项。
     var menuBarItems: [MenuBarItem] { get }
-    /// 侧栏「最近」里的条目。
-    var sidebarRecents: [SidebarRecent] { get }
     /// 固定在主窗口左侧栏「固定网页」分区的条目。
     var sidebarPinnedItems: [SidebarPinnedItem] { get }
     /// 紧跟在目录插件下方缩进展示的子条目。
@@ -54,7 +52,6 @@ public extension IronBowlPlugin {
     func stop() {}
     var settingsPages: [SettingsPage] { [] }
     var menuBarItems: [MenuBarItem] { [] }
-    var sidebarRecents: [SidebarRecent] { [] }
     var sidebarPinnedItems: [SidebarPinnedItem] { [] }
     var sidebarChildren: [SidebarPinnedItem] { [] }
     func onSidebarSelect() {}
@@ -115,21 +112,6 @@ public struct SettingsPage: Identifiable {
         self.title = title
         self.systemImage = systemImage
         self.makeView = makeView
-    }
-}
-
-/// 侧栏「最近」里的一条。
-public struct SidebarRecent: Identifiable {
-    public let id: String
-    public let title: String
-    public let trailing: String
-    public let action: () -> Void
-
-    public init(id: String, title: String, trailing: String, action: @escaping () -> Void) {
-        self.id = id
-        self.title = title
-        self.trailing = trailing
-        self.action = action
     }
 }
 

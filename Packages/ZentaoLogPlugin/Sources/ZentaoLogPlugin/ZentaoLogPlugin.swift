@@ -123,33 +123,6 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
         ]
     }
 
-    public var sidebarRecents: [SidebarRecent] {
-        guard let model else { return [] }
-        let _ = model.todaySubmitted
-        let _ = model.recordedByDate
-        let _ = model.pendingByDate
-        let f = DateFormatter()
-        f.dateFormat = "M月d日"
-        return model.recentDays.prefix(5).map { day in
-            let hours = model.recordedHours(on: day)
-            let pendingH = model.pendingHours(on: day)
-            let info = model.context.workCalendar.dayInfo(day)
-            let status: String
-            if hours > 0 {
-                status = "已写 \(hoursText(hours))h"
-            } else if pendingH > 0 {
-                status = "草稿 \(hoursText(pendingH))h"
-            } else {
-                status = info.isWorkday ? "未写" : "休息"
-            }
-            let trailing = Calendar.current.isDateInToday(day) ? "今天" : CN.weekdayShort(day)
-            return SidebarRecent(id: "zentao.day.\(WorkCalendar.dayString(day))", title: "\(f.string(from: day)) · \(status)", trailing: trailing) {
-                model.context.openPlugin(ZentaoLogPlugin.pluginID)
-                Task { await model.select(date: day) }
-            }
-        }
-    }
-
     public var quickActions: [QuickAction] {
         guard let model else { return [] }
         return [

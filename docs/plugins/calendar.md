@@ -7,7 +7,7 @@
 | 文件 | 核心符号 | 职责 |
 | :--- | :--- | :--- |
 | `CalendarPlugin.swift` | `CalendarPlugin` | 暴露主视图、设置页（月历/状态栏/外观/节假日/天气）、菜单栏项（日期/农历/天气）、首页天气卡与快捷操作 |
-| `CalendarModel.swift` | `CalendarModel`, `CalendarKeys`, `MenuBarDisplayConfig`, `MenuBarSegment`, `DayCell` | 42 格月历网格计算、整分钟/整秒动态时钟、菜单栏分段格式化、天气刷新调度与倒计时文案 |
+| `CalendarModel.swift` | `CalendarModel`, `CalendarKeys`, `CalendarMenuBarPolicy`, `MenuBarDisplayConfig`, `MenuBarSegment`, `DayCell` | 42 格月历网格计算、整分钟/整秒动态时钟、菜单栏分段格式化、独立版万年历进程避让策略、天气刷新调度与倒计时文案 |
 | `Lunar/Lunar.swift` | `Lunar`, `LunarDate` | 离线农历、干支纪年/生肖、Meeus 太阳视黄经 24 节气与公历/农历/按星期节日 |
 | `Weather/Weather.swift` | `WeatherService`, `WeatherSource`, `WeatherSnapshot` | Open-Meteo（地理编码搜索城市 + 预报 + US AQI）与和风天气（预报 + AQI）数据抓取 |
 | `Views/CalendarViews.swift` | `CalendarMainView` | 完整窗口月历界面 |
@@ -19,6 +19,7 @@
 
 - **农历与节气**：农历基于系统 `Calendar(identifier: .chinese)`（按北京时间正午防跨日）；24 节气通过 Meeus 太阳视黄经迭代求解，完全离线可用。
 - **状态栏渲染**：`CalendarMenuBarLabel` 使用 `CalendarMenuBarRenderer` 将天气图标/温度/AQI、公历/星期/农历、时钟图标/时间离线绘制为高度 `22pt` 的模板 `NSImage`，避免 macOS `MenuBarExtra` 动态文本插值在切换显示项时截断或消失；设置页实时预览使用 SwiftUI `CalendarMenuBarPreview`。
+- **双进程状态栏自动避让**：`CalendarMenuBarPolicy` 监听独立版 `com.taopaox.ironbowl.calendar` 进程启停，当独立版「饭碗万年历」正在运行时，主工作台通过 `CalendarModel.shouldShowEmbeddedMenuBar` 自动隐藏内置状态栏日历（保留 `calendar.menuBar.enabled` 设置值不覆盖），并在 `CalendarStatusBarSettings` 展示提示横幅，独立版退出后自动恢复。
 - **休/班标识与倒计时**：直接读取共享 `WorkCalendar` 数据，显示「休」「班」角标，并支持百度风格倒计时（今天显示距下一个法定节假日天数）。
 - **弹出面板交互与主题**：
   - 在 `CalendarPopover` 中点击会离开弹层的操作（城市/天气设置、打开大窗口、日历设置、退出万年历）时，会通过 `\.dismissMenuBarPopover` 立即收起弹出面板；面板内月历浏览（年/月下拉切换、前后翻月、返回今天、选日期）与弹出样式实时预览（`PopoverStyleDropdown`）则保留弹层打开。

@@ -65,6 +65,11 @@ struct CalendarStatusBarSettings: View {
         Group {
             DSSection("状态栏日历", footer: "在顶部状态栏单独显示一个日历，点开就是月历。按住 ⌘ 可以拖动调整它在状态栏的位置。") {
                 DSRow("在状态栏显示日历") { DSToggle(isOn: s.binding(CalendarKeys.menuBarEnabled)) }
+                if model.isStandaloneCalendarRunning {
+                    DSBlockRow {
+                        DSBanner(.info, "检测到独立版「饭碗万年历」正在运行，主工作台已自动隐藏内置状态栏日历以避免重复显示；退出独立版后会自动恢复。")
+                    }
+                }
                 if s[CalendarKeys.menuBarEnabled] {
                     DSRow("当前预览", description: "按下方选项实时拼接显示。") {
                         MenuBarPreviewPill(model: model)

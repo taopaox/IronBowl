@@ -1,7 +1,30 @@
+import AppKit
 import Foundation
 import IronBowlKit
 import Observation
 import SwiftUI
+
+/// 主工作台与独立版万年历同时运行时的状态栏日历自动避让策略。
+public nonisolated enum CalendarMenuBarPolicy {
+    public static let standaloneBundleID = "com.taopaox.ironbowl.calendar"
+
+    public static func shouldShowEmbeddedMenuBar(settingEnabled: Bool, isStandaloneRunning: Bool) -> Bool {
+        settingEnabled && !isStandaloneRunning
+    }
+
+    @MainActor
+    public static func isStandaloneRunning(
+        bundleID: String = standaloneBundleID,
+        currentPID: pid_t = ProcessInfo.processInfo.processIdentifier,
+        excludingPID: pid_t? = nil
+    ) -> Bool {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).contains { app in
+            !app.isTerminated
+                && app.processIdentifier != currentPID
+                && app.processIdentifier != excludingPID
+        }
+    }
+}
 
 enum CalendarKeys {
     /// 每周第一天：2 = 周一，1 = 周日（Calendar.weekday）。
@@ -106,12 +129,16 @@ public final class CalendarModel {
     public private(set) var now = Date()
     /// macOS 真实的系统深浅外观，不受应用自身强制外观（`NSApp.appearance`）影响。
     public private(set) var systemColorScheme: ColorScheme
+    /// 独立版「饭碗万年历」是否正在运行（主工作台据此自动隐藏内置状态栏日历，避免重复显示）。
+    public private(set) var isStandaloneCalendarRunning = false
     private enum ClockMode { case minute, second }
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var clockTimer: Timer?
     @ObservationIgnored private var clockMode: ClockMode?
     @ObservationIgnored private var isRunning = false
     @ObservationIgnored nonisolated(unsafe) private var systemThemeObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var standaloneLaunchObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var standaloneTerminateObserver: NSObjectProtocol?
 
     nonisolated static var cal: Calendar { Lunar.gregorian }
 
@@ -131,11 +158,45 @@ public final class CalendarModel {
                 self?.refreshSystemColorScheme()
             }
         }
+        if Bundle.main.bundleIdentifier != CalendarMenuBarPolicy.standaloneBundleID {
+            isStandaloneCalendarRunning = CalendarMenuBarPolicy.isStandaloneRunning()
+            let wsCenter = NSWorkspace.shared.notificationCenter
+            standaloneLaunchObserver = wsCenter.addObserver(
+                forName: NSWorkspace.didLaunchApplicationNotification,
+                object: nil,
+                queue: nil
+            ) { [weak self] note in
+                let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                guard app?.bundleIdentifier == CalendarMenuBarPolicy.standaloneBundleID else { return }
+                Task { @MainActor [weak self] in
+                    self?.isStandaloneCalendarRunning = CalendarMenuBarPolicy.isStandaloneRunning()
+                }
+            }
+            standaloneTerminateObserver = wsCenter.addObserver(
+                forName: NSWorkspace.didTerminateApplicationNotification,
+                object: nil,
+                queue: nil
+            ) { [weak self] note in
+                let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                guard app?.bundleIdentifier == CalendarMenuBarPolicy.standaloneBundleID else { return }
+                let terminatedPID = app?.processIdentifier
+                Task { @MainActor [weak self] in
+                    self?.isStandaloneCalendarRunning = CalendarMenuBarPolicy.isStandaloneRunning(excludingPID: terminatedPID)
+                }
+            }
+        }
     }
 
     deinit {
         if let systemThemeObserver {
             DistributedNotificationCenter.default().removeObserver(systemThemeObserver)
+        }
+        let wsCenter = NSWorkspace.shared.notificationCenter
+        if let standaloneLaunchObserver {
+            wsCenter.removeObserver(standaloneLaunchObserver)
+        }
+        if let standaloneTerminateObserver {
+            wsCenter.removeObserver(standaloneTerminateObserver)
         }
     }
 
@@ -329,6 +390,14 @@ public final class CalendarModel {
     public var menuBarEnabled: Bool {
         get { settings[CalendarKeys.menuBarEnabled] }
         set { settings[CalendarKeys.menuBarEnabled] = newValue }
+    }
+
+    /// 主工作台是否应显示内置状态栏日历（独立版「饭碗万年历」运行时自动避让隐藏）。
+    public var shouldShowEmbeddedMenuBar: Bool {
+        CalendarMenuBarPolicy.shouldShowEmbeddedMenuBar(
+            settingEnabled: menuBarEnabled,
+            isStandaloneRunning: isStandaloneCalendarRunning
+        )
     }
 
     public var popoverStyle: CalendarPopoverStyle {

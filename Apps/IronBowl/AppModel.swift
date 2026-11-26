@@ -253,12 +253,14 @@ final class AppModel {
         return (plugin(CalendarPlugin.pluginID) as? CalendarPlugin)?.model
     }
 
-    /// 菜单栏单独的日历图标。
+    /// 菜单栏单独的日历图标（独立版万年历运行时自动避让隐藏，且不覆盖用户持久化开关）。
     var calendarMenuShown: Bool {
-        get { calendarModel?.menuBarEnabled ?? false }
+        get { calendarModel?.shouldShowEmbeddedMenuBar ?? false }
         set {
-            guard let model = calendarModel, model.menuBarEnabled != newValue else { return }
-            model.menuBarEnabled = newValue
+            guard let model = calendarModel, !model.isStandaloneCalendarRunning else { return }
+            if model.menuBarEnabled != newValue {
+                model.menuBarEnabled = newValue
+            }
         }
     }
 

@@ -336,3 +336,11 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
     #expect(full.size.width > dateTime.size.width)
     #expect(hasVisiblePixels(full))
 }
+
+@Test
+func calendarMenuBarPolicySuppressesEmbeddedItemWhenStandaloneIsRunning() {
+    #expect(CalendarMenuBarPolicy.shouldShowEmbeddedMenuBar(settingEnabled: true, isStandaloneRunning: false) == true)
+    #expect(CalendarMenuBarPolicy.shouldShowEmbeddedMenuBar(settingEnabled: true, isStandaloneRunning: true) == false)
+    #expect(CalendarMenuBarPolicy.shouldShowEmbeddedMenuBar(settingEnabled: false, isStandaloneRunning: false) == false)
+    #expect(CalendarMenuBarPolicy.shouldShowEmbeddedMenuBar(settingEnabled: false, isStandaloneRunning: true) == false)
+}

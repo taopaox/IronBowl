@@ -27,7 +27,7 @@
 - **菜单栏组合**：
   - 主菜单栏采用 `IronBowlKit` 的 `MenuBarCardRenderer` 将 `🍚` 与用户自定义顺序拼接的 `MenuBarItem`（见 `app.menuBarItems`）离线绘制为 `22pt` 全彩非模板 `NSImage`「双行微缩仪表卡」：深石板微卡底配 1px 亮描边，`core.offwork`、提醒与定时任务以双行堆叠展示（上行显示 `距下班 · XX%` / 加班紫色 `加班 · XX%`，下行显示中文紧凑倒计时），其余状态以竖线分隔语义色展示；「设置 → 通用 → 菜单栏显示」同步提供实时微卡预览。
   - 点击主菜单栏图标弹出的 `MenuPanel` 采用灰底白卡分层布局（`DS.groupBackground` + `DS.card`）：顶部展示品牌、版本胶囊、日期/农历/节假日标签与「工作台」快捷按钮；中部展示今日上下班主卡（`MenuWorkHeroCard`，含倒计时、进度条、加班/打卡状态与上下班时间）以及最多 4 张已启用插件概览卡片（`MenuStatusCard` 2 列网格）；下方展示「今天」与各已启用插件的快捷入口瓷砖卡（`MenuShortcutTile`，带 `sidebarBadge` 状态圆点），底部提供「设置」与「退出饭碗」。
-  - 启用 `CalendarPlugin` 时，可额外在系统菜单栏显示独立的天气/日期/农历/时间图标与月历弹出面板（由 `app.calendarMenuShown` 控制）。
+  - 启用 `CalendarPlugin` 时，可额外在系统菜单栏显示独立的天气/日期/农历/时间图标与月历弹出面板（由 `app.calendarMenuShown` 控制）；当检测到独立版 `IronBowlCalendar`（`com.taopaox.ironbowl.calendar`）正在运行时，主工作台自动隐藏内置状态栏日历以避免顶部状态栏出现两个重复万年历，且不修改用户的 `calendar.menuBar.enabled` 配置，独立版退出后自动恢复。
   - 两个状态栏 `MenuBarExtra(.window)` 面板均挂载了 `.menuBarPopoverDismissable()`：在 `MenuPanel` 点击「今天」、各插件入口、「设置」或「退出饭碗」，以及在万年历弹层点击离开弹层的操作后，会立即收起弹出面板。
 - **主窗口关闭清理**：`AppModel.mainWindow(isOpen: false)` 会调用 `webSessions.detachAllDisplays()`，将可见网页标记为后台以允许按墓碑策略回收内存。
 - **侧栏资源监控**：左下角 `ResourceCard` 位于「今天上班」卡片上方，展示 CPU 与内存占用，支持在「系统」（整机）与「饭碗」（自身主进程、子进程及活跃 `WKWebView` 渲染进程）间切换；切至「饭碗」时会在卡内直接展示 Top 3 占用项，点击可打开 `ResourceDetailPopover` 查看逐进程内存/CPU 明细、按内存或 CPU 排序，并一键休眠后台网页释放内存；采样仅在侧栏可见时通过 `.task` 定时执行（收起或关窗自动停止）。

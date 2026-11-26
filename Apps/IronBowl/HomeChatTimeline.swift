@@ -242,7 +242,7 @@ private struct AssistantMessageView: View {
         switch message.providerKind {
         case .agy: "Antigravity"
         case .codex: "Codex"
-        case nil: "工作台助手"
+        case nil: message.modelName ?? "工作台规则"
         }
     }
 
@@ -256,7 +256,7 @@ private struct AssistantMessageView: View {
                     .font(DS.font(12.5, .semibold))
                     .foregroundStyle(DS.text)
 
-                if let model = message.modelName, !model.isEmpty {
+                if message.providerKind != nil, let model = message.modelName, !model.isEmpty {
                     Text(model)
                         .font(DS.font(11))
                         .foregroundStyle(DS.textSecondary)
@@ -319,7 +319,7 @@ private struct AssistantMessageView: View {
             }
 
             if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                MarkdownMessageBody(text: message.content)
+                DSMarkdownView(text: message.content)
             } else if message.status == .streaming && !message.hasDetails {
                 Text("正在思考并连接本地代理…")
                     .font(DS.body)
@@ -343,161 +343,6 @@ private struct AssistantMessageView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// 轻量 Markdown 渲染：自动拆分代码块并提供复制按钮，正文保留换行与行内 Markdown。
-private struct MarkdownMessageBody: View {
-    let text: String
-
-    private enum Segment: Identifiable {
-        case prose(id: Int, text: String)
-        case code(id: Int, language: String, code: String)
-
-        var id: Int {
-            switch self {
-            case .prose(let id, _), .code(let id, _, _): id
-            }
-        }
-    }
-
-    private var segments: [Segment] {
-        let lines = text.components(separatedBy: "\n")
-        var result: [Segment] = []
-        var proseBuffer: [String] = []
-        var codeBuffer: [String] = []
-        var inCodeBlock = false
-        var codeLang = ""
-        var nextID = 0
-
-        func flushProse() {
-            let joined = proseBuffer.joined(separator: "\n").trimmingCharacters(in: .newlines)
-            proseBuffer.removeAll()
-            guard !joined.isEmpty else { return }
-            result.append(.prose(id: nextID, text: joined))
-            nextID += 1
-        }
-
-        func flushCode() {
-            let joined = codeBuffer.joined(separator: "\n")
-            codeBuffer.removeAll()
-            result.append(.code(id: nextID, language: codeLang, code: joined))
-            nextID += 1
-        }
-
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("```") {
-                if inCodeBlock {
-                    flushCode()
-                    inCodeBlock = false
-                    codeLang = ""
-                } else {
-                    flushProse()
-                    inCodeBlock = true
-                    codeLang = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
-                }
-            } else if inCodeBlock {
-                codeBuffer.append(line)
-            } else {
-                proseBuffer.append(line)
-            }
-        }
-
-        if inCodeBlock {
-            flushCode()
-        } else {
-            flushProse()
-        }
-        return result
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(segments) { segment in
-                switch segment {
-                case .prose(_, let content):
-                    ProseMarkdownView(text: content)
-                case .code(_, let language, let code):
-                    CodeBlockCard(language: language, code: code)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct ProseMarkdownView: View {
-    let text: String
-
-    private var attributed: AttributedString? {
-        try? AttributedString(
-            markdown: text,
-            options: AttributedString.MarkdownParsingOptions(
-                interpretedSyntax: .inlineOnlyPreservingWhitespace
-            )
-        )
-    }
-
-    var body: some View {
-        Group {
-            if let attributed {
-                Text(attributed)
-            } else {
-                Text(text)
-            }
-        }
-        .font(DS.body)
-        .foregroundStyle(DS.text)
-        .textSelection(.enabled)
-        .lineSpacing(3)
-        .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
-private struct CodeBlockCard: View {
-    let language: String
-    let code: String
-    @State private var copied = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(language.isEmpty ? "代码" : language)
-                    .font(DS.font(11.5, .medium))
-                    .foregroundStyle(DS.textSecondary)
-                Spacer()
-                Button {
-                    copyTextToPasteboard(code)
-                    copied = true
-                    Task {
-                        try? await Task.sleep(for: .seconds(1.2))
-                        copied = false
-                    }
-                } label: {
-                    Label(copied ? "已复制" : "复制", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .font(DS.font(11))
-                        .foregroundStyle(DS.textSecondary)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(DS.well)
-
-            Divider().overlay(DS.border)
-
-            ScrollView(.horizontal) {
-                Text(code)
-                    .font(DS.mono(12))
-                    .foregroundStyle(DS.text)
-                    .textSelection(.enabled)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .background(DS.card, in: .rect(cornerRadius: 9))
-        .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(DS.border) }
     }
 }
 

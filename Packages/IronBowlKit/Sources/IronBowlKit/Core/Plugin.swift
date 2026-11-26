@@ -42,6 +42,15 @@ public protocol IronBowlPlugin: AnyObject {
     var homeCards: [HomeCard] { get }
     /// 首页输入框的内容交给插件处理；处理了返回给用户看的结果，不处理返回 nil。
     func handleHomeInput(_ text: String) async -> String?
+    /// 判断首页「今天」AI 对话是否应交由本插件按工作台业务规则处理。
+    func canHandleChatIntent(_ text: String) -> Bool
+    /// 按工作台业务规则处理首页对话意图，并通过 `onProgress` 实时上报执行步骤。
+    func handleChatIntent(
+        _ text: String,
+        onProgress: @escaping @MainActor (ChatActivityItem) -> Void
+    ) async -> ChatPluginExecutionResult?
+    /// 若插件识别该对话卡片附件，返回可在聊天流内直接交互操作（编辑/重生成/提交）的视图。
+    func makeInteractiveChatCard(for attachment: ChatCardAttachment) -> AnyView?
 }
 
 public extension IronBowlPlugin {
@@ -61,6 +70,12 @@ public extension IronBowlPlugin {
     var quickActions: [QuickAction] { [] }
     var homeCards: [HomeCard] { [] }
     func handleHomeInput(_ text: String) async -> String? { nil }
+    func canHandleChatIntent(_ text: String) -> Bool { false }
+    func handleChatIntent(
+        _ text: String,
+        onProgress: @escaping @MainActor (ChatActivityItem) -> Void
+    ) async -> ChatPluginExecutionResult? { nil }
+    func makeInteractiveChatCard(for attachment: ChatCardAttachment) -> AnyView? { nil }
 }
 
 /// 左侧栏插件条目右侧的状态角标。

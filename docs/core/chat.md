@@ -26,3 +26,8 @@
   - `.all`：默认展开全部执行详情。
   - `.hideSuccessful`：运行中展开，完成后自动折叠已成功步骤，仅保留失败项。
   - `.zen`：完成后折叠全部中间过程，仅保留摘要徽标与最终回复。
+
+## 插件对话意图路由与交互式卡片
+
+- [`IronBowlPlugin`](../../Packages/IronBowlKit/Sources/IronBowlKit/Core/Plugin.swift) 新增 `canHandleChatIntent(_:)`、`handleChatIntent(_:onProgress:)` 与 `makeInteractiveChatCard(for:)`（均提供默认空实现）。
+- 首页「今天」在对话模式下发送消息时，优先匹配已启用插件的业务指令（如「生成今日日报」「生成本周周报」「生成本月月报」），并通过 `ChatStore.runPluginIntentTurn` 在当前对话内实时推送活动进度、写入 `ChatPluginExecutionResult` 并渲染可编辑/重生成/提交的交互卡片；未命中或涉及代码/排错提问时交给 `AIChatRunner`（`agy` / `codex`）。

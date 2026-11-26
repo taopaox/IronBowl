@@ -171,6 +171,196 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
         return await model.addFromSentence(text)
     }
 
+    public func canHandleChatIntent(_ text: String) -> Bool {
+        ZentaoChatHandler.match(text) != nil
+    }
+
+    public func handleChatIntent(
+        _ text: String,
+        onProgress: @escaping @MainActor (ChatActivityItem) -> Void
+    ) async -> ChatPluginExecutionResult? {
+        guard let model, let intent = ZentaoChatHandler.match(text) else { return nil }
+
+        switch intent {
+        case .quickLog(let sentence):
+            onProgress(ChatActivityItem(
+                id: "zentao-quicklog",
+                kind: .tool,
+                title: "解析一句话工作内容并写入今日草稿",
+                subtitle: sentence,
+                status: .running
+            ))
+            let reply = await model.addFromSentence(sentence)
+            let isError = reply.hasPrefix("❌")
+            onProgress(ChatActivityItem(
+                id: "zentao-quicklog",
+                kind: .tool,
+                title: "解析一句话工作内容并写入今日草稿",
+                subtitle: sentence,
+                outputText: reply,
+                status: isError ? .failed : .completed,
+                finishedAt: Date()
+            ))
+            let todayDS = WorkCalendar.dayString(Date())
+            let card = makeDailyCardAttachment(model: model, dateString: todayDS, label: "今日日报")
+            return ChatPluginExecutionResult(
+                replyText: reply,
+                cards: isError ? [] : [card],
+                isError: isError
+            )
+
+        case .generateDaily(let dayOffset):
+            let base = Calendar.current.startOfDay(for: Date())
+            let targetDate = Calendar.current.date(byAdding: .day, value: dayOffset, to: base) ?? base
+            let ds = WorkCalendar.dayString(targetDate)
+            let label = dayOffset == 0 ? "今日日报" : "昨日日报"
+
+            onProgress(ChatActivityItem(
+                id: "zentao-scan",
+                kind: .tool,
+                title: "扫描本地 Git 提交记录",
+                subtitle: ds,
+                status: .running
+            ))
+            await model.select(date: targetDate)
+            await model.scan()
+            let repoSummary = model.activities.isEmpty
+                ? "未发现本地 Git 提交"
+                : model.activities.map { "\($0.repoName)：\($0.commits.count) 次提交" }.joined(separator: "\n")
+            onProgress(ChatActivityItem(
+                id: "zentao-scan",
+                kind: .tool,
+                title: "扫描本地 Git 提交记录",
+                subtitle: "\(model.activities.reduce(0) { $0 + $1.commits.count }) 次提交",
+                outputText: repoSummary,
+                status: .completed,
+                finishedAt: Date()
+            ))
+
+            if model.isConfigured {
+                onProgress(ChatActivityItem(
+                    id: "zentao-sync",
+                    kind: .tool,
+                    title: "同步禅道任务列表与已记工时",
+                    status: .running
+                ))
+                await model.loadTasks()
+                await model.loadRecentRecorded()
+                onProgress(ChatActivityItem(
+                    id: "zentao-sync",
+                    kind: .tool,
+                    title: "同步禅道任务列表与已记工时",
+                    subtitle: "\(model.openTasks.count) 个进行中任务",
+                    status: .completed,
+                    finishedAt: Date()
+                ))
+            }
+
+            onProgress(ChatActivityItem(
+                id: "zentao-generate",
+                kind: .tool,
+                title: "按项目规则生成日报草稿",
+                subtitle: ds,
+                status: .running
+            ))
+            await model.generate()
+            let genError = model.errorMessage
+            onProgress(ChatActivityItem(
+                id: "zentao-generate",
+                kind: .tool,
+                title: "按项目规则生成日报草稿",
+                subtitle: model.message ?? "\(model.pendingEntries(forDateString: ds).count) 条待提交草稿",
+                outputText: genError ?? model.message,
+                status: genError == nil ? .completed : .failed,
+                finishedAt: Date()
+            ))
+
+            let reply = buildDailyReplyMarkdown(model: model, dateString: ds, label: label)
+            let card = makeDailyCardAttachment(model: model, dateString: ds, label: label)
+            return ChatPluginExecutionResult(replyText: reply, cards: [card])
+
+        case .showDaily(let dayOffset):
+            let base = Calendar.current.startOfDay(for: Date())
+            let targetDate = Calendar.current.date(byAdding: .day, value: dayOffset, to: base) ?? base
+            let ds = WorkCalendar.dayString(targetDate)
+            let label = dayOffset == 0 ? "今日日报" : "昨日日报"
+
+            if model.isConfigured {
+                onProgress(ChatActivityItem(
+                    id: "zentao-sync",
+                    kind: .tool,
+                    title: "同步禅道最新记录",
+                    subtitle: ds,
+                    status: .running
+                ))
+                await model.select(date: targetDate)
+                await model.loadRecentRecorded()
+                onProgress(ChatActivityItem(
+                    id: "zentao-sync",
+                    kind: .tool,
+                    title: "同步禅道最新记录",
+                    subtitle: ds,
+                    status: .completed,
+                    finishedAt: Date()
+                ))
+            }
+
+            let reply = buildDailyReplyMarkdown(model: model, dateString: ds, label: label)
+            let card = makeDailyCardAttachment(model: model, dateString: ds, label: label)
+            return ChatPluginExecutionResult(replyText: reply, cards: [card])
+        }
+    }
+
+    public func makeInteractiveChatCard(for attachment: ChatCardAttachment) -> AnyView? {
+        guard let model, let ds = ZentaoChatHandler.dateString(fromCardID: attachment.cardID) else {
+            return nil
+        }
+        return AnyView(ZentaoDailyChatCard(model: model, dateString: ds))
+    }
+
+    private func makeDailyCardAttachment(model: LogModel, dateString: String, label: String) -> ChatCardAttachment {
+        let pending = model.pendingEntries(forDateString: dateString)
+        let recorded = model.recordedEntries(forDateString: dateString)
+        let pHours = pending.reduce(0) { $0 + $1.hours }
+        let rHours = recorded.reduce(0) { $0 + $1.hours }
+        let value = !pending.isEmpty
+            ? "待提交 \(hoursText(pHours))h"
+            : (rHours > 0 ? "已写 \(hoursText(rHours))h" : "未生成")
+        return ChatCardAttachment(
+            cardID: ZentaoChatHandler.cardID(forDateString: dateString),
+            label: label,
+            valueSnapshot: value,
+            detailSnapshot: dateString
+        )
+    }
+
+    private func buildDailyReplyMarkdown(model: LogModel, dateString: String, label: String) -> String {
+        let pending = model.pendingEntries(forDateString: dateString)
+        let recorded = model.recordedEntries(forDateString: dateString)
+        var lines: [String] = []
+        lines.append("### \(label)（\(dateString)）")
+        if let err = model.errorMessage {
+            lines.append("> ⚠️ \(err)")
+        } else if let msg = model.message {
+            lines.append(msg)
+        }
+        if !pending.isEmpty {
+            let total = pending.reduce(0) { $0 + $1.hours }
+            lines.append("**待提交草稿（\(pending.count) 条 · \(hoursText(total))h）**")
+            for entry in pending {
+                let taskName = model.task(entry.taskID).map { "#\($0.id) \($0.name)" } ?? (entry.taskID.map { "#\($0)" } ?? "未选任务")
+                let tag = entry.isOvertime ? " `[加班]`" : ""
+                lines.append("- **\(taskName)**（\(hoursText(entry.hours))h）\(tag)：\(entry.work.replacingOccurrences(of: "\n", with: " "))")
+            }
+        }
+        if !recorded.isEmpty {
+            let total = recorded.reduce(0) { $0 + $1.hours }
+            lines.append("**已入账禅道（\(recorded.count) 条 · \(hoursText(total))h）**")
+        }
+        lines.append("你可以直接在下方卡片里修改任务、工时与内容，或点击「提交到禅道」。")
+        return lines.joined(separator: "\n\n")
+    }
+
     public var menuBarItems: [MenuBarItem] {
         guard let model, let scheduler else { return [] }
         return [

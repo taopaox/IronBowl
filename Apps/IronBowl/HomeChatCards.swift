@@ -79,23 +79,50 @@ struct HomeChatCardStrip: View {
     let attachments: [ChatCardAttachment]
     var onAskWithCard: ((ChatCardAttachment) -> Void)?
 
+    private var interactiveAttachments: [ChatCardAttachment] {
+        attachments.filter { resolveInteractiveView(for: $0) != nil }
+    }
+
+    private var metricAttachments: [ChatCardAttachment] {
+        attachments.filter { resolveInteractiveView(for: $0) == nil }
+    }
+
     private var columns: [GridItem] {
-        if attachments.count <= 1 {
+        if metricAttachments.count <= 1 {
             return [GridItem(.flexible())]
         }
         return [GridItem(.adaptive(minimum: 180), spacing: 10)]
     }
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 10) {
-            ForEach(attachments) { attachment in
-                HomeChatCardCell(
-                    app: app,
-                    attachment: attachment,
-                    onAskWithCard: onAskWithCard
-                )
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(interactiveAttachments) { attachment in
+                if let view = resolveInteractiveView(for: attachment) {
+                    view
+                }
+            }
+
+            if !metricAttachments.isEmpty {
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(metricAttachments) { attachment in
+                        HomeChatCardCell(
+                            app: app,
+                            attachment: attachment,
+                            onAskWithCard: onAskWithCard
+                        )
+                    }
+                }
             }
         }
+    }
+
+    private func resolveInteractiveView(for attachment: ChatCardAttachment) -> AnyView? {
+        for plugin in app.enabledPlugins {
+            if let view = plugin.makeInteractiveChatCard(for: attachment) {
+                return view
+            }
+        }
+        return nil
     }
 }
 
@@ -229,6 +256,34 @@ struct HomeCardPickerPopover: View {
             Divider().overlay(DS.border)
 
             VStack(spacing: 6) {
+                if app.enabledPlugins.contains(where: { $0.id == "zentao.log" }) {
+                    Button {
+                        let today = WorkCalendar.dayString(Date())
+                        onInsertCards([
+                            ChatCardAttachment(
+                                cardID: "zentao.daily.interactive:\(today)",
+                                label: "今日日报",
+                                valueSnapshot: "可编辑操作",
+                                detailSnapshot: today
+                            ),
+                        ])
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "square.and.pencil")
+                                .foregroundStyle(DS.brand)
+                            Text("插入「今日日报」可操作卡片（编辑 / 提交禅道）")
+                                .font(DS.font(13, .medium))
+                            Spacer()
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundStyle(DS.textSecondary)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(DS.well, in: .rect(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 Button {
                     onInsertCards(cards.map(HomeCardCatalog.snapshot(of:)))
                 } label: {

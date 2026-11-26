@@ -35,6 +35,7 @@ IronBowl 的 UI 规范集中在 [`DesignSystem.swift`](../../Packages/IronBowlKi
 | :--- | :--- |
 | `DSPageHeader` | 页面顶栏（左标题 + 自定义前置视图 + 右侧操作区），内置 `.windowTitleBar()` |
 | `DSCard` | `12pt` 圆角白卡，支持 `padding` 与 `dashed: true` 虚线添加卡 |
+| `DSMarkdown` / `DSMarkdownView` | 块级与行内 Markdown 渲染组件（[`DSMarkdown.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/UI/DSMarkdown.swift)，支持 1~6 级标题、缩进与任务列表、引用块、GFM 表格、带复制代码块与中文标点相邻行内加粗） |
 | `DSMetric` | 无边框浅灰指标卡（小标签 + 大号等宽数字 + 副说明） |
 | `DSBanner` | 提示横幅，支持 `.info` / `.success` / `.warning` / `.danger` 与文本可选中 |
 | `DSSection` / `DSRow` / `DSBlockRow` | 设置页分组容器，自动在相邻行间绘制内缩 `Divider` |

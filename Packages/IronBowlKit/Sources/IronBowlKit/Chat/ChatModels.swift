@@ -387,6 +387,26 @@ public nonisolated struct ChatThread: Codable, Sendable, Identifiable, Equatable
     }
 }
 
+/// 插件拦截首页对话意图后返回的执行结果与交互卡片。
+public nonisolated struct ChatPluginExecutionResult: Sendable {
+    public var replyText: String
+    public var cards: [ChatCardAttachment]
+    public var activities: [ChatActivityItem]
+    public var isError: Bool
+
+    public init(
+        replyText: String,
+        cards: [ChatCardAttachment] = [],
+        activities: [ChatActivityItem] = [],
+        isError: Bool = false
+    ) {
+        self.replyText = replyText
+        self.cards = cards
+        self.activities = activities
+        self.isError = isError
+    }
+}
+
 public nonisolated enum ChatKeys {
     public static let defaultWorkspace = SettingKey<String>("chat.defaultWorkspace", default: "")
     public static let detailLevel = SettingKey<ChatOutputDetailLevel>("chat.detailLevel", default: .all)

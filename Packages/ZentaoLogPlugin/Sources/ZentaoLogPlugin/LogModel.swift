@@ -148,6 +148,73 @@ final class LogModel {
         pendingEntries(on: day).reduce(0) { $0 + $1.hours }
     }
 
+    func pendingEntries(forDateString ds: String) -> [DraftEntry] {
+        pendingByDate[ds] ?? []
+    }
+
+    func recordedEntries(forDateString ds: String) -> [DraftEntry] {
+        recordedByDate[ds] ?? []
+    }
+
+    func updatePendingDraft(_ entry: DraftEntry, forDateString ds: String) {
+        var list = pendingByDate[ds] ?? []
+        guard let idx = list.firstIndex(where: { $0.id == entry.id }) else { return }
+        list[idx] = entry
+        DraftGenerator.recomputeLefts(&list, tasks: tasks, fallbackTaskID: settings[LogKeys.fallbackTaskID])
+        setPending(list, for: ds)
+        if dateString == ds {
+            loadDraftsForCurrentDate()
+        }
+    }
+
+    func addManualPending(forDateString ds: String) {
+        var list = pendingByDate[ds] ?? []
+        list.append(DraftEntry(taskID: settings[LogKeys.fallbackTaskID], hours: 1, left: 0, work: "", isManual: true))
+        DraftGenerator.recomputeLefts(&list, tasks: tasks, fallbackTaskID: settings[LogKeys.fallbackTaskID])
+        setPending(list, for: ds)
+        if dateString == ds {
+            loadDraftsForCurrentDate()
+        }
+    }
+
+    func removePendingDraft(id: UUID, forDateString ds: String) {
+        var list = (pendingByDate[ds] ?? []).filter { $0.id != id }
+        DraftGenerator.recomputeLefts(&list, tasks: tasks, fallbackTaskID: settings[LogKeys.fallbackTaskID])
+        setPending(list, for: ds)
+        if dateString == ds {
+            loadDraftsForCurrentDate()
+        }
+    }
+
+    func submitPending(forDateString ds: String) async -> (succeeded: Int, failures: [String]) {
+        guard !isSubmitting else { return (0, ["正在提交中，请稍候"]) }
+        isSubmitting = true
+        defer { isSubmitting = false }
+        errorMessage = nil
+        let toSubmit = pendingByDate[ds] ?? []
+        let result = await submitEntries(toSubmit, for: ds)
+        if result.failures.isEmpty {
+            message = "已提交 \(result.succeeded.count) 条日志到禅道"
+        } else {
+            errorMessage = (["成功 \(result.succeeded.count) 条，以下失败："] + result.failures).joined(separator: "\n")
+        }
+        await loadTasks()
+        return (result.succeeded.count, result.failures)
+    }
+
+    func generateForDate(_ targetDate: Date, forceScan: Bool = true) async {
+        let normalized = Calendar.current.startOfDay(for: targetDate)
+        if !Calendar.current.isDate(date, inSameDayAs: normalized) {
+            await select(date: normalized)
+        } else if forceScan {
+            await scan()
+        }
+        if isConfigured {
+            await loadTasks()
+        }
+        await generate()
+    }
+
     /// 最近 7 天（含今天）。
     var recentDays: [Date] {
         let today = Calendar.current.startOfDay(for: Date())

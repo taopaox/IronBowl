@@ -6,7 +6,9 @@
 
 | 文件 | 核心符号 | 职责 |
 | :--- | :--- | :--- |
-| `ReportPlugin.swift` | `ReportPlugin`, `MonthlyReportPlugin` | 两个独立侧边栏插件入口：周报（ID：`report`，锁定 `.weekly`，含「Tita 对接」设置页）与月报（ID：`report.monthly`，锁定 `.monthly`），通过 `sidebarBadge` 在侧栏展示「本周未写 / 本月未写 / 待推Tita」角标，各自提供对应生成设置页、首页快捷操作与概览卡片 |
+| `ReportPlugin.swift` | `ReportPlugin`, `MonthlyReportPlugin` | 两个独立侧边栏插件入口：周报（ID：`report`，锁定 `.weekly`，含「Tita 对接」设置页）与月报（ID：`report.monthly`，锁定 `.monthly`），通过 `sidebarBadge` 在侧栏展示「本周未写 / 本月未写 / 待推Tita」角标，各自提供对应生成设置页、首页快捷操作、概览卡片及对话意图路由 |
+| `ReportChatHandler.swift` | `ReportChatHandler`, `ReportChatIntent` | 识别首页对话中的生成/查看周报或月报指令（过滤代码/调试类提问） |
+| `Views/ReportChatCard.swift` | `ReportChatCard` | 在首页聊天流内直接展示并操作的周报/月报卡片（Markdown 预览、展开、重新生成、复制与打开 Tita） |
 | `ReportModel.swift` | `WeeklyReportModel` | `@Observable` 业务状态：支持 `lockedPeriodKind` 锁定周/月模式、上下周与上下月切换、调用 `ZentaoDailyLogService` 查区间日报、生成/编辑/自动保存、历史列表、复制/导出 Markdown 与 Tita 状态查询/草稿保存/提交 |
 | `Model/WeekRange.swift` | `WeekRange` | 按中国工作周（周一至周日）与 ISO 周历计算起止日期、周次标题、上下周偏移及「本周 / 上周」标签 |
 | `Model/MonthRange.swift` | `MonthRange`, `MonthWeekSlice` | 按自然月（1 日至月末）计算起止日期、周分片（`weeks`）、上下月偏移及「本月 / 上月」标签 |

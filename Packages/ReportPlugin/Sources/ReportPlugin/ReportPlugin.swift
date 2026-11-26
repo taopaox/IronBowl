@@ -95,6 +95,25 @@ public final class ReportPlugin: IronBowlPlugin {
             ),
         ]
     }
+
+    public func canHandleChatIntent(_ text: String) -> Bool {
+        ReportChatHandler.match(text, periodKind: .weekly) != nil
+    }
+
+    public func handleChatIntent(
+        _ text: String,
+        onProgress: @escaping @MainActor (ChatActivityItem) -> Void
+    ) async -> ChatPluginExecutionResult? {
+        guard let model, let intent = ReportChatHandler.match(text, periodKind: .weekly) else { return nil }
+        return await executeReportChatIntent(model: model, periodKind: .weekly, intent: intent, onProgress: onProgress)
+    }
+
+    public func makeInteractiveChatCard(for attachment: ChatCardAttachment) -> AnyView? {
+        guard let model, let key = ReportChatHandler.periodKey(fromCardID: attachment.cardID, periodKind: .weekly) else {
+            return nil
+        }
+        return AnyView(ReportChatCard(model: model, periodKind: .weekly, periodKey: key))
+    }
 }
 
 /// 月报插件：独立侧边栏菜单，查询本月每日日报并生成月报。
@@ -186,4 +205,105 @@ public final class MonthlyReportPlugin: IronBowlPlugin {
             ),
         ]
     }
+
+    public func canHandleChatIntent(_ text: String) -> Bool {
+        ReportChatHandler.match(text, periodKind: .monthly) != nil
+    }
+
+    public func handleChatIntent(
+        _ text: String,
+        onProgress: @escaping @MainActor (ChatActivityItem) -> Void
+    ) async -> ChatPluginExecutionResult? {
+        guard let model, let intent = ReportChatHandler.match(text, periodKind: .monthly) else { return nil }
+        return await executeReportChatIntent(model: model, periodKind: .monthly, intent: intent, onProgress: onProgress)
+    }
+
+    public func makeInteractiveChatCard(for attachment: ChatCardAttachment) -> AnyView? {
+        guard let model, let key = ReportChatHandler.periodKey(fromCardID: attachment.cardID, periodKind: .monthly) else {
+            return nil
+        }
+        return AnyView(ReportChatCard(model: model, periodKind: .monthly, periodKey: key))
+    }
+}
+
+@MainActor
+private func executeReportChatIntent(
+    model: WeeklyReportModel,
+    periodKind: ReportPeriodKind,
+    intent: ReportChatIntent,
+    onProgress: @escaping @MainActor (ChatActivityItem) -> Void
+) async -> ChatPluginExecutionResult {
+    let noun = periodKind.displayName
+    let previous: Bool
+    let shouldGenerate: Bool
+    switch intent {
+    case .generate(let prev):
+        previous = prev
+        shouldGenerate = true
+    case .show(let prev):
+        previous = prev
+        shouldGenerate = false
+    }
+
+    onProgress(ChatActivityItem(
+        id: "report-logs",
+        kind: .tool,
+        title: "查询\(noun)关联的每日日报",
+        status: .running
+    ))
+    switch periodKind {
+    case .weekly:
+        let week = WeekRange.containing(Date()).shifted(byWeeks: previous ? -1 : 0)
+        await model.selectWeek(week)
+    case .monthly:
+        let month = MonthRange.containing(Date()).shifted(byMonths: previous ? -1 : 0)
+        await model.selectMonth(month)
+    }
+    onProgress(ChatActivityItem(
+        id: "report-logs",
+        kind: .tool,
+        title: "查询\(noun)关联的每日日报",
+        subtitle: "\(model.loggedDaysCount) 天有记录 · \(WorkCalendar.hoursText(model.totalHours))h",
+        status: .completed,
+        finishedAt: Date()
+    ))
+
+    if shouldGenerate {
+        onProgress(ChatActivityItem(
+            id: "report-generate",
+            kind: .tool,
+            title: "按项目模板汇总生成\(noun)",
+            subtitle: model.activePeriodTitle,
+            status: .running
+        ))
+        await model.generate()
+        let err = model.errorMessage
+        onProgress(ChatActivityItem(
+            id: "report-generate",
+            kind: .tool,
+            title: "按项目模板汇总生成\(noun)",
+            subtitle: err ?? (model.message ?? "已完成"),
+            outputText: err ?? model.message,
+            status: err == nil ? .completed : .failed,
+            finishedAt: Date()
+        ))
+    }
+
+    let card = ChatCardAttachment(
+        cardID: ReportChatHandler.cardID(periodKind: periodKind, periodKey: model.activePeriodKey),
+        label: model.activePeriodTitle + noun,
+        valueSnapshot: model.hasReportContent ? "已生成" : "未生成",
+        detailSnapshot: model.activePeriodShortRangeText
+    )
+
+    let reply: String
+    if let err = model.errorMessage {
+        reply = "### \(model.activePeriodTitle)\(noun)\n\n> ⚠️ \(err)"
+    } else if model.hasReportContent {
+        reply = "已为你准备好 **\(model.activePeriodTitle)\(noun)**（共 \(model.loggedDaysCount) 天 · \(WorkCalendar.hoursText(model.totalHours))h），可直接在下方卡片预览、复制或前往\(noun)页推送 Tita。"
+    } else {
+        reply = "当前周期暂无\(noun)内容，可点击下方卡片「立即生成」。"
+    }
+
+    return ChatPluginExecutionResult(replyText: reply, cards: [card])
 }

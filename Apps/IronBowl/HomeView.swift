@@ -290,6 +290,14 @@ struct HomeView: View {
                 if !actions.isEmpty {
                     ScrollView(.horizontal) {
                         HStack(spacing: 8) {
+                            ForEach(suggestedChatIntents, id: \.title) { item in
+                                Button {
+                                    sendSuggestedIntent(item.prompt)
+                                } label: {
+                                    Label(item.title, systemImage: item.systemImage)
+                                }
+                                .buttonStyle(.dsChip)
+                            }
                             ForEach(actions) { action in
                                 Button { action.action() } label: {
                                     Label(action.title, systemImage: action.systemImage)
@@ -593,6 +601,25 @@ struct HomeView: View {
         _ = app.chat.insertCards(cards, into: activeThread?.id)
     }
 
+    private var suggestedChatIntents: [(title: String, systemImage: String, prompt: String)] {
+        var items: [(String, String, String)] = []
+        if app.enabledPlugins.contains(where: { $0.id == "zentao.log" }) {
+            items.append(("生成今日日报（对话卡片）", "doc.badge.plus", "生成今日日报"))
+        }
+        if app.enabledPlugins.contains(where: { $0.id == "report" }) {
+            items.append(("生成本周周报（对话卡片）", "doc.text", "生成本周周报"))
+        }
+        if app.enabledPlugins.contains(where: { $0.id == "report.monthly" }) {
+            items.append(("生成本月月报（对话卡片）", "doc.richtext", "生成本月月报"))
+        }
+        return items
+    }
+
+    private func sendSuggestedIntent(_ prompt: String) {
+        input = prompt
+        Task { await submitInput() }
+    }
+
     private func submitInput() async {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -603,14 +630,28 @@ struct HomeView: View {
             let cardsToAttach = pendingCards
             input = ""
             pendingCards = []
-            app.chat.sendMessage(
-                text,
-                attachedCards: cardsToAttach,
-                providerKind: activeProviderKind,
-                workspacePath: activeWorkspacePath,
-                permissionMode: activePermissionMode,
-                in: activeThread?.id
-            )
+            if let matchedPlugin = app.enabledPlugins.first(where: { $0.canHandleChatIntent(text) }) {
+                app.chat.runPluginIntentTurn(
+                    text,
+                    attachedCards: cardsToAttach,
+                    providerKind: activeProviderKind,
+                    workspacePath: activeWorkspacePath,
+                    permissionMode: activePermissionMode,
+                    in: activeThread?.id
+                ) { onProgress in
+                    await matchedPlugin.handleChatIntent(text, onProgress: onProgress)
+                        ?? ChatPluginExecutionResult(replyText: "未能处理该指令。", isError: true)
+                }
+            } else {
+                app.chat.sendMessage(
+                    text,
+                    attachedCards: cardsToAttach,
+                    providerKind: activeProviderKind,
+                    workspacePath: activeWorkspacePath,
+                    permissionMode: activePermissionMode,
+                    in: activeThread?.id
+                )
+            }
 
         case .quickLog:
             guard !sendingQuickLog else { return }

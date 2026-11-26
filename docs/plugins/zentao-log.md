@@ -6,7 +6,9 @@
 
 | 文件 | 核心符号 | 职责 |
 | :--- | :--- | :--- |
-| `ZentaoLogPlugin.swift` | `ZentaoLogPlugin`, `LogReminderScheduler` | 插件入口（左侧栏归入「汇报」分组并显示为「日报」，设置与菜单栏保留「禅道日志」）、首页快捷操作/一句话记日志、菜单栏状态与提醒调度 |
+| `ZentaoLogPlugin.swift` | `ZentaoLogPlugin`, `LogReminderScheduler` | 插件入口（左侧栏归入「汇报」分组并显示为「日报」，设置与菜单栏保留「禅道日志」）、首页快捷操作/一句话记日志、对话意图路由、菜单栏状态与提醒调度 |
+| `ZentaoChatHandler.swift` | `ZentaoChatHandler`, `ZentaoChatIntent` | 识别首页对话中的生成/查看日报及 `记日志：` 指令（过滤代码/调试类提问） |
+| `Views/ZentaoDailyChatCard.swift` | `ZentaoDailyChatCard` | 在首页聊天流内直接渲染并操作的日报卡片（切换禅道任务、调整工时、修改内容、记加班、重新生成与提交禅道） |
 | `LogModel.swift` | `LogModel` | `@Observable` 业务状态：扫描、任务/已写工时同步、草稿读写、当日工时/加班、提交与 AI 解析 |
 | `DailyLogQuery.swift` | `ZentaoDailyLogService`, `DailyLogItem`, `DailyLogRangeResult` | 面向周报等跨天插件的只读区间日报查询服务（融合禅道远端、本地已提交与未提交草稿并去重） |
 | `Git/GitScanner.swift` | `GitScanner`, `RepoActivity`, `GitCommit` | 多层级发现 Git 仓库、按作者邮箱和本地当天 00:00–24:00 扫描提交（跨仓库按哈希去重） |

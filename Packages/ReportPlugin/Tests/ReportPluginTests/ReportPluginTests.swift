@@ -1089,3 +1089,15 @@ import Testing
     await monthlyPlugin.model?.generate()
     #expect(monthlyPlugin.sidebarBadge == nil)
 }
+
+@Test func matchesWeeklyAndMonthlyChatIntentsAndSkipsCodeQuestions() {
+    #expect(ReportChatHandler.match("生成本周周报", periodKind: .weekly) == .generate(previousPeriod: false))
+    #expect(ReportChatHandler.match("生成上周周报", periodKind: .weekly) == .generate(previousPeriod: true))
+    #expect(ReportChatHandler.match("查看周报", periodKind: .weekly) == .show(previousPeriod: false))
+    #expect(ReportChatHandler.match("生成本月月报", periodKind: .monthly) == .generate(previousPeriod: false))
+    #expect(ReportChatHandler.match("生成上个月月报", periodKind: .monthly) == .generate(previousPeriod: true))
+
+    #expect(ReportChatHandler.match("修复周报页面的 bug", periodKind: .weekly) == nil)
+    #expect(ReportChatHandler.match("ReportPlugin 代码里周报怎么生成的", periodKind: .weekly) == nil)
+    #expect(ReportChatHandler.match("分析一下月报测试文件", periodKind: .monthly) == nil)
+}

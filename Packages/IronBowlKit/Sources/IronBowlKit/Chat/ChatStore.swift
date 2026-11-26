@@ -267,6 +267,69 @@ public final class ChatStore {
 
     // MARK: - 发送消息与流式执行
 
+    public func runPluginIntentTurn(
+        _ rawText: String,
+        attachedCards: [ChatCardAttachment] = [],
+        providerKind: AIProviderKind,
+        workspacePath: String,
+        permissionMode: ChatPermissionMode,
+        in explicitThreadID: String? = nil,
+        executor: @escaping @MainActor (@escaping @MainActor (ChatActivityItem) -> Void) async -> ChatPluginExecutionResult
+    ) {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        let thread = resolveOrCreateThread(
+            titleSeed: text,
+            providerKind: providerKind,
+            workspacePath: workspacePath,
+            permissionMode: permissionMode,
+            in: explicitThreadID
+        )
+        guard !runningThreadIDs.contains(thread.id) else { return }
+
+        let userMessage = ChatMessage(
+            threadID: thread.id,
+            role: .user,
+            content: text,
+            status: .completed,
+            cards: attachedCards
+        )
+        appendMessage(userMessage, to: thread.id)
+
+        let assistantMessage = ChatMessage(
+            threadID: thread.id,
+            role: .assistant,
+            content: "",
+            status: .streaming,
+            providerKind: nil,
+            modelName: "工作台规则"
+        )
+        appendMessage(assistantMessage, to: thread.id)
+
+        let threadID = thread.id
+        let messageID = assistantMessage.id
+        runningThreadIDs.insert(threadID)
+
+        let runState = ActiveRun()
+        activeRuns[threadID] = runState
+        let startedAt = Date()
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await executor { [weak self] activity in
+                self?.handlePluginProgress(activity, threadID: threadID, messageID: messageID)
+            }
+            self.finalizePluginRun(
+                threadID: threadID,
+                messageID: messageID,
+                result: result,
+                duration: Date().timeIntervalSince(startedAt)
+            )
+        }
+        runState.task = task
+    }
+
     public func sendMessage(
         _ rawText: String,
         attachedCards: [ChatCardAttachment] = [],
@@ -278,27 +341,13 @@ public final class ChatStore {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        var thread: ChatThread
-        if let tid = explicitThreadID ?? selectedThreadID,
-           let existing = threads.first(where: { $0.id == tid }) {
-            thread = existing
-            if thread.providerKind != providerKind || thread.workspacePath != workspacePath || thread.permissionMode != permissionMode {
-                updateThread(tid, providerKind: providerKind, workspacePath: workspacePath, permissionMode: permissionMode)
-                thread = threads.first(where: { $0.id == tid }) ?? thread
-            }
-            // 若是新建的空对话或默认标题“新对话”，用首条提问更新标题
-            if (messagesByThread[thread.id] ?? []).isEmpty || thread.title == "新对话" {
-                renameThread(thread.id, title: Self.makeTitle(from: text))
-                thread = threads.first(where: { $0.id == tid }) ?? thread
-            }
-        } else {
-            thread = createThread(
-                title: Self.makeTitle(from: text),
-                providerKind: providerKind,
-                workspacePath: workspacePath,
-                permissionMode: permissionMode
-            )
-        }
+        let thread = resolveOrCreateThread(
+            titleSeed: text,
+            providerKind: providerKind,
+            workspacePath: workspacePath,
+            permissionMode: permissionMode,
+            in: explicitThreadID
+        )
 
         guard !runningThreadIDs.contains(thread.id) else { return }
 
@@ -581,6 +630,81 @@ public final class ChatStore {
         msg.updatedAt = Date()
         messagesByThread[threadID]?[msgIndex] = msg
         persistMessage(msg)
+    }
+
+    private func resolveOrCreateThread(
+        titleSeed: String,
+        providerKind: AIProviderKind,
+        workspacePath: String,
+        permissionMode: ChatPermissionMode,
+        in explicitThreadID: String?
+    ) -> ChatThread {
+        if let tid = explicitThreadID ?? selectedThreadID,
+           let existing = threads.first(where: { $0.id == tid }) {
+            var thread = existing
+            if thread.providerKind != providerKind || thread.workspacePath != workspacePath || thread.permissionMode != permissionMode {
+                updateThread(tid, providerKind: providerKind, workspacePath: workspacePath, permissionMode: permissionMode)
+                thread = threads.first(where: { $0.id == tid }) ?? thread
+            }
+            if (messagesByThread[thread.id] ?? []).isEmpty || thread.title == "新对话" {
+                renameThread(thread.id, title: Self.makeTitle(from: titleSeed))
+                thread = threads.first(where: { $0.id == tid }) ?? thread
+            }
+            return thread
+        }
+        return createThread(
+            title: Self.makeTitle(from: titleSeed),
+            providerKind: providerKind,
+            workspacePath: workspacePath,
+            permissionMode: permissionMode
+        )
+    }
+
+    private func handlePluginProgress(
+        _ activity: ChatActivityItem,
+        threadID: String,
+        messageID: String
+    ) {
+        guard let msgIndex = messagesByThread[threadID]?.firstIndex(where: { $0.id == messageID }),
+              var msg = messagesByThread[threadID]?[msgIndex] else { return }
+        upsertActivity(activity, into: &msg.activities)
+        msg.updatedAt = Date()
+        messagesByThread[threadID]?[msgIndex] = msg
+    }
+
+    private func finalizePluginRun(
+        threadID: String,
+        messageID: String,
+        result: ChatPluginExecutionResult,
+        duration: TimeInterval
+    ) {
+        activeRuns.removeValue(forKey: threadID)
+        runningThreadIDs.remove(threadID)
+
+        guard let msgIndex = messagesByThread[threadID]?.firstIndex(where: { $0.id == messageID }),
+              var msg = messagesByThread[threadID]?[msgIndex] else { return }
+
+        for item in result.activities {
+            upsertActivity(item, into: &msg.activities)
+        }
+        markActivitiesFinished(&msg.activities, succeeded: !result.isError)
+        msg.content = result.replyText
+        msg.cards = result.cards
+        msg.durationSeconds = duration
+        msg.status = result.isError ? .failed : .completed
+        if result.isError {
+            msg.errorMessage = result.replyText
+        }
+        msg.updatedAt = Date()
+        messagesByThread[threadID]?[msgIndex] = msg
+        persistMessage(msg)
+
+        if let tIdx = threads.firstIndex(where: { $0.id == threadID }) {
+            threads[tIdx].updatedAt = Date()
+            let updated = threads[tIdx]
+            sortThreads()
+            persistThread(updated)
+        }
     }
 
     // MARK: - 内部辅助

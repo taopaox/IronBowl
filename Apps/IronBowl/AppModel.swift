@@ -6,7 +6,6 @@ import IronBowlKit
 import Observation
 import ReportPlugin
 import SchedulerPlugin
-import ServiceManagement
 import SwiftUI
 import ZentaoLogPlugin
 
@@ -56,6 +55,7 @@ final class AppModel {
     let scheduler: TaskScheduler
     let systemMonitor: SystemMonitor
     let updater = AppUpdater()
+    let launchAtLogin = LaunchAtLoginController()
     let plugins: [IronBowlPlugin]
     var context: PluginContext!
 
@@ -64,7 +64,6 @@ final class AppModel {
     /// 菜单栏倒计时用的时钟，每 30 秒更新。
     var now = Date()
     @ObservationIgnored private var clock: Timer?
-    var launchError: String?
     @ObservationIgnored var openMainWindow: (() -> Void)?
     @ObservationIgnored private var started = Set<String>()
 
@@ -390,19 +389,5 @@ final class AppModel {
         }
         applyDockMode()
         if isOpen { NSApp.activate() }
-    }
-
-    // MARK: 开机自启
-
-    var launchAtLogin: Bool {
-        get { SMAppService.mainApp.status == .enabled }
-        set {
-            do {
-                if newValue { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-                launchError = nil
-            } catch {
-                launchError = "设置开机自启失败：\(error.localizedDescription)"
-            }
-        }
     }
 }

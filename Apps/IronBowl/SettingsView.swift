@@ -114,9 +114,7 @@ struct GeneralSettings: View {
     var body: some View {
         let s = app.settings
         DSSection("启动与显示") {
-            DSRow("开机自动启动", description: app.launchError ?? "登录电脑后自动启动饭碗，只在菜单栏显示。") {
-                DSToggle(isOn: $app.launchAtLogin)
-            }
+            DSLaunchAtLoginRow(controller: app.launchAtLogin, appName: "饭碗")
             DSRow("程序坞图标", description: "饭碗平时只在菜单栏，这里决定要不要在程序坞里出现。") {
                 DSPicker(
                     selection: Binding(get: { s[AppKeys.dockMode] }, set: { s[AppKeys.dockMode] = $0; app.applyDockMode() }),

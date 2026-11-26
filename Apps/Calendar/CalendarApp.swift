@@ -95,9 +95,10 @@ final class StandaloneCalendar {
     let settings: SettingsStore
     let workCalendar: WorkCalendar
     let updater = AppUpdater()
+    let launchAtLogin = LaunchAtLoginController()
     let plugin = CalendarPlugin()
     var now = Date()
-    var settingsPage = CalendarPlugin.settingsDisplayID
+    var settingsPage = StandaloneSettings.generalPageID
     @ObservationIgnored var openWindow: ((String) -> Void)?
     @ObservationIgnored private var clock: Timer?
 
@@ -173,11 +174,15 @@ struct CalendarPanel: View {
     }
 }
 
-/// 设置窗口：月历 + 状态栏 + 外观 + 节假日 + 天气。
+/// 设置窗口：通用 + 月历 + 状态栏 + 外观 + 节假日 + 天气 + 关于。
 struct StandaloneSettings: View {
+    static let generalPageID = "general"
     @Bindable var app: StandaloneCalendar
 
     private var pages: [SettingsPage] {
+        let generalPage = SettingsPage(id: Self.generalPageID, title: "通用", systemImage: "gearshape") {
+            AnyView(StandaloneGeneralSettings(app: app))
+        }
         let pluginPages = app.plugin.settingsPages.map { page in
             if page.id == CalendarPlugin.settingsAppearanceID, let model = app.plugin.model {
                 return SettingsPage(id: page.id, title: page.title, systemImage: page.systemImage) {
@@ -186,11 +191,10 @@ struct StandaloneSettings: View {
             }
             return page
         }
-        return pluginPages + [
-            SettingsPage(id: "about", title: "关于", systemImage: "info.circle") {
-                AnyView(StandaloneAboutSettings(updater: app.updater))
-            }
-        ]
+        let aboutPage = SettingsPage(id: "about", title: "关于", systemImage: "info.circle") {
+            AnyView(StandaloneAboutSettings(updater: app.updater))
+        }
+        return [generalPage] + pluginPages + [aboutPage]
     }
 
     var body: some View {
@@ -232,6 +236,16 @@ struct StandaloneSettings: View {
         .frame(width: DS.s(760), height: DS.s(540))
         .id(app.fontScale)
         .environment(\.locale, CN.locale)
+    }
+}
+
+private struct StandaloneGeneralSettings: View {
+    let app: StandaloneCalendar
+
+    var body: some View {
+        DSSection("启动", footer: "开机自动启动由 macOS「系统设置 → 通用 → 登录项与扩展」统一管理。") {
+            DSLaunchAtLoginRow(controller: app.launchAtLogin, appName: "饭碗万年历")
+        }
     }
 }
 

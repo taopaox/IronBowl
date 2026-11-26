@@ -42,8 +42,8 @@ flowchart LR
 | 路径 | 类型 | 职责说明 |
 | :--- | :--- | :--- |
 | `Apps/IronBowl` | macOS App (`com.taopaox.ironbowl`) | 组装全部插件，提供主窗口、首页、设置窗口、菜单栏面板与 Dock/开机自启控制 |
-| `Apps/Calendar` | macOS App (`com.taopaox.ironbowl.calendar`) | 只依赖 `IronBowlKit` + `CalendarPlugin`，提供轻量独立菜单栏万年历，与主应用共享同一数据库 |
-| `Packages/IronBowlKit` | Swift Package | 提供插件协议、数据库、强类型设置、工作日历、AI 执行器、网页墓碑、定时任务调度器（`TaskScheduler`）、系统资源监控（`SystemMonitor`）、提醒中心与 `DS*` 设计系统 |
+| `Apps/Calendar` | macOS App (`com.taopaox.ironbowl.calendar`) | 只依赖 `IronBowlKit` + `CalendarPlugin`，提供轻量独立菜单栏万年历与开机自启设置，与主应用共享同一数据库 |
+| `Packages/IronBowlKit` | Swift Package | 提供插件协议、数据库、强类型设置、开机自启控制器（`LaunchAtLoginController`）、工作日历、AI 执行器、网页墓碑、定时任务调度器（`TaskScheduler`）、系统资源监控（`SystemMonitor`）、提醒中心与 `DS*` 设计系统 |
 | `Packages/ZentaoLogPlugin` | Swift Package | Git 仓库扫描、AI 工作日志与加班拆条生成、禅道 JSON 接口客户端、工时提醒与定时自动提交动作 |
 | `Packages/CalendarPlugin` | Swift Package | 公历/农历/24 节气/节日历法、Open-Meteo 与和风天气、月历主视图与 5 套配色弹层 |
 | `Packages/FeishuPlugin` | Swift Package | 内嵌飞书网页浏览、上传下载、自定义主页与固定网页到主窗口侧边栏 |

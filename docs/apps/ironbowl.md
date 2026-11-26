@@ -7,7 +7,7 @@
 | 文件 | 核心类型 | 职责 |
 | :--- | :--- | :--- |
 | `IronBowlApp.swift` | `IronBowlApp`, `AppDelegate` | 声明主窗口、`设置` 窗口、主菜单栏及独立万年历菜单栏 Scene，并在应用菜单提供「检查更新…」入口；关闭主窗口时不退出应用 |
-| `AppModel.swift` | `AppModel`, `AppKeys`, `DockMode` | 持有共享服务（DB/Settings/WorkCalendar/AI/Chat/Web/Reminders/SystemMonitor/Updater，含核心页面 `homeID`/`remindersID`）、管理插件启停、网页会话关闭调度（`closeWebSession(id:)`）、Dock 策略与开机自启 |
+| `AppModel.swift` | `AppModel`, `AppKeys`, `DockMode` | 持有共享服务（DB/Settings/WorkCalendar/AI/Chat/Web/Reminders/SystemMonitor/Updater/LaunchAtLoginController，含核心页面 `homeID`/`remindersID`）、管理插件启停、网页会话关闭调度（`closeWebSession(id:)`）与 Dock 策略 |
 | `Apps/Shared/AppUpdater.swift` | `AppUpdater`, `AppUpdateSettingsRows` | 封装 Sparkle 2（`SPUStandardUpdaterController`）初始化、KVO 状态同步、置前激活及设置页更新开关行（双应用共享） |
 | `MainView.swift` | `MainView`, `Sidebar`, `SidebarWebPluginRow`, `ResourceCard`, `ResourceDetailPopover`, `TodayCard` | 可平滑滑动收起/展开的左侧栏（顶部切换按钮随侧栏收放同步滑移、包含「今天」「消息提醒」（带未读角标）、未分组插件与目录子项、插件分组、固定网页、资源监控卡片及下班倒计时）+ 右侧内容区 |
 | `RemindersView.swift` | `RemindersView`, `ReminderHistoryCard` | 左侧「消息提醒」历史消息中心：展示未读/今日/最近统计指标、全部/未读/已读标签、来源筛选与搜索、按天分组卡片、投递状态与操作记录标记、一键已读、删除清空及快捷跳转关联插件或设置页 |
@@ -17,7 +17,7 @@
 | `HomeChatActivityView.swift` | `HomeChatActivityView` | 可折叠命令/工具/思考/文件改动输出详情、退出码与原始 JSONL 事件查看器 |
 | `HomeChatCards.swift` | `HomeCardCatalog`, `HomeChatCardStrip`, `HomeCardPickerPopover` | 汇总核心卡片与已启用插件 `homeCards`，支持通过 `makeInteractiveChatCard(for:)` 在对话内渲染可操作活卡片与卡片选择器 |
 | `MenuBar.swift` | `MenuBarLabel`, `MenuPanel`, `MenuWorkHeroCard`, `MenuStatusCard`, `MenuShortcutTile` | 菜单栏透明底双行微缩仪表卡标签（调用 `MenuBarCardRenderer` 并传入 `MenuBarIcon` 插画图标），以及点击弹出的分层卡片式快捷面板（`AppLogo` 品牌图标与日期栏、今日上下班主卡、概览状态卡片网格与含「今天」「消息提醒」及各启用插件的快捷入口瓷砖，底栏提供「设置」「检查更新」「退出饭碗」） |
-| `SettingsView.swift` | `SettingsView` 及各核心设置页 | 左侧搜索、分组导航与底部版本号，右侧各核心设置页（通用设置底部「关于」卡片展示 `AppLogo` 品牌图标、版本信息、复制按钮及 Sparkle 2 软件更新与自动检查/下载开关） |
+| `SettingsView.swift` | `SettingsView` 及各核心设置页 | 左侧搜索、分组导航与底部版本号，右侧各核心设置页（「通用 → 启动与显示」通过共享 `DSLaunchAtLoginRow` 配置开机自动启动并在需要系统授权时提供引导跳转，底部「关于」卡片展示 `AppLogo` 品牌图标、版本信息、复制按钮及 Sparkle 2 软件更新与自动检查/下载开关） |
 
 ## 窗口与运行形态
 

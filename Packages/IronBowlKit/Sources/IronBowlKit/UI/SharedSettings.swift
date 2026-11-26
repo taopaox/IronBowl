@@ -27,6 +27,45 @@ public enum AppSharedKeys {
     public static let fontScales: [Double] = [0.9, 1.0, 1.1, 1.2, 1.3, 1.4]
 }
 
+/// 共享的开机自启设置行，工作台与独立版万年历共用。
+public struct DSLaunchAtLoginRow: View {
+    let controller: LaunchAtLoginController
+    let appName: String
+
+    public init(controller: LaunchAtLoginController, appName: String) {
+        self.controller = controller
+        self.appName = appName
+    }
+
+    private var descriptionText: String {
+        if let errorMessage = controller.errorMessage {
+            return errorMessage
+        }
+        if controller.requiresApproval {
+            return "需要在「系统设置 → 通用 → 登录项与扩展」中允许「\(appName)」开机启动。"
+        }
+        return "登录电脑后自动启动\(appName)，只在菜单栏显示。"
+    }
+
+    public var body: some View {
+        DSRow("开机自动启动", description: descriptionText) {
+            HStack(spacing: 10) {
+                if controller.requiresApproval || controller.errorMessage != nil {
+                    Button("前往系统设置") {
+                        controller.openSystemSettings()
+                    }
+                    .buttonStyle(.dsSecondary)
+                }
+                DSToggle(isOn: Binding(
+                    get: { controller.isEnabled },
+                    set: { controller.setEnabled($0) }
+                ))
+            }
+        }
+        .onAppear { controller.refresh() }
+    }
+}
+
 /// 共享的外观设置（主题 + 字体大小），主应用和独立万年历共用。
 public struct DSAppearanceSettingsView: View {
     let settings: SettingsStore

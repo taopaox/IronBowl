@@ -30,7 +30,7 @@ enum HomeCardCatalog {
                     let today = Date()
                     if cal.isWorkday(today) {
                         guard let end = cal.effectiveWorkEnd(on: today), end > today else { return "已下班" }
-                        return countdown(to: end, from: today) + " 后"
+                        return remainingTimeText(to: end, from: today) + "后"
                     }
                     let ot = cal.overtimeHours(on: today)
                     return ot > 0 ? "加班 \(WorkCalendar.hoursText(ot))h" : "已下班"

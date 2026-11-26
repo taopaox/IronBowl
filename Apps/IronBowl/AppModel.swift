@@ -267,7 +267,7 @@ final class AppModel {
         let core = MenuBarItem(id: "core.offwork", title: "离下班还有多久") { [weak self] in
             let now = Date()
             guard let self, workCalendar.isWorkday(now), let end = workCalendar.effectiveWorkEnd(on: now), end > now else { return nil }
-            return "下班 " + countdown(to: end, from: now)
+            return "距下班 " + countdown(to: end, from: now)
         }
         return [core] + enabledPlugins.flatMap(\.menuBarItems)
     }

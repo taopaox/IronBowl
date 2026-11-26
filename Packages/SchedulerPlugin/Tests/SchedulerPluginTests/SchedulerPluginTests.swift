@@ -46,7 +46,9 @@ import Testing
     #expect(plugin.homeCards.count == 1)
     #expect(plugin.menuBarItems.count == 1)
     #expect(plugin.homeCards[0].detail()?.contains("测试提醒") == true)
-    #expect(plugin.menuBarItems[0].text()?.hasPrefix("任务 ") == true)
+    let menuText = plugin.menuBarItems[0].text()
+    #expect(menuText?.hasPrefix("距任务 ") == true)
+    #expect(menuText?.contains(":") == false)
 
     plugin.stop()
     #expect(!scheduler.isStarted)

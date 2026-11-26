@@ -381,7 +381,7 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
                 return "需填 \(hoursText(target))h"
             },
             MenuBarItem(id: "zentao.nextReminder", title: "离下次提醒还有多久") {
-                scheduler.nextReminder().map { "提醒 " + countdown(to: $0) }
+                scheduler.nextReminder().map { "距提醒 " + countdown(to: $0) }
             },
         ]
     }

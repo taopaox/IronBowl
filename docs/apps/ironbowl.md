@@ -25,7 +25,7 @@
   - `.always`：始终在程序坞显示。
   - `.never`：从不在程序坞显示。
 - **菜单栏组合**：
-  - 主菜单栏图标 `🍚` 后可按用户自定义顺序拼接任意插件 `MenuBarItem`（见 `app.menuBarItems`）。
+  - 主菜单栏图标 `🍚` 后可按用户自定义顺序拼接任意插件 `MenuBarItem`（见 `app.menuBarItems`）；内置倒计时项（如 `core.offwork`「离下班还有多久」）与提醒/任务倒计时项使用中文时长格式（如 `距下班 5小时44分`、`距下班 23分`、`距下班 不到1分`），避免与时刻混淆。
   - 启用 `CalendarPlugin` 时，可额外在系统菜单栏显示独立的天气/日期/农历/时间图标与月历弹出面板（由 `app.calendarMenuShown` 控制）。
   - 两个状态栏 `MenuBarExtra(.window)` 面板均挂载了 `.menuBarPopoverDismissable()`：在 `MenuPanel` 点击「今天」、各插件入口、「设置」或「退出饭碗」，以及在万年历弹层点击离开弹层的操作后，会立即收起弹出面板。
 - **主窗口关闭清理**：`AppModel.mainWindow(isOpen: false)` 会调用 `webSessions.detachAllDisplays()`，将可见网页标记为后台以允许按墓碑策略回收内存。

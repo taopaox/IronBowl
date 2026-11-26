@@ -105,6 +105,24 @@ private func time(_ day: String, _ hhmm: String, second: Int = 0) -> Date {
     #expect(remainingTimeText(to: time("2026-11-26", "08:50"), from: base) == "0分钟")
 }
 
+@Test func countdownFormatsCompactDurations() {
+    let base = time("2026-11-26", "09:00")
+    let samples = [
+        (time("2026-11-26", "14:44"), "5小时44分"),
+        (time("2026-11-26", "10:05"), "1小时5分"),
+        (time("2026-11-26", "11:00"), "2小时"),
+        (time("2026-11-26", "09:23"), "23分"),
+        (time("2026-11-26", "09:00", second: 30), "不到1分"),
+        (base, "0分"),
+        (time("2026-11-26", "08:50"), "0分"),
+    ]
+    for (target, expected) in samples {
+        let text = countdown(to: target, from: base)
+        #expect(text == expected)
+        #expect(!text.contains(":"))
+    }
+}
+
 // MARK: 容错
 
 @Test func classifiesDwsFailures() {

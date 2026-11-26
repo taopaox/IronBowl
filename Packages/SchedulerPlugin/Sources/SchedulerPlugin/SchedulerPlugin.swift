@@ -69,7 +69,7 @@ public final class SchedulerPlugin: IronBowlPlugin {
         return [
             MenuBarItem(id: "scheduler.next", title: "离下次定时任务还有多久") {
                 guard let upcoming = scheduler.nextUpcomingTask() else { return nil }
-                return "任务 " + countdown(to: upcoming.fireAt)
+                return "距任务 " + countdown(to: upcoming.fireAt)
             },
         ]
     }

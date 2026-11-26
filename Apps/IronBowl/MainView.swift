@@ -3,29 +3,58 @@ import SwiftUI
 
 /// 主窗口：左边浅灰侧栏，右边白色内容区（WorkBuddy 风格）。
 struct MainView: View {
+    static let sidebarAnimation: Animation = .spring(duration: 0.26, bounce: 0)
+
     @Bindable var app: AppModel
-    @AppStorage("sidebarCollapsed") private var collapsed = false
+    @AppStorage("sidebarCollapsed") private var storedCollapsed = false
+    @State private var collapsed = UserDefaults.standard.bool(forKey: "sidebarCollapsed")
+
+    private func setSidebarCollapsed(_ next: Bool) {
+        guard collapsed != next else { return }
+        withAnimation(Self.sidebarAnimation) {
+            collapsed = next
+        }
+        storedCollapsed = next
+    }
 
     var body: some View {
-        HStack(spacing: 0) {
-            if !collapsed {
-                Sidebar(app: app, collapsed: $collapsed)
-                    .frame(width: DS.s(216))
-                    .transition(.move(edge: .leading))
-                Rectangle().fill(DS.border).frame(width: 1)
-            }
-            ZStack(alignment: .topLeading) {
+        let sidebarWidth = DS.s(216)
+        let totalSidebarWidth = sidebarWidth + 1
+
+        ZStack(alignment: .topLeading) {
+            HStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    Sidebar(app: app, isVisible: !collapsed)
+                        .frame(width: sidebarWidth)
+                    Rectangle().fill(DS.border).frame(width: 1)
+                }
+                .frame(width: totalSidebarWidth)
+                .frame(width: collapsed ? 0 : totalSidebarWidth, alignment: .trailing)
+                .clipped()
+                .allowsHitTesting(!collapsed)
+                .accessibilityHidden(collapsed)
+
                 detail
                     .environment(\.sidebarCollapsed, collapsed)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(DS.canvas)
-                if collapsed {
-                    Button { withAnimation(.snappy) { collapsed = false } } label: { Image(systemName: "sidebar.left") }
-                        .buttonStyle(.dsGhost)
-                        .help("展开侧边栏")
-                        .padding(.leading, 82)
-                        .padding(.top, 10)
-                }
+            }
+
+            Button {
+                setSidebarCollapsed(!collapsed)
+            } label: {
+                Image(systemName: "sidebar.left")
+            }
+            .buttonStyle(.dsGhost)
+            .help(collapsed ? "展开侧边栏" : "收起侧边栏")
+            .padding(.leading, collapsed ? 82 : sidebarWidth - DS.s(32) - 10)
+            .padding(.top, collapsed ? 10 : 6)
+        }
+        .animation(Self.sidebarAnimation, value: collapsed)
+        .onChange(of: storedCollapsed) { _, newValue in
+            guard collapsed != newValue else { return }
+            withAnimation(Self.sidebarAnimation) {
+                collapsed = newValue
             }
         }
         .ignoresSafeArea()
@@ -50,7 +79,7 @@ struct MainView: View {
 
 struct Sidebar: View {
     let app: AppModel
-    @Binding var collapsed: Bool
+    let isVisible: Bool
     @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarCollapsedDirs") private var collapsedDirsRaw = ""
     @State private var renamingItem: SidebarPinnedItem?
@@ -72,16 +101,10 @@ struct Sidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 顶部：给红绿灯留位置，右边是收起按钮
-            HStack {
-                Spacer()
-                Button { withAnimation(.snappy) { collapsed = true } } label: { Image(systemName: "sidebar.left") }
-                    .buttonStyle(.dsGhost)
-                    .help("收起侧边栏")
-            }
-            .frame(height: 40)
-            .padding(.horizontal, 10)
-            .windowTitleBar()
+            // 顶部：给红绿灯与展开/收起按钮留位置
+            Color.clear
+                .frame(height: 40)
+                .windowTitleBar()
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
@@ -139,7 +162,7 @@ struct Sidebar: View {
             .scrollIndicators(.never)
 
             Spacer(minLength: 0)
-            ResourceCard(app: app).padding(.horizontal, 10).padding(.bottom, 8)
+            ResourceCard(app: app, isVisible: isVisible).padding(.horizontal, 10).padding(.bottom, 8)
             TodayCard(app: app).padding(.horizontal, 10).padding(.bottom, 8)
 
             HStack(spacing: 2) {
@@ -400,6 +423,7 @@ private struct PinnedSidebarRow: View {
 /// 侧栏底部的小卡：实时 CPU 与内存占用（支持系统 / 饭碗切换及明细查看）。
 private struct ResourceCard: View {
     let app: AppModel
+    let isVisible: Bool
     @AppStorage("sidebarResourceScope") private var scopeRaw = ResourceScope.system.rawValue
     @State private var showDetail = false
 
@@ -514,10 +538,16 @@ private struct ResourceCard: View {
                 showDetail = false
             }
         }
+        .onChange(of: isVisible) { _, visible in
+            if !visible {
+                showDetail = false
+            }
+        }
         .popover(isPresented: $showDetail, arrowEdge: .trailing) {
             ResourceDetailPopover(app: app, isPresented: $showDetail)
         }
-        .task {
+        .task(id: isVisible) {
+            guard isVisible else { return }
             await app.systemMonitor.run()
         }
     }

@@ -56,6 +56,7 @@ struct HomeChatSidebar: View {
                     Text("对话")
                         .font(DS.font(14, .semibold))
                         .foregroundStyle(DS.text)
+                        .transition(.opacity)
                 }
                 Spacer(minLength: 4)
                 Button(action: onNewDraft) {
@@ -66,7 +67,7 @@ struct HomeChatSidebar: View {
                 .help("新建对话")
 
                 Button {
-                    withAnimation(.snappy(duration: 0.18)) {
+                    withAnimation(MainView.sidebarAnimation) {
                         app.chat.sidebarCollapsed = true
                     }
                 } label: {
@@ -80,6 +81,7 @@ struct HomeChatSidebar: View {
             .padding(.trailing, 8)
             .frame(height: 52)
             .windowTitleBar()
+            .animation(MainView.sidebarAnimation, value: mainSidebarCollapsed)
 
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")

@@ -106,13 +106,21 @@ struct HomeView: View {
     }
 
     var body: some View {
+        let chatSidebarWidth = DS.s(236)
+        let totalChatSidebarWidth = chatSidebarWidth + 1
+        let chatCollapsed = app.chat.sidebarCollapsed
+
         HStack(spacing: 0) {
-            if !app.chat.sidebarCollapsed {
+            HStack(spacing: 0) {
                 HomeChatSidebar(app: app, onNewDraft: startNewDraft)
-                    .frame(width: DS.s(236))
-                    .transition(.move(edge: .leading))
+                    .frame(width: chatSidebarWidth)
                 Rectangle().fill(DS.border).frame(width: 1)
             }
+            .frame(width: totalChatSidebarWidth)
+            .frame(width: chatCollapsed ? 0 : totalChatSidebarWidth, alignment: .trailing)
+            .clipped()
+            .allowsHitTesting(!chatCollapsed)
+            .accessibilityHidden(chatCollapsed)
 
             VStack(spacing: 0) {
                 topBar
@@ -142,6 +150,7 @@ struct HomeView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DS.canvas)
         }
+        .animation(MainView.sidebarAnimation, value: chatCollapsed)
         .onAppear {
             if draftWorkspacePath.isEmpty {
                 draftWorkspacePath = app.chat.defaultWorkspacePath
@@ -192,21 +201,24 @@ struct HomeView: View {
     private var topBar: some View {
         HStack(spacing: 8) {
             if app.chat.sidebarCollapsed {
-                Button {
-                    withAnimation(.snappy(duration: 0.18)) {
-                        app.chat.sidebarCollapsed = false
+                HStack(spacing: 8) {
+                    Button {
+                        withAnimation(MainView.sidebarAnimation) {
+                            app.chat.sidebarCollapsed = false
+                        }
+                    } label: {
+                        Image(systemName: "sidebar.left")
                     }
-                } label: {
-                    Image(systemName: "sidebar.left")
-                }
-                .buttonStyle(.dsGhost)
-                .help("展开对话列表")
+                    .buttonStyle(.dsGhost)
+                    .help("展开对话列表")
 
-                Button(action: startNewDraft) {
-                    Image(systemName: "square.and.pencil")
+                    Button(action: startNewDraft) {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .buttonStyle(.dsGhost)
+                    .help("新建对话")
                 }
-                .buttonStyle(.dsGhost)
-                .help("新建对话")
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
             }
 
             if let thread = activeThread {
@@ -316,6 +328,8 @@ struct HomeView: View {
         .padding(.trailing, 16)
         .frame(height: 52)
         .windowTitleBar()
+        .animation(MainView.sidebarAnimation, value: mainSidebarCollapsed)
+        .animation(MainView.sidebarAnimation, value: app.chat.sidebarCollapsed)
     }
 
     // MARK: - 欢迎与功能卡片网格

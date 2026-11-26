@@ -15,8 +15,8 @@
 | `HomeChatTimeline.swift` | `HomeChatTimeline` | 对话时间线、基于 `DSMarkdownView` 的完整 Markdown 渲染、实时功能卡片与失败重试 |
 | `HomeChatActivityView.swift` | `HomeChatActivityView` | 可折叠命令/工具/思考/文件改动输出详情、退出码与原始 JSONL 事件查看器 |
 | `HomeChatCards.swift` | `HomeCardCatalog`, `HomeChatCardStrip`, `HomeCardPickerPopover` | 汇总核心卡片与已启用插件 `homeCards`，支持通过 `makeInteractiveChatCard(for:)` 在对话内渲染可操作活卡片与卡片选择器 |
-| `MenuBar.swift` | `MenuBarLabel`, `MenuPanel`, `MenuWorkHeroCard`, `MenuStatusCard`, `MenuShortcutTile` | 菜单栏双行微缩仪表卡标签（调用 `MenuBarCardRenderer`），以及点击弹出的分层卡片式快捷面板（品牌应用图标与日期栏、今日上下班主卡、概览状态卡片网格与含「今天」「消息提醒」及各启用插件的快捷入口瓷砖） |
-| `SettingsView.swift` | `SettingsView` 及各核心设置页 | 左侧搜索、分组导航与底部版本号，右侧各核心设置页（通用设置底部「关于」卡片展示应用图标 `NSApp.applicationIconImage`、版本信息与复制按钮） |
+| `MenuBar.swift` | `MenuBarLabel`, `MenuPanel`, `MenuWorkHeroCard`, `MenuStatusCard`, `MenuShortcutTile` | 菜单栏双行微缩仪表卡标签（调用 `MenuBarCardRenderer` 并传入 `AppLogo` 图像），以及点击弹出的分层卡片式快捷面板（`AppLogo` 品牌图标与日期栏、今日上下班主卡、概览状态卡片网格与含「今天」「消息提醒」及各启用插件的快捷入口瓷砖） |
+| `SettingsView.swift` | `SettingsView` 及各核心设置页 | 左侧搜索、分组导航与底部版本号，右侧各核心设置页（通用设置底部「关于」卡片展示 `AppLogo` 品牌图标、版本信息与复制按钮） |
 
 ## 窗口与运行形态
 
@@ -26,8 +26,8 @@
   - `.always`：始终在程序坞显示。
   - `.never`：从不在程序坞显示。
 - **菜单栏组合**：
-  - 主菜单栏采用 `IronBowlKit` 的 `MenuBarCardRenderer` 将 `🍚` 与用户自定义顺序拼接的 `MenuBarItem`（见 `app.menuBarItems`）离线绘制为 `22pt` 全彩非模板 `NSImage`「双行微缩仪表卡」：深石板微卡底配 1px 亮描边，`core.offwork`、提醒与定时任务以双行堆叠展示（上行显示 `距下班 · XX%` / 加班紫色 `加班 · XX%`，下行显示中文紧凑倒计时），其余状态以竖线分隔语义色展示；「设置 → 通用 → 菜单栏显示」同步提供实时微卡预览。
-  - 点击主菜单栏图标弹出的 `MenuPanel` 采用灰底白卡分层布局（`DS.groupBackground` + `DS.card`）：顶部展示应用图标（`NSApp.applicationIconImage`，来源于 `Apps/IronBowl/Assets.xcassets/AppIcon.appiconset`）、品牌名、版本胶囊、日期/农历/节假日标签与「工作台」快捷按钮；中部展示今日上下班主卡（`MenuWorkHeroCard`，含倒计时、进度条、加班/打卡状态与上下班时间）以及最多 4 张已启用插件概览卡片（`MenuStatusCard` 2 列网格）；下方展示「今天」与各已启用插件的快捷入口瓷砖卡（`MenuShortcutTile`，带 `sidebarBadge` 状态圆点），底部提供「设置」与「退出饭碗」。
+  - 主菜单栏采用 `IronBowlKit` 的 `MenuBarCardRenderer` 将应用品牌图标 `AppLogo`（`Apps/IronBowl/Assets.xcassets/AppLogo.imageset`）与用户自定义顺序拼接的 `MenuBarItem`（见 `app.menuBarItems`）离线绘制为 `22pt` 全彩非模板 `NSImage`「双行微缩仪表卡」：深石板微卡底配 1px 亮描边，`core.offwork`、提醒与定时任务以双行堆叠展示（上行显示 `距下班 · XX%` / 加班紫色 `加班 · XX%`，下行显示中文紧凑倒计时），其余状态以竖线分隔语义色展示；「设置 → 通用 → 菜单栏显示」同步提供实时微卡预览。
+  - 点击主菜单栏图标弹出的 `MenuPanel` 采用灰底白卡分层布局（`DS.groupBackground` + `DS.card`）：顶部展示 `AppLogo` 品牌图标、品牌名、版本胶囊、日期/农历/节假日标签与「工作台」快捷按钮；中部展示今日上下班主卡（`MenuWorkHeroCard`，含倒计时、进度条、加班/打卡状态与上下班时间）以及最多 4 张已启用插件概览卡片（`MenuStatusCard` 2 列网格）；下方展示「今天」与各已启用插件的快捷入口瓷砖卡（`MenuShortcutTile`，带 `sidebarBadge` 状态圆点），底部提供「设置」与「退出饭碗」。
   - 启用 `CalendarPlugin` 时，可额外在系统菜单栏显示独立的天气/日期/农历/时间图标与月历弹出面板（由 `app.calendarMenuShown` 控制）；当检测到独立版 `IronBowlCalendar`（`com.taopaox.ironbowl.calendar`）正在运行时，主工作台自动隐藏内置状态栏日历以避免顶部状态栏出现两个重复万年历，且不修改用户的 `calendar.menuBar.enabled` 配置，独立版退出后自动恢复。
   - 两个状态栏 `MenuBarExtra(.window)` 面板均挂载了 `.menuBarPopoverDismissable()`：在 `MenuPanel` 点击「今天」、各插件入口、「设置」或「退出饭碗」，以及在万年历弹层点击离开弹层的操作后，会立即收起弹出面板。
 - **主窗口关闭清理**：`AppModel.mainWindow(isOpen: false)` 会调用 `webSessions.detachAllDisplays()`，将可见网页标记为后台以允许按墓碑策略回收内存。

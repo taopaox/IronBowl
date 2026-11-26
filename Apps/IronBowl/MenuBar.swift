@@ -9,7 +9,7 @@ struct MenuBarLabel: View {
 
     var body: some View {
         // 注意：这里不能用 TimelineView，会让状态栏按钮不停重绘。时间刷新靠 AppModel.now 的定时器。
-        Image(nsImage: MenuBarCardRenderer.renderImage(segments: app.menuBarCardSegments))
+        Image(nsImage: MenuBarCardRenderer.renderImage(segments: app.menuBarCardSegments, iconImage: NSImage(named: "AppLogo")))
             .onAppear {
                 // 菜单栏标签启动时就会渲染，这里拿到 openWindow 给全局用，并确保 NSApp 就绪后应用外观和 Dock 策略。
                 app.openMainWindow = { openWindow(id: "main") }
@@ -88,11 +88,11 @@ struct MenuPanel: View {
     private func header(now: Date) -> some View {
         let info = app.workCalendar.dayInfo(now)
         return HStack(alignment: .center, spacing: 10) {
-            Image(nsImage: NSApp.applicationIconImage)
+            Image("AppLogo")
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
-                .frame(width: DS.s(36), height: DS.s(36))
+                .frame(width: DS.s(30), height: DS.s(30))
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .center, spacing: 6) {

@@ -246,11 +246,11 @@ private struct StandaloneAboutSettings: View {
             DSBlockRow {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {
-                        Image(nsImage: NSApp.applicationIconImage)
+                        Image("AppLogo")
                             .resizable()
                             .interpolation(.high)
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: DS.s(42), height: DS.s(42))
+                            .frame(width: DS.s(36), height: DS.s(36))
 
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {

@@ -46,3 +46,39 @@ import Testing
     #expect(hasDarkBackground)
     #expect(hasBrightForeground)
 }
+
+@MainActor @Test func menuBarCardRendererSupportsCustomIconImage() throws {
+    let customIcon = NSImage(size: NSSize(width: 32, height: 32), flipped: false) { rect in
+        NSColor.systemOrange.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7).fill()
+        return true
+    }
+
+    let emptyWithImage = MenuBarCardRenderer.renderImage(segments: [], iconImage: customIcon, scale: 2)
+    #expect(!emptyWithImage.isTemplate)
+    #expect(emptyWithImage.size.height == MenuBarCardRenderer.barHeight)
+    #expect(emptyWithImage.size.width >= 24)
+
+    let withSegments = MenuBarCardRenderer.renderImage(
+        segments: [.stacked(top: "距下班 · 50%", bottom: "2小时00分", topTone: .amber)],
+        iconImage: customIcon,
+        scale: 2
+    )
+    #expect(!withSegments.isTemplate)
+    #expect(withSegments.size.height == MenuBarCardRenderer.barHeight)
+    #expect(withSegments.size.width > emptyWithImage.size.width)
+
+    let rep = try #require(emptyWithImage.representations.first as? NSBitmapImageRep)
+    var hasOrangeIconPixel = false
+    for y in 6..<(rep.pixelsHigh - 6) {
+        for x in 6..<(rep.pixelsWide - 6) {
+            guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), color.alphaComponent > 0.5 else { continue }
+            if color.redComponent > 0.7, color.greenComponent > 0.3, color.blueComponent < 0.3 {
+                hasOrangeIconPixel = true
+                break
+            }
+        }
+        if hasOrangeIconPixel { break }
+    }
+    #expect(hasOrangeIconPixel)
+}

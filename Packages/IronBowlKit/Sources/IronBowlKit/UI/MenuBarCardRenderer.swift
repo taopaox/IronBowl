@@ -54,6 +54,7 @@ public enum MenuBarCardRenderer {
     public static func renderImage(
         segments: [MenuBarCardSegment],
         icon: String = "🍚",
+        iconImage: NSImage? = nil,
         scale: CGFloat? = nil
     ) -> NSImage {
         let resolvedScale = max(1.0, scale ?? max(2.0, NSScreen.screens.map(\.backingScaleFactor).max() ?? 2.0))
@@ -63,7 +64,7 @@ public enum MenuBarCardRenderer {
         let inlineFont = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold)
 
         let iconAttr = NSAttributedString(string: icon, attributes: [.font: iconFont])
-        let iconSize = iconAttr.size()
+        let iconSize = iconImage != nil ? NSSize(width: 16, height: 16) : iconAttr.size()
 
         let measured: [MeasuredSegment] = segments.map { segment in
             switch segment {
@@ -142,12 +143,24 @@ public enum MenuBarCardRenderer {
             cardPath.stroke()
 
             let iconY = (barHeight - iconSize.height) / 2
+            let drawIcon: (CGFloat) -> Void = { iconX in
+                if let iconImage {
+                    iconImage.draw(
+                        in: NSRect(x: iconX, y: iconY, width: iconSize.width, height: iconSize.height),
+                        from: .zero,
+                        operation: .sourceOver,
+                        fraction: 1.0
+                    )
+                } else {
+                    iconAttr.draw(at: NSPoint(x: iconX, y: iconY))
+                }
+            }
             if measured.isEmpty {
                 let iconX = (totalWidth - iconSize.width) / 2
-                iconAttr.draw(at: NSPoint(x: iconX, y: iconY))
+                drawIcon(iconX)
             } else {
                 var x = horizontalPadding
-                iconAttr.draw(at: NSPoint(x: x, y: iconY))
+                drawIcon(x)
                 x += iconSize.width + iconGap
 
                 for (index, item) in measured.enumerated() {

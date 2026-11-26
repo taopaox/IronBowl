@@ -177,8 +177,12 @@ struct Sidebar: View {
             ResourceCard(app: app, isVisible: isVisible).padding(.horizontal, 10).padding(.bottom, 8)
             TodayCard(app: app).padding(.horizontal, 10).padding(.bottom, 8)
 
-            HStack(spacing: 2) {
-                Text("🍚").font(DS.font(16))
+            HStack(spacing: 6) {
+                Image("AppLogo")
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: DS.s(18), height: DS.s(18))
                 Text(NSFullUserName().isEmpty ? "我" : NSFullUserName()).font(DS.font(13.5))
                     .lineLimit(1)
                 Spacer()

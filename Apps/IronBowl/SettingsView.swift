@@ -124,7 +124,7 @@ struct GeneralSettings: View {
                 )
             }
         }
-        DSSection("菜单栏显示", footer: "🍚 图标一直显示；打开的信息按顺序跟在后面，用箭头调整顺序。") {
+        DSSection("菜单栏显示", footer: "饭碗图标一直显示；打开的信息按顺序跟在后面，用箭头调整顺序。") {
             MenuBarItemsEditor(app: app)
         }
         DSSection("功能插件") {
@@ -138,11 +138,11 @@ struct GeneralSettings: View {
             DSBlockRow {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {
-                        Image(nsImage: NSApp.applicationIconImage)
+                        Image("AppLogo")
                             .resizable()
                             .interpolation(.high)
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: DS.s(42), height: DS.s(42))
+                            .frame(width: DS.s(36), height: DS.s(36))
 
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
@@ -192,7 +192,7 @@ struct MenuBarItemsEditor: View {
         let activeSelected = selected.filter { availableIDs.contains($0) }
         let ordered = activeSelected.compactMap { id in all.first { $0.id == id } } + all.filter { !activeSelected.contains($0.id) }
         DSRow("当前预览", description: "双行微缩仪表卡会实时渲染在系统菜单栏右侧。") {
-            Image(nsImage: MenuBarCardRenderer.renderImage(segments: app.menuBarCardSegments))
+            Image(nsImage: MenuBarCardRenderer.renderImage(segments: app.menuBarCardSegments, iconImage: NSImage(named: "AppLogo")))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(DS.well, in: .rect(cornerRadius: 8))

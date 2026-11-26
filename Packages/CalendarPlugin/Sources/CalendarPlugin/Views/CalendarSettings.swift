@@ -74,6 +74,9 @@ struct CalendarStatusBarSettings: View {
                     DSRow("当前预览", description: "按下方选项实时拼接显示。") {
                         MenuBarPreviewPill(model: model)
                     }
+                    DSRow("显示 Logo", description: "在状态栏日历最左侧显示万年历图标。") {
+                        DSToggle(isOn: s.binding(CalendarKeys.menuBarLogo))
+                    }
                 }
             }
             if s[CalendarKeys.menuBarEnabled] {

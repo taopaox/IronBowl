@@ -52,7 +52,8 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
         aqiCategory: "优"
     )
 
-    // 默认配置（含天气，不含 AQI、农历、秒、icon、上午/下午）
+    // 默认配置（含天气，不含 Logo、AQI、农历、秒、icon、上午/下午）
+    #expect(MenuBarDisplayConfig().showLogo == false)
     let defaultSegments = CalendarModel.menuBarSegments(at: date, weather: weather, config: MenuBarDisplayConfig())
     #expect(defaultSegments == [
         .symbol("sun.max"),
@@ -64,6 +65,7 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
 
     // 全开配置
     let fullConfig = MenuBarDisplayConfig(
+        showLogo: true,
         timeEnabled: true,
         timeShowIcon: true,
         timeUse24Hour: false,
@@ -78,6 +80,7 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
         weatherShowAQI: true
     )
     #expect(CalendarModel.menuBarSegments(at: date, weather: weather, config: fullConfig) == [
+        .logo,
         .symbol("sun.max"),
         .text("23°"),
         .text("AQI 42"),
@@ -86,6 +89,17 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
         .text("十月十七"),
         .symbol("clock"),
         .text("下午 4:04:09"),
+    ])
+
+    // 仅开 Logo
+    let logoOnlyConfig = MenuBarDisplayConfig(
+        showLogo: true,
+        timeEnabled: false,
+        dateEnabled: false,
+        weatherEnabled: false
+    )
+    #expect(CalendarModel.menuBarSegments(at: date, weather: weather, config: logoOnlyConfig) == [
+        .logo,
     ])
 
     // 仅开空气质量 AQI，不开天气图标温度
@@ -130,6 +144,7 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
 
     // 天气为空时优雅省略天气与 AQI 段
     #expect(CalendarModel.menuBarSegments(at: date, weather: nil, config: fullConfig) == [
+        .logo,
         .text("11月25日"),
         .text("周三"),
         .text("十月十七"),
@@ -201,6 +216,7 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
 
     // 默认值验证
     #expect(settings[CalendarKeys.menuBarEnabled] == true)
+    #expect(settings[CalendarKeys.menuBarLogo] == false)
     #expect(settings[CalendarKeys.menuBarTime] == true)
     #expect(settings[CalendarKeys.menuBarTimeIcon] == false)
     #expect(settings[CalendarKeys.menuBarTime24Hour] == true)
@@ -215,6 +231,7 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
     #expect(settings[CalendarKeys.menuBarAQI] == false)
 
     // 写入并重载
+    settings[CalendarKeys.menuBarLogo] = true
     settings[CalendarKeys.menuBarTimeIcon] = true
     settings[CalendarKeys.menuBarTime24Hour] = false
     settings[CalendarKeys.menuBarTimePeriod] = true
@@ -225,6 +242,7 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
     settings[CalendarKeys.menuBarAQI] = true
 
     let reloaded = SettingsStore(database: db)
+    #expect(reloaded[CalendarKeys.menuBarLogo] == true)
     #expect(reloaded[CalendarKeys.menuBarTimeIcon] == true)
     #expect(reloaded[CalendarKeys.menuBarTime24Hour] == false)
     #expect(reloaded[CalendarKeys.menuBarTimePeriod] == true)
@@ -335,6 +353,52 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
     #expect(full.size.height == CalendarMenuBarRenderer.barHeight)
     #expect(full.size.width > dateTime.size.width)
     #expect(hasVisiblePixels(full))
+
+    // 内置万年历 Logo 资源应正确打包并支持全彩非模板渲染
+    #expect(CalendarAssets.logoImage != nil)
+    let withLogo = CalendarMenuBarRenderer.renderImage(
+        segments: [.logo, .text("09:05")],
+        isDark: true,
+        scale: 2.0
+    )
+    #expect(withLogo.isTemplate == false)
+    #expect(withLogo.size.height == CalendarMenuBarRenderer.barHeight)
+    #expect(withLogo.size.width > timeOnly.size.width)
+    #expect(hasVisiblePixels(withLogo))
+
+    // 深色与浅色模式下含 Logo 的文字区域像素明暗自适应
+    let withLogoLight = CalendarMenuBarRenderer.renderImage(
+        segments: [.logo, .text("09:05")],
+        isDark: false,
+        scale: 2.0
+    )
+    #expect(withLogoLight.isTemplate == false)
+
+    func averageTextLuminance(_ image: NSImage) -> Double {
+        guard let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first,
+              let data = rep.bitmapData else { return -1 }
+        var totalLuminance = 0.0
+        var count = 0
+        let startX = min(rep.pixelsWide, 46)
+        for y in 0..<rep.pixelsHigh {
+            for x in startX..<rep.pixelsWide {
+                let offset = y * rep.bytesPerRow + x * 4
+                let alpha = data[offset + 3]
+                if alpha > 32 {
+                    let r = Double(data[offset])
+                    let g = Double(data[offset + 1])
+                    let b = Double(data[offset + 2])
+                    totalLuminance += (r + g + b) / 3.0
+                    count += 1
+                }
+            }
+        }
+        return count > 0 ? totalLuminance / Double(count) : -1
+    }
+
+    let darkTextLum = averageTextLuminance(withLogo)
+    let lightTextLum = averageTextLuminance(withLogoLight)
+    #expect(darkTextLum > lightTextLum)
 }
 
 @Test

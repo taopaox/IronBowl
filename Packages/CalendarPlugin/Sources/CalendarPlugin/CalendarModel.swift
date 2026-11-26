@@ -36,6 +36,7 @@ enum CalendarKeys {
     static let refreshMinutes = SettingKey<Int>("weather.refreshMinutes", default: 30)
     /// 菜单栏日历：是否显示，以及显示哪些内容。
     static let menuBarEnabled = SettingKey<Bool>("calendar.menuBar.enabled", default: true)
+    static let menuBarLogo = SettingKey<Bool>("calendar.menuBar.logo", default: false)
     // 时间选项
     static let menuBarTime = SettingKey<Bool>("calendar.menuBar.time", default: true)
     static let menuBarTimeIcon = SettingKey<Bool>("calendar.menuBar.time.icon", default: false)
@@ -57,6 +58,8 @@ enum CalendarKeys {
 }
 
 public nonisolated struct MenuBarDisplayConfig: Sendable, Equatable {
+    public var showLogo: Bool
+
     public var timeEnabled: Bool
     public var timeShowIcon: Bool
     public var timeUse24Hour: Bool
@@ -73,6 +76,7 @@ public nonisolated struct MenuBarDisplayConfig: Sendable, Equatable {
     public var weatherShowAQI: Bool
 
     public init(
+        showLogo: Bool = false,
         timeEnabled: Bool = true,
         timeShowIcon: Bool = false,
         timeUse24Hour: Bool = true,
@@ -86,6 +90,7 @@ public nonisolated struct MenuBarDisplayConfig: Sendable, Equatable {
         weatherShowWeather: Bool = true,
         weatherShowAQI: Bool = false
     ) {
+        self.showLogo = showLogo
         self.timeEnabled = timeEnabled
         self.timeShowIcon = timeShowIcon
         self.timeUse24Hour = timeUse24Hour
@@ -102,6 +107,7 @@ public nonisolated struct MenuBarDisplayConfig: Sendable, Equatable {
 }
 
 public nonisolated enum MenuBarSegment: Sendable, Equatable {
+    case logo
     case symbol(String)
     case text(String)
 }
@@ -287,6 +293,7 @@ public final class CalendarModel {
 
     public var menuBarConfig: MenuBarDisplayConfig {
         MenuBarDisplayConfig(
+            showLogo: settings[CalendarKeys.menuBarLogo],
             timeEnabled: settings[CalendarKeys.menuBarTime],
             timeShowIcon: settings[CalendarKeys.menuBarTimeIcon],
             timeUse24Hour: settings[CalendarKeys.menuBarTime24Hour],
@@ -336,6 +343,9 @@ public final class CalendarModel {
         config: MenuBarDisplayConfig
     ) -> [MenuBarSegment] {
         var segments: [MenuBarSegment] = []
+        if config.showLogo {
+            segments.append(.logo)
+        }
         if config.weatherEnabled, let w = weather {
             if config.weatherShowWeather {
                 segments.append(.symbol(w.symbol))

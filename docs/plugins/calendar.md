@@ -11,14 +11,14 @@
 | `Lunar/Lunar.swift` | `Lunar`, `LunarDate` | 离线农历、干支纪年/生肖、Meeus 太阳视黄经 24 节气与公历/农历/按星期节日 |
 | `Weather/Weather.swift` | `WeatherService`, `WeatherSource`, `WeatherSnapshot` | Open-Meteo（地理编码搜索城市 + 预报 + US AQI）与和风天气（预报 + AQI）数据抓取 |
 | `Views/CalendarViews.swift` | `CalendarMainView` | 完整窗口月历界面 |
-| `Views/CalendarSettings.swift` | `CalendarDisplaySettings`, `CalendarStatusBarSettings`, `CalendarAppearanceSettings`, `CalendarHolidaySettings`, `WeatherSettings` | 月历、状态栏日历（时间/日期/天气开关与预览）、外观（弹出面板样式）、节假日（复用 `DSHolidaySettingsView`）与天气设置页 |
-| `Views/CalendarPopover.swift` | `CalendarPopover`, `CalendarMenuBarLabel`, `CalendarMenuBarRenderer`, `CalendarMenuBarPreview` | 菜单栏模板图像渲染器、设置预览标签与紧凑双栏弹出面板 |
+| `Views/CalendarSettings.swift` | `CalendarDisplaySettings`, `CalendarStatusBarSettings`, `CalendarAppearanceSettings`, `CalendarHolidaySettings`, `WeatherSettings` | 月历、状态栏日历（Logo/时间/日期/天气开关与预览）、外观（弹出面板样式）、节假日（复用 `DSHolidaySettingsView`）与天气设置页 |
+| `Views/CalendarPopover.swift` | `CalendarAssets`, `CalendarPopover`, `CalendarMenuBarLabel`, `CalendarMenuBarRenderer`, `CalendarMenuBarPreview` | 菜单栏图像渲染器、内置 `Resources/CalendarLogo.png` 加载器、设置预览标签与紧凑双栏弹出面板 |
 | `Views/CalendarPopoverStyle.swift` | `CalendarPopoverStyle`, `CalendarPopoverPalette` | 6 套弹出面板主题（跟随系统、跟随外观、简约白、深邃黑、经典红、经典蓝） |
 
 ## 历法与天气能力
 
 - **农历与节气**：农历基于系统 `Calendar(identifier: .chinese)`（按北京时间正午防跨日）；24 节气通过 Meeus 太阳视黄经迭代求解，完全离线可用。
-- **状态栏渲染**：`CalendarMenuBarLabel` 使用 `CalendarMenuBarRenderer` 将天气图标/温度/AQI、公历/星期/农历、时钟图标/时间离线绘制为高度 `22pt` 的模板 `NSImage`，避免 macOS `MenuBarExtra` 动态文本插值在切换显示项时截断或消失；设置页实时预览使用 SwiftUI `CalendarMenuBarPreview`。
+- **状态栏渲染**：`CalendarMenuBarLabel` 使用 `CalendarMenuBarRenderer` 将可选的万年历全彩 Logo（`MenuBarSegment.logo`，从 `Bundle.module` 的 `Resources/CalendarLogo.png` 加载）、天气图标/温度/AQI、公历/星期/农历、时钟图标/时间离线绘制为高度 `22pt` 的 `NSImage`，避免 macOS `MenuBarExtra` 动态文本插值在切换显示项时截断或消失；未开启 Logo 时输出模板图像（`isTemplate = true`），开启全彩 Logo 时输出非模板图像（`isTemplate = false`）并按系统浅/深色自适应文字与图标前景色；设置页实时预览使用 SwiftUI `CalendarMenuBarPreview`。
 - **双进程状态栏自动避让**：`CalendarMenuBarPolicy` 监听独立版 `com.taopaox.ironbowl.calendar` 进程启停，当独立版「饭碗万年历」正在运行时，主工作台通过 `CalendarModel.shouldShowEmbeddedMenuBar` 自动隐藏内置状态栏日历（保留 `calendar.menuBar.enabled` 设置值不覆盖），并在 `CalendarStatusBarSettings` 展示提示横幅，独立版退出后自动恢复。
 - **休/班标识与倒计时**：直接读取共享 `WorkCalendar` 数据，显示「休」「班」角标，并支持百度风格倒计时（今天显示距下一个法定节假日天数）。
 - **弹出面板交互与主题**：
@@ -29,7 +29,7 @@
 ## 设置键（`CalendarKeys`）
 
 - `calendar.firstWeekday`（默认 `2` 周一）、`calendar.popover.style`（默认 `.appearance`）
-- `calendar.menuBar.enabled`（默认 `true`）
+- `calendar.menuBar.enabled`（默认 `true`）、`calendar.menuBar.logo`（默认 `false`）
 - 时间选项：`calendar.menuBar.time`（默认 `true`）、`calendar.menuBar.time.icon`（默认 `false`）、`calendar.menuBar.time.24hour`（默认 `true`）、`calendar.menuBar.time.period`（默认 `false`）、`calendar.menuBar.time.seconds`（默认 `false`）
 - 日期选项：`calendar.menuBar.dateSection`（默认 `true`）、`calendar.menuBar.lunar`（默认 `false`）、`calendar.menuBar.date`（默认 `true`）、`calendar.menuBar.weekday`（默认 `true`）
 - 天气选项：`calendar.menuBar.weatherSection`（默认 `true`）、`calendar.menuBar.weather`（默认 `true`）、`calendar.menuBar.aqi`（默认 `false`）

@@ -99,52 +99,19 @@ struct Sidebar: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
+                    let partitioned = SidebarPluginGrouping.partition(app.enabledPlugins)
+
                     DSSidebarItem("今天", systemImage: "house", selected: app.selection == AppModel.homeID) {
                         app.select(AppModel.homeID)
                     }
-                    ForEach(app.enabledPlugins, id: \.id) { plugin in
-                        let children = plugin.sidebarChildren
-                        let hasSelectedChild = app.selection == plugin.id && (
-                            plugin.sidebarPinnedItems.contains(where: \.isSelected) ||
-                            children.contains(where: \.isSelected)
-                        )
-                        if plugin.isSidebarDirectory {
-                            SidebarDirectoryHeader(
-                                title: plugin.title,
-                                systemImage: plugin.systemImage,
-                                selected: app.selection == plugin.id && !hasSelectedChild,
-                                isCollapsed: isDirCollapsed(plugin.id),
-                                hasChildren: !children.isEmpty,
-                                onSelect: {
-                                    plugin.onSidebarSelect()
-                                    app.select(plugin.id)
-                                },
-                                onToggleCollapse: {
-                                    withAnimation(.snappy(duration: 0.18)) {
-                                        toggleDir(plugin.id)
-                                    }
-                                }
-                            )
-                            if !isDirCollapsed(plugin.id), !children.isEmpty {
-                                ForEach(children) { item in
-                                    PinnedSidebarRow(
-                                        item: item,
-                                        selected: app.selection == item.pluginID && item.isSelected,
-                                        indent: 14,
-                                        onStartRename: {
-                                            renameText = item.title
-                                            renamingItem = item
-                                        }
-                                    )
-                                }
-                            }
-                        } else {
-                            DSSidebarItem(plugin.title, systemImage: plugin.systemImage,
-                                          selected: app.selection == plugin.id && !hasSelectedChild,
-                                          badge: plugin.isComingSoon ? "即将推出" : nil) {
-                                plugin.onSidebarSelect()
-                                app.select(plugin.id)
-                            }
+                    ForEach(partitioned.ungrouped, id: \.id) { plugin in
+                        pluginRow(plugin)
+                    }
+
+                    ForEach(partitioned.sections) { section in
+                        DSSidebarSection(section.title)
+                        ForEach(section.plugins, id: \.id) { plugin in
+                            pluginRow(plugin)
                         }
                     }
 
@@ -218,6 +185,53 @@ struct Sidebar: View {
             .padding(18)
             .frame(width: DS.s(320))
             .background(DS.card)
+        }
+    }
+
+    @ViewBuilder
+    private func pluginRow(_ plugin: IronBowlPlugin) -> some View {
+        let children = plugin.sidebarChildren
+        let hasSelectedChild = app.selection == plugin.id && (
+            plugin.sidebarPinnedItems.contains(where: \.isSelected) ||
+            children.contains(where: \.isSelected)
+        )
+        if plugin.isSidebarDirectory {
+            SidebarDirectoryHeader(
+                title: plugin.sidebarTitle,
+                systemImage: plugin.systemImage,
+                selected: app.selection == plugin.id && !hasSelectedChild,
+                isCollapsed: isDirCollapsed(plugin.id),
+                hasChildren: !children.isEmpty,
+                onSelect: {
+                    plugin.onSidebarSelect()
+                    app.select(plugin.id)
+                },
+                onToggleCollapse: {
+                    withAnimation(.snappy(duration: 0.18)) {
+                        toggleDir(plugin.id)
+                    }
+                }
+            )
+            if !isDirCollapsed(plugin.id), !children.isEmpty {
+                ForEach(children) { item in
+                    PinnedSidebarRow(
+                        item: item,
+                        selected: app.selection == item.pluginID && item.isSelected,
+                        indent: 14,
+                        onStartRename: {
+                            renameText = item.title
+                            renamingItem = item
+                        }
+                    )
+                }
+            }
+        } else {
+            DSSidebarItem(plugin.sidebarTitle, systemImage: plugin.systemImage,
+                          selected: app.selection == plugin.id && !hasSelectedChild,
+                          badge: plugin.isComingSoon ? "即将推出" : nil) {
+                plugin.onSidebarSelect()
+                app.select(plugin.id)
+            }
         }
     }
 }

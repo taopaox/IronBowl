@@ -507,7 +507,11 @@ import Testing
     #expect(weeklyPlugin.id == "report")
     #expect(monthlyPlugin.id == "report.monthly")
     #expect(weeklyPlugin.title == "周报")
+    #expect(weeklyPlugin.sidebarTitle == "周报")
+    #expect(weeklyPlugin.sidebarSection == "汇报")
     #expect(monthlyPlugin.title == "月报")
+    #expect(monthlyPlugin.sidebarTitle == "月报")
+    #expect(monthlyPlugin.sidebarSection == "汇报")
 
     let combinedMigrations = weeklyPlugin.migrations + monthlyPlugin.migrations
     #expect(Set(combinedMigrations.map(\.identifier)).count == 2)

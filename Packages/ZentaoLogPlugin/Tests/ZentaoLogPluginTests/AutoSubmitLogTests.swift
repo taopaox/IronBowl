@@ -30,6 +30,9 @@ import Testing
     )
 
     let plugin = ZentaoLogPlugin()
+    #expect(plugin.title == "禅道日志")
+    #expect(plugin.sidebarTitle == "日报")
+    #expect(plugin.sidebarSection == "汇报")
     plugin.start(context: context)
     defer { plugin.stop() }
 

@@ -6,6 +6,10 @@ public protocol IronBowlPlugin: AnyObject {
     /// 稳定唯一 ID，用于设置里的启用开关和侧边栏选择。
     var id: String { get }
     var title: String { get }
+    /// 左侧栏显示的标题（默认与 `title` 相同）。
+    var sidebarTitle: String { get }
+    /// 左侧栏所属分组标题（如「汇报」）；为 nil 或空白时显示在顶部主列表。
+    var sidebarSection: String? { get }
     /// SF Symbol 名称。
     var systemImage: String { get }
     /// 只占位、尚未实现。
@@ -41,6 +45,8 @@ public protocol IronBowlPlugin: AnyObject {
 }
 
 public extension IronBowlPlugin {
+    var sidebarTitle: String { title }
+    var sidebarSection: String? { nil }
     var isComingSoon: Bool { false }
     var isSidebarDirectory: Bool { false }
     var migrations: [DatabaseMigration] { [] }
@@ -55,6 +61,46 @@ public extension IronBowlPlugin {
     var quickActions: [QuickAction] { [] }
     var homeCards: [HomeCard] { [] }
     func handleHomeInput(_ text: String) async -> String? { nil }
+}
+
+/// 侧栏中按 `sidebarSection` 归组后的插件分区。
+public struct SidebarPluginSection: Identifiable {
+    public let title: String
+    public let plugins: [IronBowlPlugin]
+    public var id: String { title }
+
+    public init(title: String, plugins: [IronBowlPlugin]) {
+        self.title = title
+        self.plugins = plugins
+    }
+}
+
+/// 将已启用插件按 `sidebarSection` 拆分为顶部未分组列表与保序分组列表。
+public enum SidebarPluginGrouping {
+    public static func partition(_ plugins: [IronBowlPlugin]) -> (ungrouped: [IronBowlPlugin], sections: [SidebarPluginSection]) {
+        var ungrouped: [IronBowlPlugin] = []
+        var sectionOrder: [String] = []
+        var grouped: [String: [IronBowlPlugin]] = [:]
+
+        for plugin in plugins {
+            let raw = plugin.sidebarSection?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let section = raw, !section.isEmpty else {
+                ungrouped.append(plugin)
+                continue
+            }
+            if grouped[section] == nil {
+                sectionOrder.append(section)
+                grouped[section] = []
+            }
+            grouped[section]?.append(plugin)
+        }
+
+        let sections = sectionOrder.compactMap { title -> SidebarPluginSection? in
+            guard let items = grouped[title], !items.isEmpty else { return nil }
+            return SidebarPluginSection(title: title, plugins: items)
+        }
+        return (ungrouped, sections)
+    }
 }
 
 /// 设置窗口里的一页。

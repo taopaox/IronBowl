@@ -10,6 +10,7 @@ public final class ReportPlugin: IronBowlPlugin {
 
     public let id = ReportPlugin.pluginID
     public let title = "周报"
+    public let sidebarSection: String? = "汇报"
     public let systemImage = "doc.text"
     public var migrations: [DatabaseMigration] { [ReportMigrations.weekly] }
 
@@ -89,6 +90,7 @@ public final class MonthlyReportPlugin: IronBowlPlugin {
 
     public let id = MonthlyReportPlugin.pluginID
     public let title = "月报"
+    public let sidebarSection: String? = "汇报"
     public let systemImage = "doc.richtext"
     public var migrations: [DatabaseMigration] { [ReportMigrations.monthly] }
 

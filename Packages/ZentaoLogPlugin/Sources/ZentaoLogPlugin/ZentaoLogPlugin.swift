@@ -9,6 +9,8 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
     public static let defaultAutoSubmitTaskID = "builtin.zentao.dailyAutoSubmit"
     public let id = ZentaoLogPlugin.pluginID
     public let title = "禅道日志"
+    public let sidebarTitle = "日报"
+    public let sidebarSection: String? = "汇报"
     public let systemImage = "square.and.pencil"
     public var migrations: [DatabaseMigration] { LogMigrations.all }
 

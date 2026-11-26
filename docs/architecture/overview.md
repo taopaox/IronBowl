@@ -57,7 +57,9 @@ flowchart LR
 
 ### `IronBowlPlugin` 核心能力
 
-- **基础身份**：`id`、`title`、`systemImage`、`isComingSoon`、`isSidebarDirectory`、`migrations`。
+- **基础身份**：`id`、`title`、`sidebarTitle`、`sidebarSection`、`systemImage`、`isComingSoon`、`isSidebarDirectory`、`migrations`。
+  - `sidebarTitle` 默认回退到 `title`（例如 `ZentaoLogPlugin` 的 `title` 为 `"禅道日志"`，`sidebarTitle` 为 `"日报"`）。
+  - `sidebarSection` 为 `nil` 或空白时显示在左侧栏顶部主列表；指定分组名后通过 `SidebarPluginGrouping.partition(_:)` 归组展示在独立 `DSSidebarSection` 分区下（如 `"汇报"` 分组包含日报、周报、月报）。
 - **生命周期**：
   - `start(context: PluginContext)`：插件启用并启动时调用一次，注入共享服务与导航回调。
   - `stop()`：插件停用或应用退出清理时调用，用于停止定时器并释放 `WebSessionManager` 持有会话。

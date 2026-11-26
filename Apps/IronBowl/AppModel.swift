@@ -50,6 +50,7 @@ final class AppModel {
     let reminders = ReminderCenter()
     let workCalendar: WorkCalendar
     let providers: AIProviderStore
+    let chat: ChatStore
     let webSessions: WebSessionManager
     let scheduler: TaskScheduler
     let systemMonitor: SystemMonitor
@@ -104,6 +105,7 @@ final class AppModel {
         }
         workCalendar = WorkCalendar(database: database, settings: settings)
         providers = AIProviderStore(settings: settings)
+        chat = ChatStore(database: database, settings: settings, providers: providers)
         let webSessions = WebSessionManager(settings: settings)
         self.webSessions = webSessions
         let scheduler = TaskScheduler(

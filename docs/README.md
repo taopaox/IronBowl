@@ -16,6 +16,7 @@ docs/
 │   └── design-system.md              # 视觉规范、颜色字体与 DS* 组件库
 ├── core/                             # IronBowlKit 公共底座能力
 │   ├── ai-provider.md                # AI 提供者配置与只读结构化执行
+│   ├── chat.md                       # 首页多对话引擎、流式事件解析与持久化
 │   ├── work-calendar.md              # 工作日历、上下班工时、弹性打卡（钉钉 dws）与节假日数据源
 │   ├── web-tombstone.md              # 内嵌网页会话与 Chrome 式墓碑休眠机制
 │   ├── scheduler.md                  # 通用定时任务调度引擎（周期计算、补跑与内置动作）
@@ -43,6 +44,7 @@ docs/
 | 数据库与跨进程同步 | [数据与存储](./architecture/data-and-storage.md) | `AppDatabase`、表结构迁移、`SettingsStore`、本地日志路径 |
 | UI 组件与缩放规范 | [设计系统](./architecture/design-system.md) | `DS*` 组件、浅深色适配、字体缩放与无标题栏窗口拖拽 |
 | AI 调用能力 | [AI 提供者](./core/ai-provider.md) | `agy` / `codex` 只读 JSON Schema 调用与自动路径探测 |
+| 多对话引擎 | [首页多对话工作台](./core/chat.md) | `ChatStore`、`AIChatRunner`、`AIChatStreamParser` 与 `Shell.streamLines` |
 | 节假日与工时计算 | [工作日历](./core/work-calendar.md) | 默认工时公式、弹性下班与钉钉考勤同步、`DayInfo` 优先级与节假日抓取源 |
 | 网页内存回收 | [网页与墓碑机制](./core/web-tombstone.md) | `WebSessionManager`、LRU/闲置休眠、快照与历史栈恢复 |
 | 定时任务底座 | [定时任务调度引擎](./core/scheduler.md) | `TaskScheduler`、工作日/循环周期计算、防重槽位与补执行策略 |

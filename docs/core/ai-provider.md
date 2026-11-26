@@ -2,6 +2,8 @@
 
 AI 执行能力由 [`AIProvider.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/AI/AIProvider.swift) 与 [`Shell.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/Core/Shell.swift) 提供，支持以统一提示词和 JSON Schema 调用本地安装的 AI CLI，且全部在隔离临时目录中以只读方式运行。
 
+> 本页介绍供插件使用的只读结构化执行器 `AIRunner`；首页「今天」的多轮交互式流式对话与本地工作目录执行能力由 [`AIChatRunner`](./chat.md) 提供。
+
 ## 支持的提供者（`AIProviderKind`）
 
 | 枚举 | 显示名 | 可执行文件名 | 默认思考深度选项 |

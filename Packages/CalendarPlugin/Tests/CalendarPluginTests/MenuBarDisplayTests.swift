@@ -39,6 +39,55 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
     #expect(CalendarModel.formatTime(noon, use24Hour: false, showPeriod: true, showSeconds: false) == "下午 12:05")
 }
 
+@MainActor @Test func popoverAndShortTimeFollow12And24HourSetting() throws {
+    let midnight = makeDate(hour: 0, minute: 5)
+    let morning = makeDate(hour: 9, minute: 5)
+    let noon = makeDate(hour: 12, minute: 5)
+    let evening = makeDate(hour: 18, minute: 25)
+
+    #expect(CalendarModel.popoverTimeParts(midnight, use24Hour: true) == (nil, "00:05"))
+    #expect(CalendarModel.popoverTimeParts(midnight, use24Hour: false) == ("上午", "12:05"))
+    #expect(CalendarModel.popoverTimeParts(morning, use24Hour: true) == (nil, "09:05"))
+    #expect(CalendarModel.popoverTimeParts(morning, use24Hour: false) == ("上午", "9:05"))
+    #expect(CalendarModel.popoverTimeParts(noon, use24Hour: true) == (nil, "12:05"))
+    #expect(CalendarModel.popoverTimeParts(noon, use24Hour: false) == ("下午", "12:05"))
+    #expect(CalendarModel.popoverTimeParts(evening, use24Hour: true) == (nil, "18:25"))
+    #expect(CalendarModel.popoverTimeParts(evening, use24Hour: false) == ("下午", "6:25"))
+
+    #expect(CalendarModel.formatShortTime(midnight, use24Hour: true) == "00:05")
+    #expect(CalendarModel.formatShortTime(midnight, use24Hour: false) == "上午 12:05")
+    #expect(CalendarModel.formatShortTime(morning, use24Hour: true) == "09:05")
+    #expect(CalendarModel.formatShortTime(morning, use24Hour: false) == "上午 9:05")
+    #expect(CalendarModel.formatShortTime(noon, use24Hour: true) == "12:05")
+    #expect(CalendarModel.formatShortTime(noon, use24Hour: false) == "下午 12:05")
+    #expect(CalendarModel.formatShortTime(evening, use24Hour: true) == "18:25")
+    #expect(CalendarModel.formatShortTime(evening, use24Hour: false) == "下午 6:25")
+
+    let url = FileManager.default.temporaryDirectory.appending(path: "ib-cal-timeformat-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let db = try AppDatabase(url: url, migrations: [])
+    let settings = SettingsStore(database: db)
+    let context = PluginContext(
+        database: db,
+        settings: settings,
+        reminders: ReminderCenter(),
+        workCalendar: WorkCalendar(database: db, settings: settings),
+        providers: AIProviderStore(settings: settings),
+        openPlugin: { _ in },
+        openSettings: { _ in }
+    )
+    let model = CalendarModel(context: context)
+    #expect(model.use24HourTime == true)
+    #expect(model.popoverTimeParts.period == nil)
+
+    model.use24HourTime = false
+    #expect(settings[CalendarKeys.menuBarTime24Hour] == false)
+    let expected12Hour = CalendarModel.popoverTimeParts(model.now, use24Hour: false)
+    #expect(model.popoverTimeParts == expected12Hour)
+    #expect(model.popoverTimeParts.period != nil)
+}
+
 @Test func menuBarSegmentsCombinations() {
     let date = makeDate(hour: 16, minute: 4, second: 9)
     let weather = WeatherSnapshot(

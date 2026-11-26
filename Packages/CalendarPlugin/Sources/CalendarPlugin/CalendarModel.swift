@@ -337,6 +337,19 @@ public final class CalendarModel {
         return time
     }
 
+    public nonisolated static func popoverTimeParts(_ date: Date, use24Hour: Bool) -> (period: String?, time: String) {
+        let time = formatTime(date, use24Hour: use24Hour, showPeriod: false, showSeconds: false)
+        if use24Hour {
+            return (nil, time)
+        }
+        let hour = cal.component(.hour, from: date)
+        return (hour < 12 ? "上午" : "下午", time)
+    }
+
+    public nonisolated static func formatShortTime(_ date: Date, use24Hour: Bool) -> String {
+        formatTime(date, use24Hour: use24Hour, showPeriod: !use24Hour, showSeconds: false)
+    }
+
     public nonisolated static func menuBarSegments(
         at date: Date,
         weather: WeatherSnapshot?,
@@ -400,6 +413,15 @@ public final class CalendarModel {
     public var menuBarEnabled: Bool {
         get { settings[CalendarKeys.menuBarEnabled] }
         set { settings[CalendarKeys.menuBarEnabled] = newValue }
+    }
+
+    public var use24HourTime: Bool {
+        get { settings[CalendarKeys.menuBarTime24Hour] }
+        set { settings[CalendarKeys.menuBarTime24Hour] = newValue }
+    }
+
+    public var popoverTimeParts: (period: String?, time: String) {
+        Self.popoverTimeParts(now, use24Hour: use24HourTime)
     }
 
     /// 主工作台是否应显示内置状态栏日历（独立版「饭碗万年历」运行时自动避让隐藏）。

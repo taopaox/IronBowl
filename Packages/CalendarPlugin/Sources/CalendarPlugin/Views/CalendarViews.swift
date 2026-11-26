@@ -317,7 +317,9 @@ struct WeatherCard: View {
                             .font(DS.caption)
                         }
                     }
-                    Text("更新于 \(CN.time(w.fetchedAt))").font(DS.font(11)).foregroundStyle(DS.textTertiary)
+                    Text("更新于 \(CalendarModel.formatShortTime(w.fetchedAt, use24Hour: model.use24HourTime))")
+                        .font(DS.font(11))
+                        .foregroundStyle(DS.textTertiary)
                 } else {
                     Text(model.weatherError ?? "还没选城市，选好后显示未来 7 天天气。").font(DS.body).foregroundStyle(DS.textSecondary)
                     Button("选择城市") { model.context.openSettings(CalendarPlugin.settingsWeatherID) }.buttonStyle(.dsSecondary)

@@ -610,12 +610,20 @@ private struct PopoverSidePanel: View {
         let d = model.selected
         let l = Lunar.lunar(d)
         let extra = [Lunar.festival(d), Lunar.solarTerm(d)].compactMap { $0 }
+        let clock = model.popoverTimeParts
         VStack(spacing: 8) {
-            Text(CN.time(model.now))
-                .font(DS.font(30, .light))
-                .monospacedDigit()
-                .foregroundStyle(palette.sidebarText)
-                .padding(.top, 8)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                if let period = clock.period {
+                    Text(period)
+                        .font(DS.font(13, .medium))
+                        .foregroundStyle(palette.sidebarSecondaryText)
+                }
+                Text(clock.time)
+                    .font(DS.font(30, .light))
+                    .monospacedDigit()
+                    .foregroundStyle(palette.sidebarText)
+            }
+            .padding(.top, 8)
             Text(CN.weekday(d))
                 .font(DS.font(13.5, .medium))
                 .foregroundStyle(palette.sidebarText)

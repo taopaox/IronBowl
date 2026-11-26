@@ -6,7 +6,7 @@ struct CalendarDisplaySettings: View {
 
     var body: some View {
         let s = model.settings
-        DSSection("月历", footer: "每周第一天作用于主窗口月历与状态栏弹出面板；节假日与调休数据可在左侧「节假日」中管理。") {
+        DSSection("月历", footer: "每周第一天与时间制式会同步作用于主窗口月历、状态栏日历与弹出面板；节假日与调休数据可在左侧「节假日」中管理。") {
             DSRow("每周第一天") {
                 DSPicker(
                     selection: s.binding(CalendarKeys.firstWeekday),
@@ -16,7 +16,24 @@ struct CalendarDisplaySettings: View {
                     ]
                 )
             }
+            DSRow("时间制式", description: "切换 12 小时制或 24 小时制显示。") {
+                CalendarTimeFormatPicker(selection: s.binding(CalendarKeys.menuBarTime24Hour))
+            }
         }
+    }
+}
+
+private struct CalendarTimeFormatPicker: View {
+    @Binding var selection: Bool
+
+    var body: some View {
+        DSPicker(
+            selection: $selection,
+            options: [
+                DSPickerOption(true, title: "24 小时制", subtitle: "例如 18:30"),
+                DSPickerOption(false, title: "12 小时制", subtitle: "例如 下午 6:30"),
+            ]
+        )
     }
 }
 
@@ -81,12 +98,14 @@ struct CalendarStatusBarSettings: View {
             }
             if s[CalendarKeys.menuBarEnabled] {
                 DSSection("时间选项") {
-                    DSRow("显示时间", description: "在状态栏显示当前时间，可配置图标、24 小时制、上午/下午与精确到秒。") {
+                    DSRow("显示时间", description: "在状态栏显示当前时间，可配置图标、12/24 小时制、上午/下午与精确到秒。") {
                         DSToggle(isOn: s.binding(CalendarKeys.menuBarTime))
                     }
                     if s[CalendarKeys.menuBarTime] {
                         DSRow("显示 icon") { DSToggle(isOn: s.binding(CalendarKeys.menuBarTimeIcon)) }
-                        DSRow("使用 24 小时格式") { DSToggle(isOn: s.binding(CalendarKeys.menuBarTime24Hour)) }
+                        DSRow("时间制式", description: "同步作用于状态栏时间、弹出面板时钟与天气更新时间。") {
+                            CalendarTimeFormatPicker(selection: s.binding(CalendarKeys.menuBarTime24Hour))
+                        }
                         DSRow("显示上午/下午") { DSToggle(isOn: s.binding(CalendarKeys.menuBarTimePeriod)) }
                         DSRow("时间精确到秒") { DSToggle(isOn: s.binding(CalendarKeys.menuBarTimeSeconds)) }
                     }

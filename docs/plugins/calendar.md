@@ -30,7 +30,7 @@
 
 - `calendar.firstWeekday`（默认 `2` 周一）、`calendar.popover.style`（默认 `.appearance`）
 - `calendar.menuBar.enabled`（默认 `true`）、`calendar.menuBar.logo`（默认 `false`）
-- 时间选项：`calendar.menuBar.time`（默认 `true`）、`calendar.menuBar.time.icon`（默认 `false`）、`calendar.menuBar.time.24hour`（默认 `true`）、`calendar.menuBar.time.period`（默认 `false`）、`calendar.menuBar.time.seconds`（默认 `false`）
+- 时间选项：`calendar.menuBar.time`（默认 `true`）、`calendar.menuBar.time.icon`（默认 `false`）、`calendar.menuBar.time.24hour`（默认 `true`，在「月历」和「状态栏 → 时间选项」均可通过「时间制式（24 小时制 / 12 小时制）」切换，并同步作用于状态栏时间、弹出面板右侧大时钟与主窗口天气更新时间）、`calendar.menuBar.time.period`（默认 `false`）、`calendar.menuBar.time.seconds`（默认 `false`）
 - 日期选项：`calendar.menuBar.dateSection`（默认 `true`）、`calendar.menuBar.lunar`（默认 `false`）、`calendar.menuBar.date`（默认 `true`）、`calendar.menuBar.weekday`（默认 `true`）
 - 天气选项：`calendar.menuBar.weatherSection`（默认 `true`）、`calendar.menuBar.weather`（默认 `true`）、`calendar.menuBar.aqi`（默认 `false`）
 - `weather.source`、`weather.city`、`weather.qweatherKey`、`weather.qweatherHost`、`weather.refreshMinutes`（默认 `30`）、`weather.last`

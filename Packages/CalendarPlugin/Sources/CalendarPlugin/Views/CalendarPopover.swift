@@ -2,35 +2,54 @@ import AppKit
 import IronBowlKit
 import SwiftUI
 
-/// 菜单栏日历的文字：天气图标/温度/AQI + 日期/星期/农历 + 时间图标/时间。
+/// 菜单栏日历的标签：按所选风格通过离线图像渲染器绘制为固定高度 22pt 的 Retina 图像。
 public struct CalendarMenuBarLabel: View {
     let model: CalendarModel
+    @Environment(\.colorScheme) private var colorScheme
 
     public init(model: CalendarModel) { self.model = model }
 
     public var body: some View {
-        renderedText
-            .monospacedDigit()
-            .onAppear { model.syncClockTimer() }
-            .onChange(of: model.needsSecondTick) { model.syncClockTimer() }
+        let isDark = (model.appAppearance == .system ? colorScheme : model.systemColorScheme) == .dark
+        Image(nsImage: CalendarMenuBarRenderer.renderImage(
+            snapshot: model.menuBarSnapshot,
+            style: model.menuBarStyle,
+            isDark: isDark
+        ))
+        .onAppear { model.syncClockTimer() }
+        .onChange(of: model.needsSecondTick) { model.syncClockTimer() }
+    }
+}
+
+/// 设置页里的状态栏日历预览视图（按全局字体缩放渲染）。
+public struct CalendarMenuBarPreview: View {
+    let segments: [MenuBarSegment]
+
+    public init(segments: [MenuBarSegment]) {
+        self.segments = segments
     }
 
-    private var renderedText: Text {
-        let segments = model.menuBarSegments
-        guard let first = segments.first else {
-            return Text(Image(systemName: "calendar"))
-        }
-        return segments.dropFirst().reduce(segmentText(first)) { acc, seg in
-            Text("\(acc) \(segmentText(seg))")
-        }
-    }
-
-    private func segmentText(_ segment: MenuBarSegment) -> Text {
-        switch segment {
-        case .symbol(let name):
-            Text(Image(systemName: name))
-        case .text(let value):
-            Text(verbatim: value)
+    public var body: some View {
+        let effective = segments.isEmpty ? [MenuBarSegment.symbol("calendar")] : segments
+        HStack(spacing: 4) {
+            ForEach(Array(effective.enumerated()), id: \.offset) { _, segment in
+                switch segment {
+                case .logo:
+                    if let logo = CalendarAssets.logoImage {
+                        Image(nsImage: logo)
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: DS.s(17), height: DS.s(17))
+                    } else {
+                        Image(systemName: "calendar")
+                    }
+                case .symbol(let name):
+                    Image(systemName: name)
+                case .text(let value):
+                    Text(verbatim: value)
+                }
+            }
         }
     }
 }
@@ -420,12 +439,20 @@ private struct PopoverSidePanel: View {
         let d = model.selected
         let l = Lunar.lunar(d)
         let extra = [Lunar.festival(d), Lunar.solarTerm(d)].compactMap { $0 }
+        let clock = model.popoverTimeParts
         VStack(spacing: 8) {
-            Text(CN.time(model.now))
-                .font(DS.font(30, .light))
-                .monospacedDigit()
-                .foregroundStyle(palette.sidebarText)
-                .padding(.top, 8)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                if let period = clock.period {
+                    Text(period)
+                        .font(DS.font(13, .medium))
+                        .foregroundStyle(palette.sidebarSecondaryText)
+                }
+                Text(clock.time)
+                    .font(DS.font(30, .light))
+                    .monospacedDigit()
+                    .foregroundStyle(palette.sidebarText)
+            }
+            .padding(.top, 8)
             Text(CN.weekday(d))
                 .font(DS.font(13.5, .medium))
                 .foregroundStyle(palette.sidebarText)

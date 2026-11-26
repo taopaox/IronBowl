@@ -65,15 +65,19 @@ struct SettingsView: View {
                 }
                 .scrollIndicators(.never)
 
-                Text("饭碗 \(Bundle.main.displayVersion)")
-                    .font(DS.font(11.5))
-                    .monospacedDigit()
-                    .foregroundStyle(DS.textTertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
-                    .help("当前版本 \(Bundle.main.fullVersion)")
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("饭碗 \(Bundle.main.displayVersion)")
+                        .font(DS.font(11.5))
+                        .monospacedDigit()
+                        .foregroundStyle(DS.textTertiary)
+                        .help("当前版本 \(Bundle.main.fullVersion)")
+
+                    DSSloganView(style: .sidebar)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
             }
             .frame(width: 220)
             .background(DS.sidebar)
@@ -120,7 +124,7 @@ struct GeneralSettings: View {
                 )
             }
         }
-        DSSection("菜单栏显示", footer: "🍚 图标一直显示；打开的信息按顺序跟在后面，用箭头调整顺序。") {
+        DSSection("菜单栏显示", footer: "饭碗图标一直显示；打开的信息按顺序跟在后面，用箭头调整顺序。") {
             MenuBarItemsEditor(app: app)
         }
         DSSection("功能插件") {
@@ -131,6 +135,36 @@ struct GeneralSettings: View {
             }
         }
         DSSection("关于") {
+            DSBlockRow {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Image("AppLogo")
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: DS.s(36), height: DS.s(36))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text("\(AppBrand.name) \(AppBrand.englishName)")
+                                    .font(DS.font(15, .semibold))
+                                Text(Bundle.main.displayVersion)
+                                    .font(DS.font(11, .medium))
+                                    .monospacedDigit()
+                                    .foregroundStyle(DS.textTertiary)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 1.5)
+                                    .background(DS.well, in: .capsule)
+                            }
+                            Text("macOS 本地效率工作台")
+                                .font(DS.caption)
+                                .foregroundStyle(DS.textSecondary)
+                        }
+                    }
+
+                    DSSloganView(style: .banner)
+                }
+            }
             DSRow("当前版本", description: "饭碗工作台 · \(Bundle.main.fullVersion)") {
                 Button(copiedVersion ? "已复制" : "复制版本信息") {
                     NSPasteboard.general.clearContents()
@@ -143,26 +177,40 @@ struct GeneralSettings: View {
                 }
                 .buttonStyle(.dsSecondary)
             }
+            AppUpdateSettingsRows(updater: app.updater)
         }
     }
 }
 
 struct MenuBarItemsEditor: View {
     let app: AppModel
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let s = app.settings
         let selected = s[AppKeys.menuBarItems]
         let all = app.availableMenuBarItems
-        let ordered = selected.compactMap { id in all.first { $0.id == id } } + all.filter { !selected.contains($0.id) }
+        let availableIDs = Set(all.map(\.id))
+        let activeSelected = selected.filter { availableIDs.contains($0) }
+        let ordered = activeSelected.compactMap { id in all.first { $0.id == id } } + all.filter { !activeSelected.contains($0.id) }
+        DSRow("当前预览", description: "双行微缩仪表卡会实时渲染在系统菜单栏右侧。") {
+            Image(nsImage: MenuBarCardRenderer.renderImage(
+                segments: app.menuBarCardSegments,
+                iconImage: NSImage(named: "MenuBarIcon"),
+                isDark: colorScheme == .dark
+            ))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(DS.well, in: .rect(cornerRadius: 8))
+        }
         ForEach(ordered) { item in
-            DSRow(item.title, description: selected.contains(item.id) ? "当前显示：\(item.text() ?? "—")" : nil) {
+            DSRow(item.title, description: activeSelected.contains(item.id) ? "当前显示：\(item.text() ?? "—")" : nil) {
                 HStack(spacing: 4) {
-                    if let i = selected.firstIndex(of: item.id) {
-                        Button { move(i, -1) } label: { Image(systemName: "chevron.up") }
+                    if let i = activeSelected.firstIndex(of: item.id) {
+                        Button { move(item.id, -1, in: activeSelected) } label: { Image(systemName: "chevron.up") }
                             .buttonStyle(.dsGhost).disabled(i == 0)
-                        Button { move(i, 1) } label: { Image(systemName: "chevron.down") }
-                            .buttonStyle(.dsGhost).disabled(i == selected.count - 1)
+                        Button { move(item.id, 1, in: activeSelected) } label: { Image(systemName: "chevron.down") }
+                            .buttonStyle(.dsGhost).disabled(i == activeSelected.count - 1)
                     }
                     DSToggle(isOn: Binding(
                         get: { s[AppKeys.menuBarItems].contains(item.id) },
@@ -177,10 +225,13 @@ struct MenuBarItemsEditor: View {
         }
     }
 
-    func move(_ i: Int, _ delta: Int) {
+    func move(_ id: String, _ delta: Int, in activeSelected: [String]) {
+        guard let activeIndex = activeSelected.firstIndex(of: id) else { return }
+        let targetActiveIndex = activeIndex + delta
+        guard activeSelected.indices.contains(targetActiveIndex) else { return }
+        let neighborID = activeSelected[targetActiveIndex]
         var list = app.settings[AppKeys.menuBarItems]
-        let j = i + delta
-        guard list.indices.contains(j) else { return }
+        guard let i = list.firstIndex(of: id), let j = list.firstIndex(of: neighborID) else { return }
         list.swapAt(i, j)
         app.settings[AppKeys.menuBarItems] = list
     }
@@ -304,19 +355,29 @@ struct WorkTimeSettings: View {
                     }
                 }
             }
-            DSRow("上班时间") { TimeField(value: s.binding(WorkCalendar.startKey)) }
-            DSRow("下班时间") { TimeField(value: s.binding(WorkCalendar.endKey)) }
+            DSRow("上班时间") { TimeField(value: workTimeBinding(WorkCalendar.startKey)) }
+            DSRow("下班时间") { TimeField(value: workTimeBinding(WorkCalendar.endKey)) }
             DSRow("午休", description: "每天默认工时 = 下班 − 上班 − 午休，现在是 \(String(format: "%g", cal.defaultWorkHours)) 小时。") {
                 DSStepper(intValue: s.binding(WorkCalendar.lunchMinutesKey), in: 0...180, step: 15) { "\($0) 分钟" }
             }
             DSRow("弹性时间", description: "上班早到几分钟就早走几分钟，晚到几分钟就晚走几分钟，最多这么多。需要拿到当天的上班打卡时间才生效。") {
-                DSStepper(intValue: s.binding(WorkCalendar.flexMinutesKey), in: 0...120, step: 5) { $0 == 0 ? "不弹性" : "\($0) 分钟" }
+                DSStepper(intValue: workTimeBinding(WorkCalendar.flexMinutesKey), in: 0...120, step: 5) { $0 == 0 ? "不弹性" : "\($0) 分钟" }
             }
         }
 
         DingTalkAttendanceSettings(app: app)
 
         DSHolidaySettingsView(workCalendar: cal, settings: s)
+    }
+
+    private func workTimeBinding<Value>(_ key: SettingKey<Value>) -> Binding<Value> {
+        Binding(
+            get: { app.settings[key] },
+            set: { newValue in
+                app.settings[key] = newValue
+                app.scheduler.recomputeNextRuns()
+            }
+        )
     }
 }
 
@@ -424,11 +485,11 @@ struct ProviderSettings: View {
 struct ProviderEditor: View {
     let store: AIProviderStore
     let config: AIProviderConfig
-    @State private var models: [(id: String, name: String)] = []
     @State private var testing = false
     @State private var testResult: String?
 
     var body: some View {
+        let models = store.models(for: config.kind)
         DSSection(config.kind.displayName, footer: config.kind == .codex ? "Codex 需要先在终端运行一次 codex login 登录。" : nil) {
             DSRow("程序路径", description: "留空会用登录 shell 自动查找。") {
                 HStack(spacing: 6) {
@@ -442,15 +503,13 @@ struct ProviderEditor: View {
             DSRow("模型", description: "留空用 CLI 自己的默认模型。") {
                 HStack(spacing: 6) {
                     TextField("", text: bind(\.model), prompt: Text("默认")).textFieldStyle(.ds).frame(width: 220)
-                    if config.kind == .agy {
-                        DSPicker(
-                            selection: bind(\.model),
-                            options: [DSPickerOption("", title: "默认", subtitle: "使用 CLI 默认模型。")] + models.map {
-                                DSPickerOption($0.id, title: $0.name, subtitle: $0.id == $0.name ? nil : $0.id)
-                            }
-                        )
-                            .task { if models.isEmpty { models = await AIRunner.listModels(config: config) } }
-                    }
+                    DSPicker(
+                        selection: bind(\.model),
+                        options: [DSPickerOption("", title: "默认", subtitle: "使用 CLI 默认模型。")] + models.map {
+                            DSPickerOption($0.id, title: $0.name, subtitle: $0.detail ?? ($0.id == $0.name ? nil : $0.id))
+                        }
+                    )
+                    .task { await store.loadModels(for: config.kind) }
                 }
             }
             DSRow("思考深度") {

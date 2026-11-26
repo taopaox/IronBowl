@@ -55,6 +55,10 @@ public enum DS {
         .system(size: size * fontScale, design: .monospaced)
     }
 
+    public static func serif(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .system(size: size * fontScale, weight: weight, design: .serif)
+    }
+
     /// 跟着字号一起缩放的尺寸（控件高度等）。
     public static func s(_ v: CGFloat) -> CGFloat { (v * fontScale).rounded() }
 
@@ -297,14 +301,23 @@ public struct DSSidebarItem: View {
     let systemImage: String
     let selected: Bool
     let badge: String?
+    let badgeColor: Color?
     let action: () -> Void
     @State private var hovering = false
 
-    public init(_ title: String, systemImage: String, selected: Bool, badge: String? = nil, action: @escaping () -> Void) {
+    public init(
+        _ title: String,
+        systemImage: String,
+        selected: Bool,
+        badge: String? = nil,
+        badgeColor: Color? = nil,
+        action: @escaping () -> Void
+    ) {
         self.title = title
         self.systemImage = systemImage
         self.selected = selected
         self.badge = badge
+        self.badgeColor = badgeColor
         self.action = action
     }
 
@@ -317,9 +330,19 @@ public struct DSSidebarItem: View {
                 Text(title).font(DS.font(14.5))
                 Spacer(minLength: 0)
                 if let badge {
-                    Text(badge).font(DS.font(11.5)).foregroundStyle(DS.textTertiary)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .overlay { Capsule().strokeBorder(DS.border) }
+                    if let badgeColor {
+                        Text(badge)
+                            .font(DS.font(10.5, .semibold))
+                            .foregroundStyle(badgeColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(badgeColor.opacity(0.14), in: .capsule)
+                            .overlay { Capsule().strokeBorder(badgeColor.opacity(0.32)) }
+                    } else {
+                        Text(badge).font(DS.font(11.5)).foregroundStyle(DS.textTertiary)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .overlay { Capsule().strokeBorder(DS.border) }
+                    }
                 }
             }
             .foregroundStyle(DS.text)
@@ -556,4 +579,86 @@ public struct DSPageHeader<Leading: View, Actions: View>: View {
 public extension EnvironmentValues {
     /// 主窗口侧边栏是否处于收起状态（收起时内容区左上角要给展开按钮让位置）。
     @Entry var sidebarCollapsed = false
+}
+
+// MARK: - 品牌标语
+
+public enum DSSloganStyle: Sendable {
+    case hero
+    case sidebar
+    case banner
+    case inline
+}
+
+/// 饭碗全局品牌标语展示组件：无框衬线排版配合纤细暖琥珀竖线/细线点缀。
+public struct DSSloganView: View {
+    let text: String
+    let style: DSSloganStyle
+
+    public init(_ text: String = AppBrand.slogan, style: DSSloganStyle = .inline) {
+        self.text = text
+        self.style = style
+    }
+
+    private var sidebarText: String {
+        text == AppBrand.slogan ? AppBrand.twoLineSlogan : text
+    }
+
+    public var body: some View {
+        switch style {
+        case .hero:
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(DS.brand.opacity(0.55))
+                    .frame(width: 18, height: 1.5)
+                Text(text)
+                    .font(DS.serif(15.5, .medium))
+                    .tracking(1.0)
+                    .foregroundStyle(DS.text.opacity(0.84))
+                Capsule()
+                    .fill(DS.brand.opacity(0.55))
+                    .frame(width: 18, height: 1.5)
+            }
+
+        case .sidebar:
+            Text(sidebarText)
+                .font(DS.serif(12, .medium))
+                .tracking(0.3)
+                .foregroundStyle(DS.text.opacity(0.76))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(DS.brand.opacity(0.75))
+                        .frame(width: 2)
+                        .padding(.vertical, 1.5)
+                }
+
+        case .banner:
+            Text(text)
+                .font(DS.serif(13, .medium))
+                .tracking(0.5)
+                .foregroundStyle(DS.text.opacity(0.82))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .padding(.leading, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(DS.brand.opacity(0.75))
+                        .frame(width: 2.5)
+                        .padding(.vertical, 1.5)
+                }
+
+        case .inline:
+            Text(text)
+                .font(DS.serif(12.5, .medium))
+                .tracking(0.4)
+                .foregroundStyle(DS.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+    }
 }

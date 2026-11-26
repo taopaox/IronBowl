@@ -67,6 +67,47 @@ import Testing
     #expect(model2.activePageID == FeishuModel.homePageID)
 }
 
+@MainActor @Test func closePageAndCloseActivePageBehavior() throws {
+    let dbURL = FileManager.default.temporaryDirectory.appending(path: "ib-feishu-close-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: dbURL) }
+
+    let db = try AppDatabase(url: dbURL, migrations: [])
+    let settings = SettingsStore(database: db)
+    let web = WebSessionManager(settings: settings, startTimer: false, headlessForTesting: true)
+    var openedPlugins: [String] = []
+    let model = FeishuModel(
+        settings: settings,
+        webSessions: web,
+        openPlugin: { openedPlugins.append($0) }
+    )
+
+    let pin = model.pin(title: "测试文档", url: "https://my.feishu.cn/wiki/doc1")!
+    #expect(model.hasOpenSession(pageID: FeishuModel.homePageID) == false)
+    #expect(model.hasOpenSession(pageID: pin.id) == false)
+
+    // 先打开主页再切到固定页
+    _ = model.activeSession
+    #expect(model.hasOpenSession(pageID: FeishuModel.homePageID) == true)
+
+    model.selectPage(pin.id)
+    _ = model.activeSession
+    #expect(model.hasOpenSession(pageID: pin.id) == true)
+
+    // 后台关闭主页会话：只销毁主页会话，不切走当前固定页也不触发跳转
+    model.closePage(id: FeishuModel.homePageID)
+    #expect(model.hasOpenSession(pageID: FeishuModel.homePageID) == false)
+    #expect(model.activePageID == pin.id)
+    #expect(openedPlugins.isEmpty)
+
+    // 关闭当前激活的固定页：销毁会话、清空 activePageID、保留固定项并跳转回今天首页
+    model.closeActivePage()
+    #expect(model.hasOpenSession(pageID: pin.id) == false)
+    #expect(model.activePageID == nil)
+    #expect(model.activeSession == nil)
+    #expect(model.pinnedPages.contains(where: { $0.id == pin.id }))
+    #expect(openedPlugins == ["home"])
+}
+
 @Test func pinnedPageDecodesLegacyJSONWithoutNeverSuspend() throws {
     let legacyJSON = #"{"id":"p1","title":"旧文档","url":"https://my.feishu.cn/wiki/1","systemImage":"doc.text"}"#
     let decoded = try JSONDecoder().decode(FeishuPinnedPage.self, from: Data(legacyJSON.utf8))

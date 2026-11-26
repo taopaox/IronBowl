@@ -148,6 +148,81 @@ final class LogModel {
         pendingEntries(on: day).reduce(0) { $0 + $1.hours }
     }
 
+    func pendingEntries(forDateString ds: String) -> [DraftEntry] {
+        pendingByDate[ds] ?? []
+    }
+
+    func recordedEntries(forDateString ds: String) -> [DraftEntry] {
+        recordedByDate[ds] ?? []
+    }
+
+    func updatePendingDraft(_ entry: DraftEntry, forDateString ds: String) {
+        var list = pendingByDate[ds] ?? []
+        guard let idx = list.firstIndex(where: { $0.id == entry.id }) else { return }
+        let previous = list[idx]
+        guard entry != previous else { return }
+        list[idx] = entry
+        list[idx].allowsRegeneration = false
+        if entry.left != previous.left {
+            list[idx].manualLeft = entry.left
+        } else if entry.taskID != previous.taskID {
+            list[idx].manualLeft = nil
+        }
+        DraftGenerator.recomputeLefts(&list, tasks: tasks, fallbackTaskID: settings[LogKeys.fallbackTaskID])
+        setPending(list, for: ds)
+        if dateString == ds {
+            loadDraftsForCurrentDate()
+        }
+    }
+
+    func addManualPending(forDateString ds: String) {
+        var list = pendingByDate[ds] ?? []
+        list.append(DraftEntry(taskID: settings[LogKeys.fallbackTaskID], hours: 1, left: 0, work: "", isManual: true))
+        DraftGenerator.recomputeLefts(&list, tasks: tasks, fallbackTaskID: settings[LogKeys.fallbackTaskID])
+        setPending(list, for: ds)
+        if dateString == ds {
+            loadDraftsForCurrentDate()
+        }
+    }
+
+    func removePendingDraft(id: UUID, forDateString ds: String) {
+        var list = (pendingByDate[ds] ?? []).filter { $0.id != id }
+        DraftGenerator.recomputeLefts(&list, tasks: tasks, fallbackTaskID: settings[LogKeys.fallbackTaskID])
+        setPending(list, for: ds)
+        if dateString == ds {
+            loadDraftsForCurrentDate()
+        }
+    }
+
+    func submitPending(forDateString ds: String) async -> (succeeded: Int, failures: [String]) {
+        guard !isGenerating && !isSubmitting else { return (0, ["正在生成或提交，请稍候"]) }
+        isSubmitting = true
+        defer { isSubmitting = false }
+        errorMessage = nil
+        let toSubmit = pendingByDate[ds] ?? []
+        let result = await submitEntries(toSubmit, for: ds)
+        if result.failures.isEmpty {
+            message = "已提交 \(result.succeeded.count) 条日志到禅道"
+        } else {
+            errorMessage = (["成功 \(result.succeeded.count) 条，以下失败："] + result.failures).joined(separator: "\n")
+        }
+        await loadTasks()
+        return (result.succeeded.count, result.failures)
+    }
+
+    func generateForDate(_ targetDate: Date, forceScan: Bool = true) async {
+        let normalized = Calendar.current.startOfDay(for: targetDate)
+        if !Calendar.current.isDate(date, inSameDayAs: normalized) {
+            await select(date: normalized)
+        } else if forceScan {
+            await scan()
+        }
+        if isConfigured {
+            await loadTasks()
+        }
+        await generate()
+    }
+
     /// 最近 7 天（含今天）。
     var recentDays: [Date] {
         let today = Calendar.current.startOfDay(for: Date())
@@ -293,16 +368,16 @@ final class LogModel {
         pendingByDate = store.pendingDrafts(since: WorkCalendar.dayString(minDay))
     }
 
-    private func setPending(_ entries: [DraftEntry], for dateKey: String) {
+    @discardableResult
+    private func setPending(_ entries: [DraftEntry], for dateKey: String) -> Bool {
         let pending = entries.filter { !$0.isRecorded }
-        if pending.isEmpty {
-            if pendingByDate.removeValue(forKey: dateKey) != nil {
-                store.savePendingDrafts([], for: dateKey)
-            }
-        } else if pendingByDate[dateKey] != pending {
-            pendingByDate[dateKey] = pending
-            store.savePendingDrafts(pending, for: dateKey)
+        guard pending != pendingEntries(forDateString: dateKey) else { return true }
+        guard store.savePendingDrafts(pending, for: dateKey) else {
+            errorMessage = "草稿未能写入本机数据库，请重试。"
+            return false
         }
+        pendingByDate[dateKey] = pending.isEmpty ? nil : pending
+        return true
     }
 
     private func syncCurrentPendingFromDrafts() {
@@ -365,7 +440,7 @@ final class LogModel {
     // MARK: 生成
 
     func generate() async {
-        guard !isGenerating else { return }
+        guard !isGenerating && !isSubmitting else { return }
         isGenerating = true
         defer { isGenerating = false }
         errorMessage = nil
@@ -418,13 +493,18 @@ final class LogModel {
             promptTemplate: settings[LogKeys.prompt],
             overtimeHours: plannedOT,
             workEnd: context.workCalendar.workEnd(on: targetDate),
-            localSubmissions: localSubmissions
+            localSubmissions: localSubmissions,
+            pendingDrafts: pendingEntries(forDateString: targetDateString)
         )
         let provider = context.providers.config(providerKind)
         let output = await DraftGenerator.generate(input, provider: provider.executablePath.isEmpty ? nil : provider)
+        guard pendingEntries(forDateString: targetDateString) == input.pendingDrafts else {
+            message = "生成期间草稿有变动，已保留最新内容，请重新生成。"
+            return
+        }
         let mergedRecorded = DraftGenerator.mergeRecorded(remote: recorded, local: localSubmissions)
         let pendingOnly = output.entries.filter { !$0.isRecorded }
-        setPending(pendingOnly, for: targetDateString)
+        guard setPending(pendingOnly, for: targetDateString) else { return }
         if mergedRecorded.isEmpty {
             recordedByDate.removeValue(forKey: targetDateString)
         } else {
@@ -458,24 +538,39 @@ final class LogModel {
         recomputeLefts()
     }
 
+    /// 从左页 Git 提交小票摘录一条到待提交草稿。
+    func addDraftFromCommit(activity: RepoActivity, commit: GitCommit) {
+        let projectID = mappings[activity.repoPath]?.projectID
+        let matchedTaskID = projectID.flatMap { pid in
+            openTasks.first(where: { $0.projectID == pid })?.id
+        }
+        let lastTaskID = store.lastTasks()[activity.repoPath].flatMap { tid in
+            openTasks.contains(where: { $0.id == tid }) ? tid : nil
+        }
+        let taskID = lastTaskID ?? matchedTaskID ?? settings[LogKeys.fallbackTaskID]
+        let cleaned = DraftGenerator.cleanSubject(commit.subject)
+        let workText = cleaned.isEmpty ? commit.subject : cleaned
+        drafts.append(DraftEntry(
+            taskID: taskID,
+            hours: 1,
+            left: 0,
+            work: workText,
+            repoPaths: [activity.repoPath],
+            commitHashes: [commit.hash],
+            isFallback: taskID == settings[LogKeys.fallbackTaskID],
+            isManual: true
+        ))
+        recomputeLefts()
+    }
+
     func addOvertime(hours: Double, taskID: Int?, work: String) {
         drafts.append(DraftEntry(taskID: taskID, hours: hours, left: 0, work: work.isEmpty ? "加班处理工作" : work,
                                  isFallback: taskID == settings[LogKeys.fallbackTaskID], isOvertime: true, isManual: true))
         recomputeLefts()
     }
 
-    func removeDraft(id: UUID) {
-        drafts.removeAll { $0.id == id }
-        recomputeLefts()
-    }
-
     func recomputeLefts() {
         DraftGenerator.recomputeLefts(&drafts, tasks: tasks, fallbackTaskID: settings[LogKeys.fallbackTaskID])
-    }
-
-    func recomputeLeft(for index: Int) {
-        guard drafts.indices.contains(index) else { return }
-        recomputeLefts()
     }
 
     /// 当天剩余可分配工时最多的那条（加班默认记到这里）。
@@ -486,7 +581,7 @@ final class LogModel {
     // MARK: 提交
 
     func submit() async {
-        guard !isSubmitting else { return }
+        guard !isGenerating && !isSubmitting else { return }
         isSubmitting = true
         defer { isSubmitting = false }
         errorMessage = nil
@@ -549,6 +644,9 @@ final class LogModel {
                 detail: "请等待当前手动生成或提交操作完成后再试。"
             )
         }
+
+        isGenerating = true
+        defer { isGenerating = false }
 
         let targetDate = Calendar.current.startOfDay(for: now)
         let todayString = WorkCalendar.dayString(targetDate)
@@ -617,7 +715,6 @@ final class LogModel {
                 )
             }
 
-            isGenerating = true
             let excluded = Set(mappings.values.filter(\.excluded).map(\.repoPath))
             let targetActivities = await GitScanner.activity(
                 repos: repos().filter { !excluded.contains($0) },
@@ -633,7 +730,6 @@ final class LogModel {
             }
 
             if targetActivities.isEmpty {
-                isGenerating = false
                 return .skipped(
                     summary: "今天未检测到 Git 提交，未自动提交日志",
                     detail: "扫描根目录 \(settings[LogKeys.gitRoot]) 下没有发现 \(email) 今天的提交记录。如需记录非代码工作，请前往禅道日志页手动添加。",
@@ -646,7 +742,6 @@ final class LogModel {
             let info = context.workCalendar.dayInfo(targetDate)
             let plannedOT = overtimeHours(on: targetDate)
             if !info.isWorkday && plannedOT <= 0 {
-                isGenerating = false
                 return .skipped(
                     summary: "今天是休息日且未设置加班时长，无需提交日志",
                     detail: "若今天实际需要记录加班工时，请在禅道日志页设置加班时长后再生成提交。",
@@ -676,16 +771,21 @@ final class LogModel {
                 promptTemplate: settings[LogKeys.prompt],
                 overtimeHours: plannedOT,
                 workEnd: context.workCalendar.workEnd(on: targetDate),
-                localSubmissions: localSubmissions
+                localSubmissions: localSubmissions,
+                pendingDrafts: pendingEntries(forDateString: todayString)
             )
             let provider = context.providers.config(providerKind)
             let output = await DraftGenerator.generate(input, provider: provider.executablePath.isEmpty ? nil : provider)
+            guard pendingEntries(forDateString: todayString) == input.pendingDrafts else {
+                return .skipped(summary: "生成期间草稿有变动，已保留最新内容", detail: "请确认后重新生成或提交。", actionTitle: "查看草稿", actionPluginID: ZentaoLogPlugin.pluginID)
+            }
             let pendingOnly = output.entries.filter { !$0.isRecorded }
-            setPending(pendingOnly, for: todayString)
+            guard setPending(pendingOnly, for: todayString) else {
+                return .failed(summary: "未能保存本地草稿", detail: "请检查磁盘空间后重试。")
+            }
             if dateString == todayString {
                 loadDraftsForCurrentDate()
             }
-            isGenerating = false
 
             if let aiErr = output.aiError {
                 if !options.allowFallbackOnAIFailure {
@@ -777,7 +877,7 @@ final class LogModel {
     // MARK: 首页一句话记日志
 
     /// 用 AI 把一句话解析成今天的一条手动日志，加进今天的草稿。返回给用户看的结果。
-    func addFromSentence(_ text: String) async -> String {
+    func addFromSentence(_ text: String, on day: Date = Date()) async -> String {
         guard isConfigured else { return "❌ 先在设置里填写禅道账号" }
         if tasks.isEmpty { await loadTasks() }
         guard !openTasks.isEmpty else { return "❌ 没拉到禅道任务，先在设置里测试连接" }
@@ -800,15 +900,28 @@ final class LogModel {
             let r = try JSONDecoder().decode(R.self, from: result.json)
             let taskID = openTasks.contains { $0.id == r.taskId } ? r.taskId : settings[LogKeys.fallbackTaskID]
             let hours = max(0.5, (r.hours * 2).rounded() / 2)
-            if !Calendar.current.isDateInToday(date) { await select(date: Date()) }
-            drafts.append(DraftEntry(taskID: taskID, hours: hours, left: 0, work: r.work,
-                                     isFallback: taskID == settings[LogKeys.fallbackTaskID], isManual: true))
-            recomputeLefts()
+            guard !Task.isCancelled else { return "❌ 已取消" }
+            guard appendQuickLog(work: r.work, hours: hours, taskID: taskID, on: day) else {
+                return "❌ 草稿未能写入本机数据库，请重试"
+            }
             let name = task(taskID).map { "#\($0.id) \($0.name)" } ?? "未选任务"
             return "已加到今天的草稿：\(name)，\(hoursText(hours)) 小时。去禅道日志页确认后提交。"
         } catch {
             return "❌ \(error.localizedDescription)"
         }
+    }
+
+    /// 直接按收录日期追加，保持日报页当前查看的日期。
+    func appendQuickLog(work: String, hours: Double, taskID: Int?, on day: Date) -> Bool {
+        let text = work.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, hours.isFinite, hours > 0 else { return false }
+        let key = WorkCalendar.dayString(day)
+        var entries = pendingEntries(forDateString: key)
+        entries.append(DraftEntry(taskID: taskID, hours: hours, left: 0, work: text, isManual: true))
+        DraftGenerator.recomputeLefts(&entries, tasks: tasks, fallbackTaskID: settings[LogKeys.fallbackTaskID])
+        guard setPending(entries, for: key) else { return false }
+        if dateString == key { loadDraftsForCurrentDate() }
+        return true
     }
 
     // MARK: 映射

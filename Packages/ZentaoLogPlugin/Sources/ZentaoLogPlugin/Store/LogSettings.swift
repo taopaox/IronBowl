@@ -35,6 +35,7 @@ enum LogKeys {
     static let scanMode = SettingKey<ScanMode>("scan.mode", default: .onDemand)
     static let scanInterval = SettingKey<Int>("scan.intervalMinutes", default: 10)
 
+    static let quickLogShortcut = SettingKey<Bool>("log.quickLogShortcut", default: true)
     static let prompt = SettingKey<String>("log.prompt", default: DraftGenerator.defaultPrompt)
     static let overtimeDefaultHours = SettingKey<Double>("log.overtimeDefaultHours", default: 2)
     static let offDayOvertime = SettingKey<Bool>("log.offDayOvertime", default: true)
@@ -130,6 +131,15 @@ struct LogStore {
         (try? db.pool.read { try Submission.filter(Column("date") >= minDate).fetchAll($0) }) ?? []
     }
 
+    func submissions(from startDate: String, to endDate: String) -> [Submission] {
+        (try? db.pool.read {
+            try Submission
+                .filter(Column("date") >= startDate && Column("date") <= endDate)
+                .order(Column("date").asc, Column("id").asc)
+                .fetchAll($0)
+        }) ?? []
+    }
+
     func add(_ submission: Submission) {
         try? db.pool.write { try submission.insert($0) }
     }
@@ -151,6 +161,21 @@ struct LogStore {
         let rows = (try? db.pool.read { db in
             try Row.fetchAll(db, sql: "SELECT date, payload FROM zentaoPendingDraft WHERE date >= ?", arguments: [minDate])
         }) ?? []
+        return Self.decodePendingRows(rows)
+    }
+
+    func pendingDrafts(from startDate: String, to endDate: String) -> [String: [DraftEntry]] {
+        let rows = (try? db.pool.read { db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT date, payload FROM zentaoPendingDraft WHERE date >= ? AND date <= ?",
+                arguments: [startDate, endDate]
+            )
+        }) ?? []
+        return Self.decodePendingRows(rows)
+    }
+
+    private static func decodePendingRows(_ rows: [Row]) -> [String: [DraftEntry]] {
         let decoder = JSONDecoder()
         var out: [String: [DraftEntry]] = [:]
         for row in rows {
@@ -168,24 +193,24 @@ struct LogStore {
         return out
     }
 
-    func savePendingDrafts(_ entries: [DraftEntry], for date: String) {
+    @discardableResult
+    func savePendingDrafts(_ entries: [DraftEntry], for date: String) -> Bool {
         let pending = entries.filter { !$0.isRecorded }
         if pending.isEmpty {
-            try? db.pool.write { db in
+            return (try? db.pool.write { db in
                 try db.execute(sql: "DELETE FROM zentaoPendingDraft WHERE date = ?", arguments: [date])
-            }
-            return
+            }) != nil
         }
         guard let data = try? JSONEncoder().encode(pending),
               let payload = String(data: data, encoding: .utf8) else {
-            return
+            return false
         }
         let now = Date()
-        try? db.pool.write { db in
+        return (try? db.pool.write { db in
             try db.execute(
                 sql: "INSERT OR REPLACE INTO zentaoPendingDraft(date, payload, updatedAt) VALUES (?, ?, ?)",
                 arguments: [date, payload, now]
             )
-        }
+        }) != nil
     }
 }

@@ -1,6 +1,8 @@
 # IronBowl
 饭碗 — 我的上班工作台（macOS 26，SwiftUI 原生）。
 
+> 先把饭碗端稳，再慢慢加菜，不烧心。
+
 设计清单见 [docs/DESIGN.md](docs/DESIGN.md)。
 
 ## 构建

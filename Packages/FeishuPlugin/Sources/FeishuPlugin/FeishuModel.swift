@@ -12,7 +12,7 @@ public final class FeishuModel {
     @ObservationIgnored public let openPlugin: (String) -> Void
     @ObservationIgnored public let openSettings: (String?) -> Void
 
-    public private(set) var activePageID: String
+    public private(set) var activePageID: String?
     @ObservationIgnored private var ownedSessionIDs: Set<String> = [FeishuModel.homePageID]
 
     public convenience init(context: PluginContext) {
@@ -63,12 +63,13 @@ public final class FeishuModel {
     }
 
     public var activePinnedPage: FeishuPinnedPage? {
-        guard activePageID != Self.homePageID else { return nil }
+        guard let activePageID, activePageID != Self.homePageID else { return nil }
         return pinnedPages.first { $0.id == activePageID }
     }
 
-    public var activeSession: WebSession {
-        session(for: activePageID)
+    public var activeSession: WebSession? {
+        guard let activePageID else { return nil }
+        return session(for: activePageID)
     }
 
     public func session(for pageID: String) -> WebSession {
@@ -82,6 +83,14 @@ public final class FeishuModel {
             neverSuspend: pin?.neverSuspend ?? false,
             displayName: pin?.title ?? "飞书知识库"
         )
+    }
+
+    public func hasOpenSession(pageID: String) -> Bool {
+        webSessions.hasSession(id: pageID)
+    }
+
+    public func ownsSession(id: String) -> Bool {
+        id == Self.homePageID || ownedSessionIDs.contains(id) || pinnedPages.contains(where: { $0.id == id })
     }
 
     public func isSuspended(pageID: String) -> Bool {
@@ -100,6 +109,30 @@ public final class FeishuModel {
         }
         activePageID = id
         settings[FeishuKeys.lastPageID] = id
+    }
+
+    public func closePage(id: String, navigateHomeIfActive: Bool = false) {
+        let wasActive = (activePageID == id)
+        let wasVisible = webSessions.existingSession(id: id)?.isVisible ?? false
+        webSessions.remove(id: id)
+        if id != Self.homePageID {
+            ownedSessionIDs.remove(id)
+        }
+        if wasActive {
+            activePageID = nil
+            settings[FeishuKeys.lastPageID] = Self.homePageID
+            if navigateHomeIfActive || wasVisible {
+                openPlugin("home")
+            }
+        }
+    }
+
+    public func closeActivePage() {
+        if let id = activePageID {
+            closePage(id: id, navigateHomeIfActive: true)
+        } else {
+            openPlugin("home")
+        }
     }
 
     @discardableResult

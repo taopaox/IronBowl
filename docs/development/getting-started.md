@@ -22,8 +22,9 @@ git config core.hooksPath .githooks
 
 - **自动发版流水线（[`.github/workflows/release.yml`](../../.github/workflows/release.yml)）**：仅在 `main` 收到合并推送（或手动 `workflow_dispatch`）时自动执行 [`scripts/release.py`](../../scripts/release.py)：
   - 扫描上一个 `v*` Tag 至 `HEAD` 间的非合并提交（跳过 `chore(release):` 提交）并按约定式提交规则计算新版本号（含 `BREAKING CHANGE` / `!` 规则与 `0.x` 次版本递增规则）、递增 `CURRENT_PROJECT_VERSION`；
-  - 更新 [`project.yml`](../../project.yml) 并重新生成 Xcode 工程，直接 Release 编译并校验 `IronBowl.app` 与 `IronBowlCalendar.app` 的 `Info.plist` 版本（单元测试在合入前于本地执行，CI 跳过重复单测以缩短发版耗时）；
-  - 为两款应用分别打包 `.dmg` 与 `.zip` 安装包及 `SHA256SUMS.txt`，提交 `chore(release): 发布 vX.Y.Z`、创建 `vX.Y.Z` Tag 并发布 GitHub Release（附中文分类更新日志）。
+  - 更新 [`project.yml`](../../project.yml) 并重新生成 Xcode 工程，直接 Release 编译并校验 `IronBowl.app` 与 `IronBowlCalendar.app` 的 `Info.plist` 版本、`SUFeedURL` 与 `SUPublicEDKey`（单元测试在合入前于本地执行，CI 跳过重复单测以缩短发版耗时）；
+  - 为两款应用分别打包 `.dmg` 与 `.zip` 安装包及 `SHA256SUMS.txt`，使用仓库 Secret `SPARKLE_PRIVATE_KEY` 调用 Sparkle `sign_update` 对两份 `.zip` 进行 Ed25519 签名，并通过 `scripts/release.py appcast` 生成 `appcast-ironbowl.xml` 与 `appcast-calendar.xml`；
+  - 提交 `chore(release): 发布 vX.Y.Z`、创建 `vX.Y.Z` Tag 并发布 GitHub Release（附中文分类更新日志，两份 `appcast-*.xml` 一并作为 Release 附件托管以供双应用 Sparkle 2 客户端免鉴权自动更新）。
 
 ## 本地构建与运行
 

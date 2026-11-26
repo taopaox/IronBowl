@@ -32,6 +32,14 @@ public final class AIWebPlugin: IronBowlPlugin {
         model?.selectDirectory()
     }
 
+    public func closeWebSession(id: String) -> Bool {
+        let prefix = "aiweb."
+        guard id.hasPrefix(prefix) else { return false }
+        let appID = String(id.dropFirst(prefix.count))
+        model?.closeApp(id: appID)
+        return true
+    }
+
     public var settingsPages: [SettingsPage] {
         guard let model else { return [] }
         return [
@@ -55,6 +63,7 @@ public final class AIWebPlugin: IronBowlPlugin {
                 iconImage: resolvedLogo?.image,
                 iconIsTemplate: resolvedLogo?.isTemplate ?? false,
                 isSelected: model.activeAppID == app.id,
+                isOpen: model.hasOpenSession(appID: app.id),
                 isSuspended: model.isSuspended(appID: app.id),
                 isNeverSuspend: app.neverSuspend,
                 canMoveUp: index > 0,
@@ -62,6 +71,9 @@ public final class AIWebPlugin: IronBowlPlugin {
                 action: {
                     model.selectApp(app.id)
                     model.openPlugin(Self.pluginID)
+                },
+                onClose: {
+                    model.closeApp(id: app.id)
                 },
                 onRename: { newName in
                     model.renameApp(id: app.id, name: newName)

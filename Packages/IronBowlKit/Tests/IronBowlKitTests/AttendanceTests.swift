@@ -68,21 +68,59 @@ private func time(_ day: String, _ hhmm: String, second: Int = 0) -> Date {
     let day = time("2026-11-25", "12:00")
 
     #expect(cal.workEnd(on: day) == time("2026-11-25", "17:30"))
+    #expect(cal.onWorkTimeText(on: day) == "08:30")
     #expect(cal.scheduleText(on: day) == "08:30–17:30")
 
     cal.setClockIn(time("2026-11-25", "08:12", second: 40), on: day)
     #expect(cal.workEnd(on: day) == time("2026-11-25", "17:12"))
     #expect(cal.workStart(on: day) == time("2026-11-25", "08:12"))
+    #expect(cal.onWorkTimeText(on: day) == "08:12")
     #expect(cal.scheduleText(on: day) == "打卡 08:12 · 17:12 下班")
+
+    // 打卡早于弹性下限时，onWorkTimeText 仍展示实际打卡时间。
+    cal.setClockIn(time("2026-11-25", "07:45"), on: day)
+    #expect(cal.onWorkTimeText(on: day) == "07:45")
+    #expect(cal.workEnd(on: day) == time("2026-11-25", "17:00"))
 
     // 重新打开数据库后仍然生效。
     let reopened = WorkCalendar(database: db, settings: settings)
-    #expect(reopened.workEnd(on: day) == time("2026-11-25", "17:12"))
+    #expect(reopened.workEnd(on: day) == time("2026-11-25", "17:00"))
+    #expect(reopened.onWorkTimeText(on: day) == "07:45")
     // 别的日期不受影响。
     #expect(reopened.workEnd(on: time("2026-11-26", "12:00")) == time("2026-11-26", "17:30"))
+    #expect(reopened.onWorkTimeText(on: time("2026-11-26", "12:00")) == "08:30")
 
     cal.setClockIn(nil, on: day)
     #expect(cal.workEnd(on: day) == time("2026-11-25", "17:30"))
+    #expect(cal.onWorkTimeText(on: day) == "08:30")
+}
+
+@Test func remainingTimeTextFormatsHumanReadableDurations() {
+    let base = time("2026-11-26", "09:00")
+    #expect(remainingTimeText(to: time("2026-11-26", "17:25"), from: base) == "8小时25分")
+    #expect(remainingTimeText(to: time("2026-11-26", "11:00"), from: base) == "2小时")
+    #expect(remainingTimeText(to: time("2026-11-26", "09:23"), from: base) == "23分钟")
+    #expect(remainingTimeText(to: time("2026-11-26", "09:00", second: 30), from: base) == "不到1分钟")
+    #expect(remainingTimeText(to: base, from: base) == "0分钟")
+    #expect(remainingTimeText(to: time("2026-11-26", "08:50"), from: base) == "0分钟")
+}
+
+@Test func countdownFormatsCompactDurations() {
+    let base = time("2026-11-26", "09:00")
+    let samples = [
+        (time("2026-11-26", "14:44"), "5小时44分"),
+        (time("2026-11-26", "10:05"), "1小时5分"),
+        (time("2026-11-26", "11:00"), "2小时"),
+        (time("2026-11-26", "09:23"), "23分"),
+        (time("2026-11-26", "09:00", second: 30), "不到1分"),
+        (base, "0分"),
+        (time("2026-11-26", "08:50"), "0分"),
+    ]
+    for (target, expected) in samples {
+        let text = countdown(to: target, from: base)
+        #expect(text == expected)
+        #expect(!text.contains(":"))
+    }
 }
 
 // MARK: 容错
@@ -215,6 +253,31 @@ private func fakeDws(auth: String, attendance: String = #"{"ok":true,"data":{"re
     #expect(cal.effectiveWorkEnd(on: day) == time("2026-11-25", "17:30"))
     #expect(cal.offWorkTimeText(on: day) == "17:30")
     #expect(cal.scheduleText(on: day) == "08:30–17:30")
+}
+
+@MainActor @Test func workProgressComputesRatioAcrossWorkday() throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "ironbowl-progress-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let db = try AppDatabase(url: url, migrations: [])
+    let settings = SettingsStore(database: db)
+    settings[WorkCalendar.startKey] = "08:30"
+    settings[WorkCalendar.endKey] = "17:30"
+    settings[WorkCalendar.flexMinutesKey] = 30
+    let cal = WorkCalendar(database: db, settings: settings)
+
+    // 上班前为 0，工作时段中点（13:00）为 0.5，下班后为 1
+    #expect(cal.workProgress(on: time("2026-11-25", "08:00")) == 0)
+    let midpoint = cal.workProgress(on: time("2026-11-25", "13:00"))
+    #expect(midpoint != nil && abs((midpoint ?? 0) - 0.5) < 0.001)
+    #expect(cal.workProgress(on: time("2026-11-25", "18:00")) == 1)
+
+    // 设置当日加班 3h 后，实际下班顺延至 20:30（总跨度 12h），14:30 为 0.5、17:30 为 0.75
+    let day = time("2026-11-25", "12:00")
+    cal.setOvertimeHours(3, on: day)
+    let otMid = cal.workProgress(on: time("2026-11-25", "14:30"))
+    #expect(otMid != nil && abs((otMid ?? 0) - 0.5) < 0.001)
+    let otThreeQuarter = cal.workProgress(on: time("2026-11-25", "17:30"))
+    #expect(otThreeQuarter != nil && abs((otThreeQuarter ?? 0) - 0.75) < 0.001)
 }
 
 @MainActor @Test func coreV4MigratesZentaoDailyOvertime() throws {

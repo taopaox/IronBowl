@@ -3,6 +3,7 @@ import SwiftUI
 
 struct TaskEditorSheet: View {
     let scheduler: TaskScheduler
+    let workCalendar: WorkCalendar
     let existingTask: ScheduledTask?
 
     @Environment(\.dismiss) private var dismiss
@@ -14,6 +15,7 @@ struct TaskEditorSheet: View {
     @State private var timeDate: Date
     @State private var weekdays: [Int]
     @State private var intervalMinutes: Int
+    @State private var minutesBeforeWorkEnd: Int
     @State private var misfirePolicy: MisfirePolicy
     @State private var notifyPolicy: TaskNotifyPolicy
     @State private var notifyStyle: ReminderStyle
@@ -21,8 +23,9 @@ struct TaskEditorSheet: View {
 
     private let weekdayOptions = [(2, "一"), (3, "二"), (4, "三"), (5, "四"), (6, "五"), (7, "六"), (1, "日")]
 
-    init(scheduler: TaskScheduler, existingTask: ScheduledTask?) {
+    init(scheduler: TaskScheduler, workCalendar: WorkCalendar, existingTask: ScheduledTask?) {
         self.scheduler = scheduler
+        self.workCalendar = workCalendar
         self.existingTask = existingTask
 
         let actions = scheduler.registeredActions
@@ -50,6 +53,7 @@ struct TaskEditorSheet: View {
         _timeDate = State(initialValue: initialTime)
         _weekdays = State(initialValue: initialSchedule.weekdays)
         _intervalMinutes = State(initialValue: initialSchedule.intervalMinutes)
+        _minutesBeforeWorkEnd = State(initialValue: initialSchedule.minutesBeforeWorkEnd)
         _misfirePolicy = State(initialValue: existingTask?.misfirePolicy ?? .runIfMissedToday)
         _notifyPolicy = State(initialValue: existingTask?.notifyPolicy ?? .onSuccessAndFailure)
         _notifyStyle = State(initialValue: existingTask?.notifyStyle ?? .cornerCard)
@@ -147,6 +151,21 @@ struct TaskEditorSheet: View {
                             ? "\(minutes / 60) 小时"
                             : "\(minutes) 分钟"
                     }
+                }
+            } else if scheduleKind == .beforeWorkEnd {
+                DSRow("提前时长", description: beforeWorkEndPreviewText) {
+                    DSStepper(intValue: $minutesBeforeWorkEnd, in: 0...180, step: 1) { minutes in
+                        minutes == 0 ? "准点下班时" : "提前 \(minutes) 分钟"
+                    }
+                }
+                DSRow("错过触发时") {
+                    DSPicker(
+                        selection: $misfirePolicy,
+                        options: MisfirePolicy.allCases.map {
+                            DSPickerOption($0, title: $0.displayName, subtitle: $0.detail)
+                        },
+                        width: 240
+                    )
                 }
             } else {
                 DSRow("触发时刻") {
@@ -282,19 +301,51 @@ struct TaskEditorSheet: View {
         }
     }
 
+    private var actionHandlesOwnReminder: Bool {
+        actionID == TaskScheduler.coreReminderActionID || actionID == TaskScheduler.coreClockOutReminderActionID
+    }
+
+    private var clockOutKeepVisible: Bool {
+        actionID == TaskScheduler.coreClockOutReminderActionID
+            && (parameters["keepVisible"] ?? "true").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != "false"
+    }
+
+    private var beforeWorkEndPreviewText: String {
+        let now = Date()
+        let previewSchedule = TaskSchedule(kind: .beforeWorkEnd, minutesBeforeWorkEnd: minutesBeforeWorkEnd)
+        var detail = "跟随工作日历的弹性打卡与加班安排，自动跳过周末和法定节假日。"
+        if !workCalendar.isWorkday(now), let next = previewSchedule.nextRun(after: now, workCalendar: workCalendar) {
+            return "今天非工作日，下次将在 \(CN.monthDay(next)) \(CN.time(next)) 触发。"
+        }
+        if let end = workCalendar.effectiveWorkEnd(on: now),
+           let offText = workCalendar.offWorkTimeText(on: now) {
+            let trigger = end.addingTimeInterval(-TimeInterval(minutesBeforeWorkEnd * 60))
+            let triggerDayPrefix = Calendar.current.isDate(trigger, inSameDayAs: now) ? "" : "当日 "
+            detail = "今日参考下班 \(offText)，按当前设置将在 \(triggerDayPrefix)\(CN.time(trigger)) 触发。\(detail)"
+        }
+        return detail
+    }
+
     private var notifySection: some View {
         DSSection("执行通知") {
-            DSRow("通知时机") {
-                DSPicker(
-                    selection: $notifyPolicy,
-                    options: TaskNotifyPolicy.allCases.map {
-                        DSPickerOption($0, title: $0.displayName, subtitle: $0.detail)
-                    },
-                    width: 240
-                )
+            if !actionHandlesOwnReminder {
+                DSRow("通知时机") {
+                    DSPicker(
+                        selection: $notifyPolicy,
+                        options: TaskNotifyPolicy.allCases.map {
+                            DSPickerOption($0, title: $0.displayName, subtitle: $0.detail)
+                        },
+                        width: 240
+                    )
+                }
             }
-            if notifyPolicy != .never {
-                DSRow("提醒方式") {
+            if actionHandlesOwnReminder || notifyPolicy != .never {
+                DSRow(
+                    "提醒方式",
+                    description: clockOutKeepVisible
+                        ? "当前已开启「常驻不消失」，若选系统通知将自动转为右上角浮动卡片。"
+                        : nil
+                ) {
                     DSPicker(
                         selection: $notifyStyle,
                         options: ReminderStyle.allCases.map {
@@ -329,6 +380,11 @@ struct TaskEditorSheet: View {
             name = nextAction.defaultName
         }
         parameters = nextAction.defaultParameters
+        if existingTask == nil, newActionID == TaskScheduler.coreClockOutReminderActionID {
+            scheduleKind = .beforeWorkEnd
+            minutesBeforeWorkEnd = 5
+            notifyStyle = .cornerCard
+        }
     }
 
     private func save() {
@@ -338,7 +394,8 @@ struct TaskEditorSheet: View {
             hour: comps.hour ?? 17,
             minute: comps.minute ?? 0,
             weekdays: weekdays,
-            intervalMinutes: intervalMinutes
+            intervalMinutes: intervalMinutes,
+            minutesBeforeWorkEnd: minutesBeforeWorkEnd
         )
         let task = ScheduledTask(
             id: existingTask?.id ?? UUID().uuidString,

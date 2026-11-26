@@ -6,12 +6,14 @@ import WebKit
 public struct WebContainerView: View {
     let session: WebSession
     let manager: WebSessionManager
+    let onClose: (() -> Void)?
 
     @State private var displayToken = UUID()
 
-    public init(session: WebSession, manager: WebSessionManager) {
+    public init(session: WebSession, manager: WebSessionManager, onClose: (() -> Void)? = nil) {
         self.session = session
         self.manager = manager
+        self.onClose = onClose
     }
 
     public var body: some View {
@@ -70,10 +72,17 @@ public struct WebContainerView: View {
                         .font(DS.caption)
                         .foregroundStyle(DS.textSecondary)
                         .lineLimit(1)
-                    Button("重新唤醒") {
-                        manager.attachDisplay(sessionID: session.id, token: displayToken)
+                    HStack(spacing: 8) {
+                        Button("重新唤醒") {
+                            manager.attachDisplay(sessionID: session.id, token: displayToken)
+                        }
+                        .buttonStyle(.dsPrimary)
+
+                        if let onClose {
+                            Button("关闭网页", action: onClose)
+                                .buttonStyle(.dsSecondary)
+                        }
                     }
-                    .buttonStyle(.dsPrimary)
                 }
                 .frame(maxWidth: .infinity)
             }

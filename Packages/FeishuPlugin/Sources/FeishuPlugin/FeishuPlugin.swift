@@ -31,6 +31,24 @@ public final class FeishuPlugin: IronBowlPlugin {
         model?.selectHome()
     }
 
+    public var isSidebarWebOpen: Bool {
+        model?.hasOpenSession(pageID: FeishuModel.homePageID) ?? false
+    }
+
+    public var isSidebarWebSuspended: Bool {
+        model?.isSuspended(pageID: FeishuModel.homePageID) ?? false
+    }
+
+    public func onSidebarCloseWeb() {
+        model?.closePage(id: FeishuModel.homePageID)
+    }
+
+    public func closeWebSession(id: String) -> Bool {
+        guard model?.ownsSession(id: id) == true else { return false }
+        model?.closePage(id: id)
+        return true
+    }
+
     public var settingsPages: [SettingsPage] {
         guard let model else { return [] }
         return [
@@ -51,6 +69,7 @@ public final class FeishuPlugin: IronBowlPlugin {
                 subtitle: page.url,
                 systemImage: page.systemImage,
                 isSelected: model.activePageID == page.id,
+                isOpen: model.hasOpenSession(pageID: page.id),
                 isSuspended: model.isSuspended(pageID: page.id),
                 isNeverSuspend: page.neverSuspend,
                 canMoveUp: index > 0,
@@ -58,6 +77,9 @@ public final class FeishuPlugin: IronBowlPlugin {
                 action: {
                     model.selectPage(page.id)
                     model.openPlugin(Self.pluginID)
+                },
+                onClose: {
+                    model.closePage(id: page.id)
                 },
                 onRename: { newTitle in
                     model.renamePin(id: page.id, title: newTitle)

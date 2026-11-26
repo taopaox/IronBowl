@@ -30,6 +30,18 @@ struct CalendarApp: App {
         .defaultSize(width: 1000, height: 700)
         .defaultLaunchBehavior(.suppressed)
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("关于饭碗万年历") {
+                    NSApp.orderFrontStandardAboutPanel(options: [
+                        .credits: AppBrand.aboutCredits(),
+                    ])
+                }
+                Divider()
+                Button("检查更新…") {
+                    app.updater.checkForUpdates()
+                }
+                .disabled(!app.updater.canCheckForUpdates)
+            }
             CommandGroup(replacing: .appSettings) {
                 CalendarSettingsCommand(app: app)
             }
@@ -61,6 +73,11 @@ final class CalendarAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         app?.applyAppearance()
+        CalendarMenuBarPolicy.postStandaloneLifecycle(.alive)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        CalendarMenuBarPolicy.postStandaloneLifecycle(.willTerminate)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -77,6 +94,7 @@ final class StandaloneCalendar {
     let database: AppDatabase
     let settings: SettingsStore
     let workCalendar: WorkCalendar
+    let updater = AppUpdater()
     let plugin = CalendarPlugin()
     var now = Date()
     var settingsPage = CalendarPlugin.settingsDisplayID
@@ -170,7 +188,7 @@ struct StandaloneSettings: View {
         }
         return pluginPages + [
             SettingsPage(id: "about", title: "关于", systemImage: "info.circle") {
-                AnyView(StandaloneAboutSettings())
+                AnyView(StandaloneAboutSettings(updater: app.updater))
             }
         ]
     }
@@ -187,16 +205,19 @@ struct StandaloneSettings: View {
                     }
                 }
                 Spacer()
-                Text("饭碗万年历 \(Bundle.main.displayVersion)")
-                    .font(DS.font(11.5))
-                    .monospacedDigit()
-                    .foregroundStyle(DS.textTertiary)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 4)
-                    .help("当前版本 \(Bundle.main.fullVersion)")
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("饭碗万年历 \(Bundle.main.displayVersion)")
+                        .font(DS.font(11.5))
+                        .monospacedDigit()
+                        .foregroundStyle(DS.textTertiary)
+                        .help("当前版本 \(Bundle.main.fullVersion)")
+                    DSSloganView(style: .sidebar)
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
             }
             .padding(10)
-            .frame(width: 180)
+            .frame(width: 190)
             .background(DS.sidebar)
             Rectangle().fill(DS.border).frame(width: 1)
             ScrollView {
@@ -229,10 +250,41 @@ private struct StandaloneAppearanceSettings: View {
 }
 
 private struct StandaloneAboutSettings: View {
+    let updater: AppUpdater
     @State private var copied = false
 
     var body: some View {
         DSSection("关于") {
+            DSBlockRow {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Image("AppLogo")
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: DS.s(36), height: DS.s(36))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text("饭碗万年历")
+                                    .font(DS.font(15, .semibold))
+                                Text(Bundle.main.displayVersion)
+                                    .font(DS.font(11, .medium))
+                                    .monospacedDigit()
+                                    .foregroundStyle(DS.textTertiary)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 1.5)
+                                    .background(DS.well, in: .capsule)
+                            }
+                            Text("\(AppBrand.name) \(AppBrand.englishName) 独立桌面组件")
+                                .font(DS.caption)
+                                .foregroundStyle(DS.textSecondary)
+                        }
+                    }
+
+                    DSSloganView(style: .banner)
+                }
+            }
             DSRow("当前版本", description: "饭碗万年历 · \(Bundle.main.fullVersion)") {
                 Button(copied ? "已复制" : "复制版本信息") {
                     NSPasteboard.general.clearContents()
@@ -245,6 +297,7 @@ private struct StandaloneAboutSettings: View {
                 }
                 .buttonStyle(.dsSecondary)
             }
+            AppUpdateSettingsRows(updater: updater)
         }
     }
 }

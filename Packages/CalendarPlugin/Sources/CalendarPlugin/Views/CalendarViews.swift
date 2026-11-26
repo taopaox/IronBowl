@@ -6,6 +6,7 @@ import SwiftUI
 public struct CalendarMainView: View {
     let model: CalendarModel
     let versionText: String?
+    @Environment(\.sidebarCollapsed) private var sidebarCollapsed
 
     public init(model: CalendarModel, versionText: String? = nil) {
         self.model = model
@@ -15,14 +16,22 @@ public struct CalendarMainView: View {
     public var body: some View {
         VStack(spacing: 0) {
             DSPageHeader("万年历", topPadding: 8) {
-                if let versionText, !versionText.isEmpty {
-                    Text(versionText)
-                        .font(DS.font(11.5, .medium))
-                        .monospacedDigit()
-                        .foregroundStyle(DS.textTertiary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(DS.well, in: .capsule)
+                HStack(spacing: 10) {
+                    if let versionText, !versionText.isEmpty {
+                        Text(versionText)
+                            .font(DS.font(11.5, .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(DS.textTertiary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(DS.well, in: .capsule)
+                    }
+                    if versionText != nil || sidebarCollapsed {
+                        Text("·")
+                            .font(DS.font(12))
+                            .foregroundStyle(DS.textTertiary)
+                        DSSloganView(style: .inline)
+                    }
                 }
             } actions: {
                 if let w = model.weatherShort {
@@ -308,7 +317,9 @@ struct WeatherCard: View {
                             .font(DS.caption)
                         }
                     }
-                    Text("更新于 \(CN.time(w.fetchedAt))").font(DS.font(11)).foregroundStyle(DS.textTertiary)
+                    Text("更新于 \(CalendarModel.formatShortTime(w.fetchedAt, use24Hour: model.use24HourTime))")
+                        .font(DS.font(11))
+                        .foregroundStyle(DS.textTertiary)
                 } else {
                     Text(model.weatherError ?? "还没选城市，选好后显示未来 7 天天气。").font(DS.body).foregroundStyle(DS.textSecondary)
                     Button("选择城市") { model.context.openSettings(CalendarPlugin.settingsWeatherID) }.buttonStyle(.dsSecondary)

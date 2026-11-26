@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import IronBowlKit
 import Testing
@@ -38,6 +39,55 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
     #expect(CalendarModel.formatTime(noon, use24Hour: false, showPeriod: true, showSeconds: false) == "下午 12:05")
 }
 
+@MainActor @Test func popoverAndShortTimeFollow12And24HourSetting() throws {
+    let midnight = makeDate(hour: 0, minute: 5)
+    let morning = makeDate(hour: 9, minute: 5)
+    let noon = makeDate(hour: 12, minute: 5)
+    let evening = makeDate(hour: 18, minute: 25)
+
+    #expect(CalendarModel.popoverTimeParts(midnight, use24Hour: true) == (nil, "00:05"))
+    #expect(CalendarModel.popoverTimeParts(midnight, use24Hour: false) == ("上午", "12:05"))
+    #expect(CalendarModel.popoverTimeParts(morning, use24Hour: true) == (nil, "09:05"))
+    #expect(CalendarModel.popoverTimeParts(morning, use24Hour: false) == ("上午", "9:05"))
+    #expect(CalendarModel.popoverTimeParts(noon, use24Hour: true) == (nil, "12:05"))
+    #expect(CalendarModel.popoverTimeParts(noon, use24Hour: false) == ("下午", "12:05"))
+    #expect(CalendarModel.popoverTimeParts(evening, use24Hour: true) == (nil, "18:25"))
+    #expect(CalendarModel.popoverTimeParts(evening, use24Hour: false) == ("下午", "6:25"))
+
+    #expect(CalendarModel.formatShortTime(midnight, use24Hour: true) == "00:05")
+    #expect(CalendarModel.formatShortTime(midnight, use24Hour: false) == "上午 12:05")
+    #expect(CalendarModel.formatShortTime(morning, use24Hour: true) == "09:05")
+    #expect(CalendarModel.formatShortTime(morning, use24Hour: false) == "上午 9:05")
+    #expect(CalendarModel.formatShortTime(noon, use24Hour: true) == "12:05")
+    #expect(CalendarModel.formatShortTime(noon, use24Hour: false) == "下午 12:05")
+    #expect(CalendarModel.formatShortTime(evening, use24Hour: true) == "18:25")
+    #expect(CalendarModel.formatShortTime(evening, use24Hour: false) == "下午 6:25")
+
+    let url = FileManager.default.temporaryDirectory.appending(path: "ib-cal-timeformat-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let db = try AppDatabase(url: url, migrations: [])
+    let settings = SettingsStore(database: db)
+    let context = PluginContext(
+        database: db,
+        settings: settings,
+        reminders: ReminderCenter(),
+        workCalendar: WorkCalendar(database: db, settings: settings),
+        providers: AIProviderStore(settings: settings),
+        openPlugin: { _ in },
+        openSettings: { _ in }
+    )
+    let model = CalendarModel(context: context)
+    #expect(model.use24HourTime == true)
+    #expect(model.popoverTimeParts.period == nil)
+
+    model.use24HourTime = false
+    #expect(settings[CalendarKeys.menuBarTime24Hour] == false)
+    let expected12Hour = CalendarModel.popoverTimeParts(model.now, use24Hour: false)
+    #expect(model.popoverTimeParts == expected12Hour)
+    #expect(model.popoverTimeParts.period != nil)
+}
+
 @Test func menuBarSegmentsCombinations() {
     let date = makeDate(hour: 16, minute: 4, second: 9)
     let weather = WeatherSnapshot(
@@ -51,7 +101,8 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
         aqiCategory: "优"
     )
 
-    // 默认配置（含天气，不含 AQI、农历、秒、icon、上午/下午）
+    // 默认配置（含天气，不含 Logo、AQI、农历、秒、icon、上午/下午）
+    #expect(MenuBarDisplayConfig().showLogo == false)
     let defaultSegments = CalendarModel.menuBarSegments(at: date, weather: weather, config: MenuBarDisplayConfig())
     #expect(defaultSegments == [
         .symbol("sun.max"),
@@ -63,6 +114,7 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
 
     // 全开配置
     let fullConfig = MenuBarDisplayConfig(
+        showLogo: true,
         timeEnabled: true,
         timeShowIcon: true,
         timeUse24Hour: false,
@@ -77,6 +129,7 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
         weatherShowAQI: true
     )
     #expect(CalendarModel.menuBarSegments(at: date, weather: weather, config: fullConfig) == [
+        .logo,
         .symbol("sun.max"),
         .text("23°"),
         .text("AQI 42"),
@@ -85,6 +138,17 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
         .text("十月十七"),
         .symbol("clock"),
         .text("下午 4:04:09"),
+    ])
+
+    // 仅开 Logo
+    let logoOnlyConfig = MenuBarDisplayConfig(
+        showLogo: true,
+        timeEnabled: false,
+        dateEnabled: false,
+        weatherEnabled: false
+    )
+    #expect(CalendarModel.menuBarSegments(at: date, weather: weather, config: logoOnlyConfig) == [
+        .logo,
     ])
 
     // 仅开空气质量 AQI，不开天气图标温度
@@ -129,6 +193,7 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
 
     // 天气为空时优雅省略天气与 AQI 段
     #expect(CalendarModel.menuBarSegments(at: date, weather: nil, config: fullConfig) == [
+        .logo,
         .text("11月25日"),
         .text("周三"),
         .text("十月十七"),
@@ -200,6 +265,7 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
 
     // 默认值验证
     #expect(settings[CalendarKeys.menuBarEnabled] == true)
+    #expect(settings[CalendarKeys.menuBarLogo] == false)
     #expect(settings[CalendarKeys.menuBarTime] == true)
     #expect(settings[CalendarKeys.menuBarTimeIcon] == false)
     #expect(settings[CalendarKeys.menuBarTime24Hour] == true)
@@ -214,6 +280,7 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
     #expect(settings[CalendarKeys.menuBarAQI] == false)
 
     // 写入并重载
+    settings[CalendarKeys.menuBarLogo] = true
     settings[CalendarKeys.menuBarTimeIcon] = true
     settings[CalendarKeys.menuBarTime24Hour] = false
     settings[CalendarKeys.menuBarTimePeriod] = true
@@ -224,6 +291,7 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
     settings[CalendarKeys.menuBarAQI] = true
 
     let reloaded = SettingsStore(database: db)
+    #expect(reloaded[CalendarKeys.menuBarLogo] == true)
     #expect(reloaded[CalendarKeys.menuBarTimeIcon] == true)
     #expect(reloaded[CalendarKeys.menuBarTime24Hour] == false)
     #expect(reloaded[CalendarKeys.menuBarTimePeriod] == true)
@@ -287,4 +355,314 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
 
     plugin.stop()
     #expect(plugin.settingsPages.isEmpty)
+}
+
+@MainActor @Test func menuBarImageRendererProducesValidTemplateImages() throws {
+    func hasVisiblePixels(_ image: NSImage) -> Bool {
+        guard let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first,
+              let data = rep.bitmapData else { return false }
+        let totalBytes = rep.bytesPerRow * rep.pixelsHigh
+        for offset in stride(from: 3, to: totalBytes, by: 4) where data[offset] > 0 {
+            return true
+        }
+        return false
+    }
+
+    // 空分段回退到日历图标
+    let fallback = CalendarMenuBarRenderer.renderImage(segments: [], scale: 2.0)
+    #expect(fallback.isTemplate == true)
+    #expect(fallback.size.height == CalendarMenuBarRenderer.barHeight)
+    #expect(fallback.size.width >= 18)
+    let fallbackRep = try #require(fallback.representations.compactMap { $0 as? NSBitmapImageRep }.first)
+    #expect(fallbackRep.pixelsWide == Int(ceil(fallback.size.width * 2)))
+    #expect(fallbackRep.pixelsHigh == 44)
+    #expect(hasVisiblePixels(fallback))
+
+    // 仅时间
+    let timeOnly = CalendarMenuBarRenderer.renderImage(segments: [.text("09:05")], scale: 2.0)
+    #expect(timeOnly.isTemplate == true)
+    #expect(timeOnly.size.height == CalendarMenuBarRenderer.barHeight)
+    #expect(hasVisiblePixels(timeOnly))
+
+    // 日期 + 星期 + 时间
+    let dateTime = CalendarMenuBarRenderer.renderImage(
+        segments: [.text("11月26日"), .text("周四"), .text("09:05")],
+        scale: 2.0
+    )
+    #expect(dateTime.isTemplate == true)
+    #expect(dateTime.size.width > timeOnly.size.width)
+    #expect(hasVisiblePixels(dateTime))
+
+    // 全开（含两个 SF Symbol 与多段文字）宽度明显大于仅日期+时间，不会丢失任何段
+    let full = CalendarMenuBarRenderer.renderImage(
+        segments: [.symbol("sun.max"), .text("10°"), .text("11月26日"), .text("周四"), .symbol("clock"), .text("09:05")],
+        scale: 2.0
+    )
+    #expect(full.isTemplate == true)
+    #expect(full.size.height == CalendarMenuBarRenderer.barHeight)
+    #expect(full.size.width > dateTime.size.width)
+    #expect(hasVisiblePixels(full))
+
+    // 内置万年历 Logo 资源应正确打包并支持全彩非模板渲染
+    #expect(CalendarAssets.logoImage != nil)
+    let withLogo = CalendarMenuBarRenderer.renderImage(
+        segments: [.logo, .text("09:05")],
+        isDark: true,
+        scale: 2.0
+    )
+    #expect(withLogo.isTemplate == false)
+    #expect(withLogo.size.height == CalendarMenuBarRenderer.barHeight)
+    #expect(withLogo.size.width > timeOnly.size.width)
+    #expect(hasVisiblePixels(withLogo))
+
+    // 深色与浅色模式下含 Logo 的文字区域像素明暗自适应
+    let withLogoLight = CalendarMenuBarRenderer.renderImage(
+        segments: [.logo, .text("09:05")],
+        isDark: false,
+        scale: 2.0
+    )
+    #expect(withLogoLight.isTemplate == false)
+
+    func averageTextLuminance(_ image: NSImage) -> Double {
+        guard let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first,
+              let data = rep.bitmapData else { return -1 }
+        var totalLuminance = 0.0
+        var count = 0
+        let startX = min(rep.pixelsWide, 46)
+        for y in 0..<rep.pixelsHigh {
+            for x in startX..<rep.pixelsWide {
+                let offset = y * rep.bytesPerRow + x * 4
+                let alpha = data[offset + 3]
+                if alpha > 32 {
+                    let r = Double(data[offset])
+                    let g = Double(data[offset + 1])
+                    let b = Double(data[offset + 2])
+                    totalLuminance += (r + g + b) / 3.0
+                    count += 1
+                }
+            }
+        }
+        return count > 0 ? totalLuminance / Double(count) : -1
+    }
+
+    let darkTextLum = averageTextLuminance(withLogo)
+    let lightTextLum = averageTextLuminance(withLogoLight)
+    #expect(darkTextLum > lightTextLum)
+}
+
+@Test
+func calendarMenuBarPolicySuppressesEmbeddedItemWhenStandaloneIsRunning() {
+    #expect(CalendarMenuBarPolicy.shouldShowEmbeddedMenuBar(settingEnabled: true, isStandaloneRunning: false) == true)
+    #expect(CalendarMenuBarPolicy.shouldShowEmbeddedMenuBar(settingEnabled: true, isStandaloneRunning: true) == false)
+    #expect(CalendarMenuBarPolicy.shouldShowEmbeddedMenuBar(settingEnabled: false, isStandaloneRunning: false) == false)
+    #expect(CalendarMenuBarPolicy.shouldShowEmbeddedMenuBar(settingEnabled: false, isStandaloneRunning: true) == false)
+}
+
+@Test
+func standaloneLifecyclePayloadEncodingAndDecoding() {
+    let alivePayload = CalendarMenuBarPolicy.encodeLifecyclePayload(.alive, pid: 4321)
+    let decodedAlive = CalendarMenuBarPolicy.decodeLifecyclePayload(alivePayload)
+    #expect(decodedAlive?.event == .alive)
+    #expect(decodedAlive?.pid == 4321)
+
+    let terminatePayload = CalendarMenuBarPolicy.encodeLifecyclePayload(.willTerminate, pid: 9876)
+    let decodedTerminate = CalendarMenuBarPolicy.decodeLifecyclePayload(terminatePayload)
+    #expect(decodedTerminate?.event == .willTerminate)
+    #expect(decodedTerminate?.pid == 9876)
+
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload(nil) == nil)
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload("") == nil)
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload("alive") == nil)
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload("unknown|123") == nil)
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload("alive|abc") == nil)
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload("alive|0") == nil)
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload("alive|-5") == nil)
+}
+
+@Test
+func standaloneCalendarPresenceStateHandlesLaunchOrderQuitCrashAndSelfPID() {
+    let currentPID: pid_t = 100
+    let standalonePID: pid_t = 200
+    let secondStandalonePID: pid_t = 201
+    var state = StandaloneCalendarPresenceState()
+
+    // 1. 初始无独立版运行
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { _ in false }) == false)
+
+    // 2. 先开饭碗、后开独立版万年历：runningPIDs 尚未刷新时收到 alive 广播即刻隐藏内置状态栏日历
+    state.handleLifecycleEvent(.alive, pid: standalonePID, currentPID: currentPID)
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { $0 == standalonePID }) == true)
+    #expect(state.reconcile(runningPIDs: [standalonePID], isProcessAlive: { $0 == standalonePID }) == true)
+
+    // 3. 独立版正常退出：收到 willTerminate 时即使系统列表尚未移除也立即恢复显示，进程退出后清理状态
+    state.handleLifecycleEvent(.willTerminate, pid: standalonePID, currentPID: currentPID)
+    #expect(state.reconcile(runningPIDs: [standalonePID], isProcessAlive: { $0 == standalonePID }) == false)
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { _ in false }) == false)
+    #expect(state.terminatingPIDs.isEmpty)
+    #expect(state.announcedAlivePIDs.isEmpty)
+
+    // 4. 独立版异常退出（SIGKILL，无 willTerminate）：进程不再存活时自动清理并恢复显示
+    state.handleLifecycleEvent(.alive, pid: standalonePID, currentPID: currentPID)
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { $0 == standalonePID }) == true)
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { _ in false }) == false)
+    #expect(state.announcedAlivePIDs.isEmpty)
+
+    // 5. 忽略自身 PID 的广播
+    state.handleLifecycleEvent(.alive, pid: currentPID, currentPID: currentPID)
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { $0 == currentPID }) == false)
+
+    // 6. 多实例同时存在时，仅退出其中之一仍保持避让，全部退出才恢复
+    state.handleLifecycleEvent(.alive, pid: standalonePID, currentPID: currentPID)
+    state.handleLifecycleEvent(.alive, pid: secondStandalonePID, currentPID: currentPID)
+    state.handleLifecycleEvent(.willTerminate, pid: standalonePID, currentPID: currentPID)
+    #expect(state.reconcile(runningPIDs: [secondStandalonePID], isProcessAlive: { $0 == secondStandalonePID }) == true)
+    state.handleLifecycleEvent(.willTerminate, pid: secondStandalonePID, currentPID: currentPID)
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { _ in false }) == false)
+}
+
+@Test
+func processAliveCheckRecognizesCurrentProcessAndRejectsInvalidPIDs() {
+    #expect(CalendarMenuBarPolicy.isProcessAlive(ProcessInfo.processInfo.processIdentifier) == true)
+    #expect(CalendarMenuBarPolicy.isProcessAlive(0) == false)
+    #expect(CalendarMenuBarPolicy.isProcessAlive(-1) == false)
+}
+
+@MainActor @Test func menuBarStyleCatalogAndPersistence() throws {
+    let styles = CalendarMenuBarStyle.allCases
+    #expect(styles.count == 20)
+    #expect(Set(styles.map(\.id)).count == 20)
+    #expect(Set(styles.map(\.code)).count == 20)
+    #expect(styles.map(\.code) == (1...20).map { String(format: "%02d", $0) })
+    #expect(Set(styles.map(\.category)) == Set(CalendarMenuBarStyleCategory.allCases))
+    #expect(styles.allSatisfy { !$0.displayName.isEmpty && !$0.subtitle.isEmpty })
+
+    let url = FileManager.default.temporaryDirectory.appending(path: "ib-cal-styles-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let db = try AppDatabase(url: url, migrations: [])
+    let settings = SettingsStore(database: db)
+    #expect(settings[CalendarKeys.menuBarStyle] == .nativeMinimal)
+    #expect(settings[CalendarKeys.menuBarHolidayBadge] == true)
+
+    for style in styles {
+        settings[CalendarKeys.menuBarStyle] = style
+        let reloaded = SettingsStore(database: db)
+        #expect(reloaded[CalendarKeys.menuBarStyle] == style)
+    }
+
+    settings[CalendarKeys.menuBarHolidayBadge] = false
+    let reloaded = SettingsStore(database: db)
+    #expect(reloaded[CalendarKeys.menuBarHolidayBadge] == false)
+}
+
+@MainActor @Test func menuBarRendererAll20StylesDarkLightAndFallback() throws {
+    func hasVisiblePixels(_ image: NSImage) -> Bool {
+        guard let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first,
+              let data = rep.bitmapData else { return false }
+        let totalBytes = rep.bytesPerRow * rep.pixelsHigh
+        for offset in stride(from: 3, to: totalBytes, by: 4) where data[offset] > 0 {
+            return true
+        }
+        return false
+    }
+
+    let date = makeDate(hour: 18, minute: 27, second: 35)
+    let weather = WeatherSnapshot(
+        city: "深圳",
+        temperature: 22.0,
+        text: "晴",
+        symbol: "sun.max",
+        days: [],
+        fetchedAt: date,
+        aqi: 42,
+        aqiCategory: "优"
+    )
+
+    let fullConfig = MenuBarDisplayConfig(
+        showLogo: true,
+        timeEnabled: true,
+        timeShowIcon: true,
+        timeUse24Hour: true,
+        timeShowPeriod: true,
+        timeShowSeconds: true,
+        dateEnabled: true,
+        dateShowLunar: true,
+        dateShowSolar: true,
+        dateShowWeekday: true,
+        showHolidayBadge: true,
+        weatherEnabled: true,
+        weatherShowWeather: true,
+        weatherShowAQI: true
+    )
+    let fullSnapshot = CalendarMenuBarSnapshot.make(
+        at: date,
+        weather: weather,
+        holidayBadge: "休",
+        config: fullConfig
+    )
+
+    for style in CalendarMenuBarStyle.allCases {
+        for isDark in [true, false] {
+            let img = CalendarMenuBarRenderer.renderImage(
+                snapshot: fullSnapshot,
+                style: style,
+                isDark: isDark,
+                scale: 2.0
+            )
+            #expect(img.size.height == CalendarMenuBarRenderer.barHeight)
+            #expect(img.size.width >= 18)
+            let rep = try #require(img.representations.compactMap { $0 as? NSBitmapImageRep }.first)
+            #expect(rep.pixelsHigh == 44)
+            #expect(rep.pixelsWide == Int(ceil(img.size.width * 2)))
+            #expect(hasVisiblePixels(img))
+        }
+    }
+
+    // 原生极简排印无 Logo 且无角标时应保持模板图
+    let minimalNoLogo = CalendarMenuBarSnapshot.make(
+        at: date,
+        weather: weather,
+        holidayBadge: nil,
+        config: MenuBarDisplayConfig(showLogo: false, showHolidayBadge: false)
+    )
+    let minimalImg = CalendarMenuBarRenderer.renderImage(
+        snapshot: minimalNoLogo,
+        style: .nativeMinimal,
+        isDark: true,
+        scale: 2.0
+    )
+    #expect(minimalImg.isTemplate == true)
+
+    // 彩色风格应输出非模板图
+    let neonImg = CalendarMenuBarRenderer.renderImage(
+        snapshot: minimalNoLogo,
+        style: .cyberNeon,
+        isDark: true,
+        scale: 2.0
+    )
+    #expect(neonImg.isTemplate == false)
+
+    // 所有字段关闭时优雅回退到日历图标
+    let emptyConfig = MenuBarDisplayConfig(
+        showLogo: false,
+        timeEnabled: false,
+        dateEnabled: false,
+        weatherEnabled: false
+    )
+    let emptySnapshot = CalendarMenuBarSnapshot.make(
+        at: date,
+        weather: nil,
+        holidayBadge: "休",
+        config: emptyConfig
+    )
+    #expect(emptySnapshot.hasAnyContent == false)
+    let fallbackImg = CalendarMenuBarRenderer.renderImage(
+        snapshot: emptySnapshot,
+        style: .liquidGlass,
+        isDark: true,
+        scale: 2.0
+    )
+    #expect(fallbackImg.size.height == CalendarMenuBarRenderer.barHeight)
+    #expect(fallbackImg.isTemplate == true)
+    #expect(hasVisiblePixels(fallbackImg))
 }

@@ -111,9 +111,10 @@ struct AIWebMainView: View {
                             AIAppCard(
                                 app: app,
                                 logoStore: model.logoStore,
-                                hasLiveSession: model.existingSession(for: app.id) != nil,
+                                hasLiveSession: model.hasOpenSession(appID: app.id),
                                 isSuspended: model.isSuspended(appID: app.id),
                                 onOpen: { model.selectApp(app.id) },
+                                onClose: { model.closeApp(id: app.id) },
                                 onTogglePin: { model.togglePin(id: app.id) },
                                 onEdit: { model.beginEditing(appID: app.id) },
                                 onDelete: { model.deleteApp(id: app.id) },
@@ -193,8 +194,10 @@ struct AIWebMainView: View {
                 .overlay(alignment: .bottom) { Rectangle().fill(DS.border).frame(height: 1) }
             }
 
-            WebContainerView(session: session, manager: model.webSessions)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            WebContainerView(session: session, manager: model.webSessions) {
+                model.closeApp(id: app.id)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onChange(of: session.currentURL) { _, newURL in
             if !addressFocused {
@@ -280,6 +283,19 @@ struct AIWebMainView: View {
                 }
                 .buttonStyle(.dsGhost)
                 .help("在默认浏览器中打开")
+
+                Rectangle()
+                    .fill(DS.border)
+                    .frame(width: 1, height: DS.s(16))
+
+                Button {
+                    model.closeApp(id: app.id)
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.dsGhost)
+                .help("关闭网页")
+                .accessibilityLabel("关闭网页")
             }
         }
         .padding(.leading, sidebarCollapsed ? 120 : 14)
@@ -351,6 +367,7 @@ private struct AIAppCard: View {
     let hasLiveSession: Bool
     let isSuspended: Bool
     let onOpen: () -> Void
+    let onClose: () -> Void
     let onTogglePin: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -415,6 +432,15 @@ private struct AIAppCard: View {
 
                     Spacer()
 
+                    if hasLiveSession {
+                        Button(action: onClose) {
+                            Image(systemName: "xmark")
+                                .font(DS.font(12))
+                        }
+                        .buttonStyle(.dsGhost)
+                        .help("关闭网页")
+                    }
+
                     Button(action: onEdit) {
                         Image(systemName: "pencil")
                             .font(DS.font(12))
@@ -424,6 +450,9 @@ private struct AIAppCard: View {
 
                     Menu {
                         Button("打开网页", action: onOpen)
+                        if hasLiveSession {
+                            Button("关闭网页", action: onClose)
+                        }
                         Button(app.isPinned ? "取消固定" : "固定到左侧目录", action: onTogglePin)
                         Button("编辑…", action: onEdit)
                         Button("在默认浏览器打开", action: onOpenInBrowser)
@@ -453,6 +482,9 @@ private struct AIAppCard: View {
         .onTapGesture(perform: onOpen)
         .contextMenu {
             Button("打开网页", action: onOpen)
+            if hasLiveSession {
+                Button("关闭网页", action: onClose)
+            }
             Button(app.isPinned ? "取消固定" : "固定到左侧目录", action: onTogglePin)
             Button("编辑…", action: onEdit)
             Button("在默认浏览器打开", action: onOpenInBrowser)

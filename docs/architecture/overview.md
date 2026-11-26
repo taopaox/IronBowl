@@ -23,6 +23,7 @@ flowchart LR
     IronBowl --> FeishuPlugin["Packages/FeishuPlugin<br/>(飞书知识库)"]
     IronBowl --> AIWebPlugin["Packages/AIWebPlugin<br/>(AI 网页目录)"]
     IronBowl --> SchedulerPlugin["Packages/SchedulerPlugin<br/>(定时任务)"]
+    IronBowl --> ReportPlugin["Packages/ReportPlugin<br/>(周报月报)"]
 
     CalendarApp["Apps/Calendar<br/>(独立版万年历)"] --> IronBowlKit
     CalendarApp --> CalendarPlugin
@@ -32,6 +33,8 @@ flowchart LR
     FeishuPlugin --> IronBowlKit
     AIWebPlugin --> IronBowlKit
     SchedulerPlugin --> IronBowlKit
+    ReportPlugin --> IronBowlKit
+    ReportPlugin --> ZentaoLogPlugin
 ```
 
 ## 目录职责划分
@@ -46,6 +49,7 @@ flowchart LR
 | `Packages/FeishuPlugin` | Swift Package | 内嵌飞书网页浏览、上传下载、自定义主页与固定网页到主窗口侧边栏 |
 | `Packages/AIWebPlugin` | Swift Package | 20 个内置 AI 网站目录、可折叠侧栏子项、官方 Logo 与自定义图标抓取 |
 | `Packages/SchedulerPlugin` | Swift Package | 定时任务管理页面、任务编辑弹窗、执行日志审计与调度引擎生命周期控制 |
+| `Packages/ReportPlugin` | Swift Package | 按周/月查询每日日报（禅道/本地提交/草稿）、AI 与规则汇总生成周报和月报、预览编辑及 Markdown 导出 |
 
 ## 插件协议与生命周期
 
@@ -53,7 +57,9 @@ flowchart LR
 
 ### `IronBowlPlugin` 核心能力
 
-- **基础身份**：`id`、`title`、`systemImage`、`isComingSoon`、`isSidebarDirectory`、`migrations`。
+- **基础身份**：`id`、`title`、`sidebarTitle`、`sidebarSection`、`systemImage`、`isComingSoon`、`isSidebarDirectory`、`migrations`。
+  - `sidebarTitle` 默认回退到 `title`（例如 `ZentaoLogPlugin` 的 `title` 为 `"禅道日志"`，`sidebarTitle` 为 `"日报"`）。
+  - `sidebarSection` 为 `nil` 或空白时显示在左侧栏顶部主列表；指定分组名后通过 `SidebarPluginGrouping.partition(_:)` 归组展示在独立 `DSSidebarSection` 分区下（如 `"汇报"` 分组包含日报、周报、月报）。
 - **生命周期**：
   - `start(context: PluginContext)`：插件启用并启动时调用一次，注入共享服务与导航回调。
   - `stop()`：插件停用或应用退出清理时调用，用于停止定时器并释放 `WebSessionManager` 持有会话。
@@ -61,7 +67,6 @@ flowchart LR
   - `makeMainView()`：插件主内容区视图。
   - `settingsPages`：自动注入设置窗口左侧插件分组。
   - `menuBarItems`：暴露给菜单栏和「设置 → 通用 → 菜单栏显示」的可选信息项。
-  - `sidebarRecents`：显示在主窗口侧边栏「最近日志」分区。
   - `sidebarPinnedItems`：显示在主窗口侧边栏「固定网页」分区（支持重命名、排序、休眠与右键菜单）。
   - `sidebarChildren`：配合 `isSidebarDirectory == true` 在侧栏插件项下方缩进展示可折叠子项。
   - `quickActions` / `homeCards` / `handleHomeInput(_:)`：注入首页「今天」的快捷标签、概览卡片与一句话输入处理链。
@@ -90,7 +95,8 @@ flowchart LR
 3. `FeishuPlugin`（`feishu`）
 4. `AIWebPlugin`（`aiweb`）
 5. `SchedulerPlugin`（`scheduler`）
-6. `ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist")`
-7. `ComingSoonPlugin(id: "report", title: "周报日报", systemImage: "doc.text")`
+6. `ReportPlugin`（`report`，周报）
+7. `MonthlyReportPlugin`（`report.monthly`，月报）
+8. `ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist")`
 
 当应用版本升级引入新插件 ID 时，`AppModel` 会比对 `app.knownPlugins` 与 `app.enabledPlugins`，自动将新增插件加入已启用列表，避免老用户升级后看不到新插件。

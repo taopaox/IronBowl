@@ -15,6 +15,24 @@ public final class SchedulerPlugin: IronBowlPlugin {
 
     public func start(context: PluginContext) {
         self.context = context
+        context.scheduler.seedDefaultTaskIfNeeded({
+            ScheduledTask(
+                id: TaskScheduler.defaultClockOutReminderTaskID,
+                name: "打卡提醒",
+                actionID: TaskScheduler.coreClockOutReminderActionID,
+                isEnabled: true,
+                schedule: TaskSchedule(kind: .beforeWorkEnd, minutesBeforeWorkEnd: 5),
+                misfirePolicy: .runIfMissedToday,
+                notifyPolicy: .onSuccessAndFailure,
+                notifyStyle: .cornerCard,
+                parameters: [
+                    "title": "下班打卡提醒",
+                    "message": "",
+                    "keepVisible": "true",
+                    "snoozeMinutes": "5",
+                ]
+            )
+        }, seedID: TaskScheduler.defaultClockOutReminderTaskID)
         context.scheduler.start()
     }
 
@@ -69,7 +87,7 @@ public final class SchedulerPlugin: IronBowlPlugin {
         return [
             MenuBarItem(id: "scheduler.next", title: "离下次定时任务还有多久") {
                 guard let upcoming = scheduler.nextUpcomingTask() else { return nil }
-                return "任务 " + countdown(to: upcoming.fireAt)
+                return "距任务 " + countdown(to: upcoming.fireAt)
             },
         ]
     }

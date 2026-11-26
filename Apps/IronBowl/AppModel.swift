@@ -4,6 +4,7 @@ import CalendarPlugin
 import FeishuPlugin
 import IronBowlKit
 import Observation
+import ReportPlugin
 import SchedulerPlugin
 import ServiceManagement
 import SwiftUI
@@ -42,16 +43,19 @@ enum AppKeys {
 @Observable
 final class AppModel {
     static let homeID = "home"
+    static let remindersID = "reminders"
     /// 给 AppDelegate 用（程序坞点击重新打开窗口）。
     nonisolated(unsafe) static weak var shared: AppModel?
     let database: AppDatabase
     let settings: SettingsStore
-    let reminders = ReminderCenter()
+    let reminders: ReminderCenter
     let workCalendar: WorkCalendar
     let providers: AIProviderStore
+    let chat: ChatStore
     let webSessions: WebSessionManager
     let scheduler: TaskScheduler
     let systemMonitor: SystemMonitor
+    let updater = AppUpdater()
     let plugins: [IronBowlPlugin]
     var context: PluginContext!
 
@@ -71,8 +75,9 @@ final class AppModel {
             FeishuPlugin(),
             AIWebPlugin(),
             SchedulerPlugin(),
+            ReportPlugin(),
+            MonthlyReportPlugin(),
             ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist"),
-            ComingSoonPlugin(id: "report", title: "周报日报", systemImage: "doc.text"),
         ]
         self.plugins = plugins
         defer { AppModel.shared = self }
@@ -81,6 +86,7 @@ final class AppModel {
         } catch {
             fatalError("打开数据库失败：\(error)")
         }
+        reminders = ReminderCenter(database: database)
         settings = SettingsStore(database: database)
         if let existingEnabled = settings[AppKeys.enabledPlugins] {
             let known = Set(settings[AppKeys.knownPlugins])
@@ -102,6 +108,7 @@ final class AppModel {
         }
         workCalendar = WorkCalendar(database: database, settings: settings)
         providers = AIProviderStore(settings: settings)
+        chat = ChatStore(database: database, settings: settings, providers: providers)
         let webSessions = WebSessionManager(settings: settings)
         self.webSessions = webSessions
         let scheduler = TaskScheduler(
@@ -151,6 +158,7 @@ final class AppModel {
         clock?.tolerance = 5
         Task {
             await providers.autodetectMissingPaths()
+            await providers.loadAllModels()
             await workCalendar.updateIfNeeded()
             await workCalendar.syncAttendanceIfNeeded()
         }
@@ -201,6 +209,13 @@ final class AppModel {
         NSApp.activate()
     }
 
+    func closeWebSession(id: String) {
+        for plugin in enabledPlugins where plugin.closeWebSession(id: id) {
+            return
+        }
+        webSessions.remove(id: id)
+    }
+
     // MARK: 设置窗口
 
     /// 钉钉考勤自动同步遇到没安装 / 没登录 / 没权限时，右上角提醒一次（同一天同类问题只提醒一次）。
@@ -226,6 +241,8 @@ final class AppModel {
             title: "钉钉考勤同步不可用",
             message: "\(issue.localizedDescription)。今天先按固定的 \(settings[WorkCalendar.startKey])–\(settings[WorkCalendar.endKey]) 计算下班时间。",
             systemImage: "exclamationmark.triangle.fill",
+            source: .attendance,
+            targetSettingsPage: "worktime",
             actions: actions
         )
         reminders.show(content, style: .cornerCard)
@@ -248,13 +265,9 @@ final class AppModel {
         return (plugin(CalendarPlugin.pluginID) as? CalendarPlugin)?.model
     }
 
-    /// 菜单栏单独的日历图标。
+    /// 菜单栏单独的日历图标（独立版万年历运行时自动避让隐藏，且不覆盖用户持久化开关）。
     var calendarMenuShown: Bool {
-        get { calendarModel?.menuBarEnabled ?? false }
-        set {
-            guard let model = calendarModel, model.menuBarEnabled != newValue else { return }
-            model.menuBarEnabled = newValue
-        }
+        calendarModel?.shouldShowEmbeddedMenuBar ?? false
     }
 
     /// 所有可选的菜单栏信息项（核心 + 已启用插件）。
@@ -262,7 +275,7 @@ final class AppModel {
         let core = MenuBarItem(id: "core.offwork", title: "离下班还有多久") { [weak self] in
             let now = Date()
             guard let self, workCalendar.isWorkday(now), let end = workCalendar.effectiveWorkEnd(on: now), end > now else { return nil }
-            return "下班 " + countdown(to: end, from: now)
+            return "距下班 " + countdown(to: end, from: now)
         }
         return [core] + enabledPlugins.flatMap(\.menuBarItems)
     }
@@ -271,6 +284,64 @@ final class AppModel {
         _ = now // 每 30 秒刷新一次倒计时
         let items = Dictionary(availableMenuBarItems.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         return settings[AppKeys.menuBarItems].compactMap { items[$0]?.text() }.joined(separator: " ")
+    }
+
+    /// 供主状态栏与设置页预览渲染「双行微缩仪表卡」的分段数据。
+    var menuBarCardSegments: [MenuBarCardSegment] {
+        _ = now // 每 30 秒刷新一次倒计时
+        let current = Date()
+        let items = Dictionary(availableMenuBarItems.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var segments: [MenuBarCardSegment] = []
+
+        for id in settings[AppKeys.menuBarItems] {
+            if id == "core.offwork" {
+                guard workCalendar.isWorkday(current),
+                      let end = workCalendar.effectiveWorkEnd(on: current),
+                      end > current else { continue }
+                let ot = workCalendar.overtimeHours(on: current)
+                let pct = Int(((workCalendar.workProgress(on: current) ?? 0) * 100).rounded())
+                let top = ot > 0 ? "加班 · \(pct)%" : "距下班 · \(pct)%"
+                segments.append(.stacked(
+                    top: top,
+                    bottom: countdown(to: end, from: current),
+                    topTone: ot > 0 ? .purple : .amber
+                ))
+                continue
+            }
+
+            guard let text = items[id]?.text(), !text.isEmpty else { continue }
+            if id == "zentao.nextReminder", text.hasPrefix("距提醒 ") {
+                segments.append(.stacked(
+                    top: "距提醒",
+                    bottom: String(text.dropFirst("距提醒 ".count)),
+                    topTone: .amber
+                ))
+            } else if id == "scheduler.next", text.hasPrefix("距任务 ") {
+                segments.append(.stacked(
+                    top: "距任务",
+                    bottom: String(text.dropFirst("距任务 ".count)),
+                    topTone: .indigo
+                ))
+            } else {
+                segments.append(.inline(text: text, tone: inlineTone(for: id, text: text)))
+            }
+        }
+        return segments
+    }
+
+    private func inlineTone(for id: String, text: String) -> MenuBarCardTone {
+        switch id {
+        case "zentao.status":
+            text == "✓" ? .green : .rose
+        case "zentao.hours":
+            text.hasPrefix("已写") ? .green : .rose
+        case "calendar.weather":
+            .sky
+        case "zentao.commits", "calendar.date", "calendar.lunar":
+            .slate
+        default:
+            .white
+        }
     }
 
     // MARK: 外观

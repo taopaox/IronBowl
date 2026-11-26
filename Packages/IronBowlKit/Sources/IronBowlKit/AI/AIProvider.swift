@@ -6,6 +6,12 @@ public nonisolated enum AIProviderKind: String, Codable, Sendable, CaseIterable,
     case codex
 
     public var id: String { rawValue }
+    public var shortName: String {
+        switch self {
+        case .agy: "Antigravity"
+        case .codex: "Codex"
+        }
+    }
     public var displayName: String {
         switch self {
         case .agy: "Antigravity（agy）"
@@ -42,6 +48,20 @@ public nonisolated enum AIProviderKind: String, Codable, Sendable, CaseIterable,
         case "max": "最大推理深度，耗时最长。"
         default: "自定义思考深度参数。"
         }
+    }
+}
+
+public nonisolated struct AIModelInfo: Codable, Sendable, Identifiable, Hashable {
+    public let id: String
+    public let name: String
+    public let detail: String?
+    public let supportedEfforts: [String]
+
+    public init(id: String, name: String, detail: String? = nil, supportedEfforts: [String] = []) {
+        self.id = id
+        self.name = name
+        self.detail = detail
+        self.supportedEfforts = supportedEfforts
     }
 }
 
@@ -167,16 +187,92 @@ public enum AIRunner {
         throw AIError.badOutput(text)
     }
 
+    /// 列出可用模型详情（支持 `agy models` 与 Codex 本地缓存 `~/.codex/models_cache.json`）。
+    @concurrent
+    public nonisolated static func listModelInfos(config: AIProviderConfig) async -> [AIModelInfo] {
+        switch config.kind {
+        case .agy:
+            guard !config.executablePath.isEmpty,
+                  let r = try? await Shell.run(config.executablePath, ["models"], timeout: 30), r.status == 0
+            else { return [] }
+            return parseAgyModels(r.stdout)
+
+        case .codex:
+            let codexHome: URL
+            if let envHome = ProcessInfo.processInfo.environment["CODEX_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !envHome.isEmpty {
+                codexHome = URL(fileURLWithPath: envHome, isDirectory: true)
+            } else {
+                codexHome = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".codex", directoryHint: .isDirectory)
+            }
+            let cacheURL = codexHome.appending(path: "models_cache.json")
+            guard let data = try? Data(contentsOf: cacheURL) else { return [] }
+            return parseCodexModelsCache(data)
+        }
+    }
+
     /// `agy models` 列出可用模型（id, 名称）。
     @concurrent
     public nonisolated static func listModels(config: AIProviderConfig) async -> [(id: String, name: String)] {
-        guard config.kind == .agy, !config.executablePath.isEmpty,
-              let r = try? await Shell.run(config.executablePath, ["models"], timeout: 30), r.status == 0
-        else { return [] }
-        return r.stdout.split(separator: "\n").compactMap { line in
-            let parts = line.split(separator: "\t", maxSplits: 1)
-            guard parts.count == 2 else { return nil }
-            return (String(parts[0]), String(parts[1]))
+        await listModelInfos(config: config).map { ($0.id, $0.name) }
+    }
+
+    public nonisolated static func parseAgyModels(_ stdout: String) -> [AIModelInfo] {
+        let cleaned = stdout.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        var result: [AIModelInfo] = []
+        var seen = Set<String>()
+        for rawLine in cleaned.split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty,
+                  !line.contains("Fetching available models"),
+                  !(line.first.map { "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".contains($0) } ?? false) else {
+                continue
+            }
+            let id: String
+            let name: String
+            let tabParts = line.split(separator: "\t", maxSplits: 1)
+            if tabParts.count == 2 {
+                id = tabParts[0].trimmingCharacters(in: .whitespaces)
+                name = tabParts[1].trimmingCharacters(in: .whitespaces)
+            } else if let gapRange = line.range(of: #" {2,}"#, options: .regularExpression) {
+                id = String(line[..<gapRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+                name = String(line[gapRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+            } else {
+                continue
+            }
+            guard !id.isEmpty, seen.insert(id).inserted else { continue }
+            result.append(AIModelInfo(id: id, name: name.isEmpty ? id : name))
+        }
+        return result
+    }
+
+    public nonisolated static func parseCodexModelsCache(_ data: Data) -> [AIModelInfo] {
+        struct CacheFile: Decodable {
+            struct EffortEntry: Decodable { let effort: String }
+            struct ModelEntry: Decodable {
+                let slug: String
+                let display_name: String?
+                let description: String?
+                let visibility: String?
+                let priority: Int?
+                let supported_reasoning_levels: [EffortEntry]?
+            }
+            let models: [ModelEntry]
+        }
+
+        guard let decoded = try? JSONDecoder().decode(CacheFile.self, from: data) else { return [] }
+        let visible = decoded.models
+            .filter { ($0.visibility ?? "list") != "hide" && !$0.slug.isEmpty }
+            .sorted { ($0.priority ?? Int.max) < ($1.priority ?? Int.max) }
+
+        var seen = Set<String>()
+        return visible.compactMap { entry in
+            guard seen.insert(entry.slug).inserted else { return nil }
+            let name = (entry.display_name?.isEmpty == false) ? entry.display_name! : entry.slug
+            let detail = (entry.description?.isEmpty == false) ? entry.description : nil
+            let efforts = entry.supported_reasoning_levels?.map(\.effort) ?? []
+            return AIModelInfo(id: entry.slug, name: name, detail: detail, supportedEfforts: efforts)
         }
     }
 }
@@ -188,6 +284,8 @@ public final class AIProviderStore {
     static let defaultKey = SettingKey<AIProviderKind>("ai.default", default: .agy)
 
     @ObservationIgnored private let settings: SettingsStore
+    public private(set) var availableModels: [AIProviderKind: [AIModelInfo]] = [:]
+    public private(set) var loadingModels: Set<AIProviderKind> = []
 
     public init(settings: SettingsStore) {
         self.settings = settings
@@ -206,6 +304,37 @@ public final class AIProviderStore {
 
     public func config(_ kind: AIProviderKind) -> AIProviderConfig {
         configs.first { $0.kind == kind } ?? AIProviderConfig(kind: kind)
+    }
+
+    public func models(for kind: AIProviderKind) -> [AIModelInfo] {
+        availableModels[kind] ?? []
+    }
+
+    public func modelDisplayName(id: String, for kind: AIProviderKind) -> String? {
+        guard !id.isEmpty else { return nil }
+        return models(for: kind).first { $0.id == id }?.name
+    }
+
+    public func loadModels(for kind: AIProviderKind, force: Bool = false) async {
+        guard !loadingModels.contains(kind) else { return }
+        if !force, let cached = availableModels[kind], !cached.isEmpty {
+            return
+        }
+        loadingModels.insert(kind)
+        defer { loadingModels.remove(kind) }
+        let cfg = config(kind)
+        let list = await AIRunner.listModelInfos(config: cfg)
+        if !list.isEmpty || force {
+            availableModels[kind] = list
+        }
+    }
+
+    public func loadAllModels() async {
+        await withTaskGroup(of: Void.self) { group in
+            for kind in AIProviderKind.allCases {
+                group.addTask { await self.loadModels(for: kind) }
+            }
+        }
     }
 
     public func update(_ config: AIProviderConfig) {

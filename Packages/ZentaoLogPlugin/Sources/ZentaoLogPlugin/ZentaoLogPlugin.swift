@@ -9,11 +9,24 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
     public static let defaultAutoSubmitTaskID = "builtin.zentao.dailyAutoSubmit"
     public let id = ZentaoLogPlugin.pluginID
     public let title = "禅道日志"
+    public let sidebarTitle = "日报"
+    public let sidebarSection: String? = "汇报"
     public let systemImage = "square.and.pencil"
     public var migrations: [DatabaseMigration] { LogMigrations.all }
 
+    public var sidebarBadge: SidebarBadge? {
+        guard let model, model.isConfigured else { return nil }
+        let today = Date()
+        guard model.context.workCalendar.isWorkday(today), !model.todaySubmitted else { return nil }
+        if model.pendingHours(on: today) > 0 {
+            return SidebarBadge("草稿", color: DS.warning)
+        }
+        return SidebarBadge("今日未写", color: DS.danger)
+    }
+
     var model: LogModel?
     var scheduler: LogReminderScheduler?
+    private var quickCapture: QuickLogCapture?
     private var pluginContext: PluginContext?
 
     public init() {}
@@ -22,6 +35,9 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
         self.pluginContext = context
         let model = LogModel(context: context)
         self.model = model
+        let capture = QuickLogCapture(model: model)
+        quickCapture = capture
+        capture.syncShortcut()
         let scheduler = LogReminderScheduler(model: model)
         self.scheduler = scheduler
         scheduler.start()
@@ -30,6 +46,8 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
 
     public func stop() {
         pluginContext?.scheduler.unregister(actionID: Self.autoSubmitActionID)
+        quickCapture?.stop()
+        quickCapture = nil
         pluginContext = nil
         scheduler?.stop()
         scheduler = nil
@@ -50,7 +68,7 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
                     title: "已有未提交草稿时",
                     description: "触发时如果今天已经存在尚未提交的草稿，如何处理。",
                     kind: .choice([
-                        .init(value: AutoLogDraftStrategy.regenerate.rawValue, title: "重新扫描并生成覆盖后提交", subtitle: "拉取最新 Git 提交重新生成草稿并提交（推荐）。"),
+                        .init(value: AutoLogDraftStrategy.regenerate.rawValue, title: "保留手写修改，重新生成后提交", subtitle: "保留手写和改过的草稿，只给尚未摘录的提交分配剩余工时。"),
                         .init(value: AutoLogDraftStrategy.submitExisting.rawValue, title: "直接提交已有草稿", subtitle: "不再重新扫描和调用 AI，直接提交现有草稿。"),
                         .init(value: AutoLogDraftStrategy.skip.rawValue, title: "保留草稿并跳过", subtitle: "不覆盖手动编辑中的草稿，等手动确认提交。"),
                     ]),
@@ -112,40 +130,13 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
     public static let settingsReposID = "zentao.repos"
 
     public var settingsPages: [SettingsPage] {
-        guard let model, let scheduler else { return [] }
+        guard let model, let scheduler, let quickCapture else { return [] }
         return [
             SettingsPage(id: Self.settingsAccountID, title: "禅道账号", systemImage: "person.crop.circle") { AnyView(ZentaoAccountSettings(model: model)) },
             SettingsPage(id: Self.settingsReposID, title: "仓库与映射", systemImage: "folder") { AnyView(RepoSettings(model: model)) },
-            SettingsPage(id: "zentao.generate", title: "日志生成", systemImage: "sparkles") { AnyView(GenerateSettings(model: model)) },
+            SettingsPage(id: "zentao.generate", title: "日志生成", systemImage: "sparkles") { AnyView(GenerateSettings(model: model, capture: quickCapture)) },
             SettingsPage(id: "zentao.reminder", title: "日志提醒", systemImage: "bell") { AnyView(ReminderSettings(model: model, scheduler: scheduler)) },
         ]
-    }
-
-    public var sidebarRecents: [SidebarRecent] {
-        guard let model else { return [] }
-        let _ = model.todaySubmitted
-        let _ = model.recordedByDate
-        let _ = model.pendingByDate
-        let f = DateFormatter()
-        f.dateFormat = "M月d日"
-        return model.recentDays.prefix(5).map { day in
-            let hours = model.recordedHours(on: day)
-            let pendingH = model.pendingHours(on: day)
-            let info = model.context.workCalendar.dayInfo(day)
-            let status: String
-            if hours > 0 {
-                status = "已写 \(hoursText(hours))h"
-            } else if pendingH > 0 {
-                status = "草稿 \(hoursText(pendingH))h"
-            } else {
-                status = info.isWorkday ? "未写" : "休息"
-            }
-            let trailing = Calendar.current.isDateInToday(day) ? "今天" : CN.weekdayShort(day)
-            return SidebarRecent(id: "zentao.day.\(WorkCalendar.dayString(day))", title: "\(f.string(from: day)) · \(status)", trailing: trailing) {
-                model.context.openPlugin(ZentaoLogPlugin.pluginID)
-                Task { await model.select(date: day) }
-            }
-        }
     }
 
     public var quickActions: [QuickAction] {
@@ -186,6 +177,196 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
         return await model.addFromSentence(text)
     }
 
+    public func canHandleChatIntent(_ text: String) -> Bool {
+        ZentaoChatHandler.match(text) != nil
+    }
+
+    public func handleChatIntent(
+        _ text: String,
+        onProgress: @escaping @MainActor (ChatActivityItem) -> Void
+    ) async -> ChatPluginExecutionResult? {
+        guard let model, let intent = ZentaoChatHandler.match(text) else { return nil }
+
+        switch intent {
+        case .quickLog(let sentence):
+            onProgress(ChatActivityItem(
+                id: "zentao-quicklog",
+                kind: .tool,
+                title: "解析一句话工作内容并写入今日草稿",
+                subtitle: sentence,
+                status: .running
+            ))
+            let reply = await model.addFromSentence(sentence)
+            let isError = reply.hasPrefix("❌")
+            onProgress(ChatActivityItem(
+                id: "zentao-quicklog",
+                kind: .tool,
+                title: "解析一句话工作内容并写入今日草稿",
+                subtitle: sentence,
+                outputText: reply,
+                status: isError ? .failed : .completed,
+                finishedAt: Date()
+            ))
+            let todayDS = WorkCalendar.dayString(Date())
+            let card = makeDailyCardAttachment(model: model, dateString: todayDS, label: "今日日报")
+            return ChatPluginExecutionResult(
+                replyText: reply,
+                cards: isError ? [] : [card],
+                isError: isError
+            )
+
+        case .generateDaily(let dayOffset):
+            let base = Calendar.current.startOfDay(for: Date())
+            let targetDate = Calendar.current.date(byAdding: .day, value: dayOffset, to: base) ?? base
+            let ds = WorkCalendar.dayString(targetDate)
+            let label = dayOffset == 0 ? "今日日报" : "昨日日报"
+
+            onProgress(ChatActivityItem(
+                id: "zentao-scan",
+                kind: .tool,
+                title: "扫描本地 Git 提交记录",
+                subtitle: ds,
+                status: .running
+            ))
+            await model.select(date: targetDate)
+            await model.scan()
+            let repoSummary = model.activities.isEmpty
+                ? "未发现本地 Git 提交"
+                : model.activities.map { "\($0.repoName)：\($0.commits.count) 次提交" }.joined(separator: "\n")
+            onProgress(ChatActivityItem(
+                id: "zentao-scan",
+                kind: .tool,
+                title: "扫描本地 Git 提交记录",
+                subtitle: "\(model.activities.reduce(0) { $0 + $1.commits.count }) 次提交",
+                outputText: repoSummary,
+                status: .completed,
+                finishedAt: Date()
+            ))
+
+            if model.isConfigured {
+                onProgress(ChatActivityItem(
+                    id: "zentao-sync",
+                    kind: .tool,
+                    title: "同步禅道任务列表与已记工时",
+                    status: .running
+                ))
+                await model.loadTasks()
+                await model.loadRecentRecorded()
+                onProgress(ChatActivityItem(
+                    id: "zentao-sync",
+                    kind: .tool,
+                    title: "同步禅道任务列表与已记工时",
+                    subtitle: "\(model.openTasks.count) 个进行中任务",
+                    status: .completed,
+                    finishedAt: Date()
+                ))
+            }
+
+            onProgress(ChatActivityItem(
+                id: "zentao-generate",
+                kind: .tool,
+                title: "按项目规则生成日报草稿",
+                subtitle: ds,
+                status: .running
+            ))
+            await model.generate()
+            let genError = model.errorMessage
+            onProgress(ChatActivityItem(
+                id: "zentao-generate",
+                kind: .tool,
+                title: "按项目规则生成日报草稿",
+                subtitle: model.message ?? "\(model.pendingEntries(forDateString: ds).count) 条待提交草稿",
+                outputText: genError ?? model.message,
+                status: genError == nil ? .completed : .failed,
+                finishedAt: Date()
+            ))
+
+            let reply = buildDailyReplyMarkdown(model: model, dateString: ds, label: label)
+            let card = makeDailyCardAttachment(model: model, dateString: ds, label: label)
+            return ChatPluginExecutionResult(replyText: reply, cards: [card])
+
+        case .showDaily(let dayOffset):
+            let base = Calendar.current.startOfDay(for: Date())
+            let targetDate = Calendar.current.date(byAdding: .day, value: dayOffset, to: base) ?? base
+            let ds = WorkCalendar.dayString(targetDate)
+            let label = dayOffset == 0 ? "今日日报" : "昨日日报"
+
+            if model.isConfigured {
+                onProgress(ChatActivityItem(
+                    id: "zentao-sync",
+                    kind: .tool,
+                    title: "同步禅道最新记录",
+                    subtitle: ds,
+                    status: .running
+                ))
+                await model.select(date: targetDate)
+                await model.loadRecentRecorded()
+                onProgress(ChatActivityItem(
+                    id: "zentao-sync",
+                    kind: .tool,
+                    title: "同步禅道最新记录",
+                    subtitle: ds,
+                    status: .completed,
+                    finishedAt: Date()
+                ))
+            }
+
+            let reply = buildDailyReplyMarkdown(model: model, dateString: ds, label: label)
+            let card = makeDailyCardAttachment(model: model, dateString: ds, label: label)
+            return ChatPluginExecutionResult(replyText: reply, cards: [card])
+        }
+    }
+
+    public func makeInteractiveChatCard(for attachment: ChatCardAttachment) -> AnyView? {
+        guard let model, let ds = ZentaoChatHandler.dateString(fromCardID: attachment.cardID) else {
+            return nil
+        }
+        return AnyView(ZentaoDailyChatCard(model: model, dateString: ds))
+    }
+
+    private func makeDailyCardAttachment(model: LogModel, dateString: String, label: String) -> ChatCardAttachment {
+        let pending = model.pendingEntries(forDateString: dateString)
+        let recorded = model.recordedEntries(forDateString: dateString)
+        let pHours = pending.reduce(0) { $0 + $1.hours }
+        let rHours = recorded.reduce(0) { $0 + $1.hours }
+        let value = !pending.isEmpty
+            ? "待提交 \(hoursText(pHours))h"
+            : (rHours > 0 ? "已写 \(hoursText(rHours))h" : "未生成")
+        return ChatCardAttachment(
+            cardID: ZentaoChatHandler.cardID(forDateString: dateString),
+            label: label,
+            valueSnapshot: value,
+            detailSnapshot: dateString
+        )
+    }
+
+    private func buildDailyReplyMarkdown(model: LogModel, dateString: String, label: String) -> String {
+        let pending = model.pendingEntries(forDateString: dateString)
+        let recorded = model.recordedEntries(forDateString: dateString)
+        var lines: [String] = []
+        lines.append("### \(label)（\(dateString)）")
+        if let err = model.errorMessage {
+            lines.append("> ⚠️ \(err)")
+        } else if let msg = model.message {
+            lines.append(msg)
+        }
+        if !pending.isEmpty {
+            let total = pending.reduce(0) { $0 + $1.hours }
+            lines.append("**待提交草稿（\(pending.count) 条 · \(hoursText(total))h）**")
+            for entry in pending {
+                let taskName = model.task(entry.taskID).map { "#\($0.id) \($0.name)" } ?? (entry.taskID.map { "#\($0)" } ?? "未选任务")
+                let tag = entry.isOvertime ? " `[加班]`" : ""
+                lines.append("- **\(taskName)**（\(hoursText(entry.hours))h）\(tag)：\(entry.work.replacingOccurrences(of: "\n", with: " "))")
+            }
+        }
+        if !recorded.isEmpty {
+            let total = recorded.reduce(0) { $0 + $1.hours }
+            lines.append("**已入账禅道（\(recorded.count) 条 · \(hoursText(total))h）**")
+        }
+        lines.append("你可以直接在下方卡片里修改任务、工时与内容，或点击「提交到禅道」。")
+        return lines.joined(separator: "\n\n")
+    }
+
     public var menuBarItems: [MenuBarItem] {
         guard let model, let scheduler else { return [] }
         return [
@@ -206,7 +387,7 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
                 return "需填 \(hoursText(target))h"
             },
             MenuBarItem(id: "zentao.nextReminder", title: "离下次提醒还有多久") {
-                scheduler.nextReminder().map { "提醒 " + countdown(to: $0) }
+                scheduler.nextReminder().map { "距提醒 " + countdown(to: $0) }
             },
         ]
     }
@@ -321,6 +502,8 @@ final class LogReminderScheduler {
             title: "今天的禅道日志还没写",
             message: "\(count)点一下就能生成草稿，确认后提交。",
             systemImage: "square.and.pencil",
+            source: .zentao,
+            targetPluginID: ZentaoLogPlugin.pluginID,
             actions: [
                 ReminderAction(id: "later", title: "\(snooze) 分钟后") { [weak self] in
                     self?.snoozeUntil = Date().addingTimeInterval(TimeInterval(snooze * 60))
@@ -352,6 +535,8 @@ final class LogReminderScheduler {
             title: "今天的禅道日志还没写（预览）",
             message: "这是「\(style.shortName)」样式的预览，点任意按钮关闭。",
             systemImage: "square.and.pencil",
+            source: .zentao,
+            recordInHistory: false,
             actions: [
                 ReminderAction(id: "later", title: "\(settings[LogKeys.snoozeMinutes]) 分钟后") {},
                 ReminderAction(id: "skip", title: "今天不写") {},

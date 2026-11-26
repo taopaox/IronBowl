@@ -10,6 +10,7 @@ let package = Package(
         .target(
             name: "CalendarPlugin",
             dependencies: ["IronBowlKit"],
+            resources: [.copy("Resources/CalendarLogo.png")],
             swiftSettings: [.defaultIsolation(MainActor.self), .enableUpcomingFeature("NonisolatedNonsendingByDefault")]
         ),
         .testTarget(name: "CalendarPluginTests", dependencies: ["CalendarPlugin"]),

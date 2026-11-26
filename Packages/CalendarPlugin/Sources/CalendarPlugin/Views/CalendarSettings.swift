@@ -6,7 +6,7 @@ struct CalendarDisplaySettings: View {
 
     var body: some View {
         let s = model.settings
-        DSSection("月历", footer: "每周第一天作用于主窗口月历与状态栏弹出面板；节假日与调休数据可在左侧「节假日」中管理。") {
+        DSSection("月历", footer: "每周第一天与时间制式会同步作用于主窗口月历、状态栏日历与弹出面板；节假日与调休数据可在左侧「节假日」中管理。") {
             DSRow("每周第一天") {
                 DSPicker(
                     selection: s.binding(CalendarKeys.firstWeekday),
@@ -16,14 +16,60 @@ struct CalendarDisplaySettings: View {
                     ]
                 )
             }
+            DSRow("时间制式", description: "切换 12 小时制或 24 小时制显示。") {
+                CalendarTimeFormatPicker(selection: s.binding(CalendarKeys.menuBarTime24Hour))
+            }
+        }
+    }
+}
+
+private struct CalendarTimeFormatPicker: View {
+    @Binding var selection: Bool
+
+    var body: some View {
+        DSPicker(
+            selection: $selection,
+            options: [
+                DSPickerOption(true, title: "24 小时制", subtitle: "例如 18:30"),
+                DSPickerOption(false, title: "12 小时制", subtitle: "例如 下午 6:30"),
+            ]
+        )
+    }
+}
+
+private enum StylePreviewBackdrop: String, CaseIterable, Identifiable {
+    case auto, dark, light
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .auto: "跟随"
+        case .dark: "深色"
+        case .light: "浅色"
         }
     }
 }
 
 struct CalendarStatusBarSettings: View {
     let model: CalendarModel
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var selectedCategory: CalendarMenuBarStyleCategory?
+    @State private var previewBackdrop: StylePreviewBackdrop = .auto
 
     private var s: SettingsStore { model.settings }
+
+    private var effectivePreviewIsDark: Bool {
+        switch previewBackdrop {
+        case .auto: (model.appAppearance == .system ? colorScheme : model.systemColorScheme) == .dark
+        case .dark: true
+        case .light: false
+        }
+    }
+
+    private var filteredStyles: [CalendarMenuBarStyle] {
+        guard let selectedCategory else { return CalendarMenuBarStyle.allCases }
+        return CalendarMenuBarStyle.allCases.filter { $0.category == selectedCategory }
+    }
 
     private var dateEnabled: Binding<Bool> {
         Binding(
@@ -65,20 +111,84 @@ struct CalendarStatusBarSettings: View {
         Group {
             DSSection("状态栏日历", footer: "在顶部状态栏单独显示一个日历，点开就是月历。按住 ⌘ 可以拖动调整它在状态栏的位置。") {
                 DSRow("在状态栏显示日历") { DSToggle(isOn: s.binding(CalendarKeys.menuBarEnabled)) }
+                if model.isStandaloneCalendarRunning {
+                    DSBlockRow {
+                        DSBanner(.info, "检测到独立版「饭碗万年历」正在运行，主工作台已自动隐藏内置状态栏日历以避免重复显示；退出独立版后会自动恢复。")
+                    }
+                }
                 if s[CalendarKeys.menuBarEnabled] {
-                    DSRow("当前预览", description: "按下方选项实时拼接显示。") {
-                        MenuBarPreviewPill(model: model)
+                    DSRow("当前预览", description: "当前风格：#\(model.menuBarStyle.code) \(model.menuBarStyle.displayName)") {
+                        MenuBarPreviewPill(model: model, isDark: effectivePreviewIsDark)
+                    }
+                    DSRow("显示 Logo", description: "在状态栏日历最左侧显示万年历图标。") {
+                        DSToggle(isOn: s.binding(CalendarKeys.menuBarLogo))
                     }
                 }
             }
             if s[CalendarKeys.menuBarEnabled] {
+                DSSection("状态栏风格", footer: "内置 20 套状态栏视觉风格，点击即可实时切换顶部状态栏外观，所有样式均自动适配深浅模式与下方显示选项。") {
+                    DSBlockRow {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 6) {
+                                StyleFilterChip(title: "全部 (20)", selected: selectedCategory == nil) {
+                                    selectedCategory = nil
+                                }
+                                ForEach(CalendarMenuBarStyleCategory.allCases) { category in
+                                    StyleFilterChip(title: category.displayName, selected: selectedCategory == category) {
+                                        selectedCategory = category
+                                    }
+                                }
+                                Spacer(minLength: 4)
+                                HStack(spacing: 2) {
+                                    ForEach(StylePreviewBackdrop.allCases) { mode in
+                                        Button {
+                                            previewBackdrop = mode
+                                        } label: {
+                                            Text(mode.title)
+                                                .font(DS.font(11, previewBackdrop == mode ? .semibold : .regular))
+                                                .foregroundStyle(previewBackdrop == mode ? DS.text : DS.textTertiary)
+                                                .padding(.horizontal, 7)
+                                                .padding(.vertical, 3)
+                                                .background(
+                                                    previewBackdrop == mode ? DS.card : .clear,
+                                                    in: .rect(cornerRadius: 5)
+                                                )
+                                                .contentShape(.rect)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(2)
+                                .background(DS.well, in: .rect(cornerRadius: 7))
+                            }
+
+                            LazyVGrid(
+                                columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
+                                spacing: 10
+                            ) {
+                                ForEach(filteredStyles) { style in
+                                    MenuBarStyleCard(
+                                        style: style,
+                                        snapshot: model.menuBarSnapshot,
+                                        isDark: effectivePreviewIsDark,
+                                        selected: model.menuBarStyle == style
+                                    ) {
+                                        model.menuBarStyle = style
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 DSSection("时间选项") {
-                    DSRow("显示时间", description: "在状态栏显示当前时间，可配置图标、24 小时制、上午/下午与精确到秒。") {
+                    DSRow("显示时间", description: "在状态栏显示当前时间，可配置图标、12/24 小时制、上午/下午与精确到秒。") {
                         DSToggle(isOn: s.binding(CalendarKeys.menuBarTime))
                     }
                     if s[CalendarKeys.menuBarTime] {
                         DSRow("显示 icon") { DSToggle(isOn: s.binding(CalendarKeys.menuBarTimeIcon)) }
-                        DSRow("使用 24 小时格式") { DSToggle(isOn: s.binding(CalendarKeys.menuBarTime24Hour)) }
+                        DSRow("时间制式", description: "同步作用于状态栏时间、弹出面板时钟与天气更新时间。") {
+                            CalendarTimeFormatPicker(selection: s.binding(CalendarKeys.menuBarTime24Hour))
+                        }
                         DSRow("显示上午/下午") { DSToggle(isOn: s.binding(CalendarKeys.menuBarTimePeriod)) }
                         DSRow("时间精确到秒") { DSToggle(isOn: s.binding(CalendarKeys.menuBarTimeSeconds)) }
                     }
@@ -91,6 +201,9 @@ struct CalendarStatusBarSettings: View {
                         DSRow("显示阳历") { DSToggle(isOn: s.binding(CalendarKeys.menuBarDate)) }
                         DSRow("显示农历") { DSToggle(isOn: s.binding(CalendarKeys.menuBarLunar)) }
                         DSRow("显示星期几") { DSToggle(isOn: s.binding(CalendarKeys.menuBarWeekday)) }
+                        DSRow("显示休/班角标", description: "法定节假日与调休补班日显示「休」「班」标识。") {
+                            DSToggle(isOn: s.binding(CalendarKeys.menuBarHolidayBadge))
+                        }
                     }
                 }
                 DSSection("天气选项") {
@@ -112,6 +225,7 @@ struct CalendarStatusBarSettings: View {
                 }
             }
         }
+        .onAppear { model.refreshStandaloneCalendarState() }
         .onChange(of: model.needsSecondTick) { model.syncClockTimer() }
     }
 }
@@ -165,17 +279,129 @@ struct CalendarHolidaySettings: View {
 
 private struct MenuBarPreviewPill: View {
     let model: CalendarModel
+    let isDark: Bool
 
     var body: some View {
-        CalendarMenuBarLabel(model: model)
-            .font(DS.font(13, .medium))
-            .foregroundStyle(DS.text)
+        let image = CalendarMenuBarRenderer.renderImage(
+            snapshot: model.menuBarSnapshot,
+            style: model.menuBarStyle,
+            isDark: isDark,
+            scale: 2.0
+        )
+        Image(nsImage: image)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+            .frame(maxHeight: CalendarMenuBarRenderer.barHeight)
+            .foregroundStyle(isDark ? Color.white : Color.black)
             .padding(.horizontal, 10)
-            .frame(height: DS.s(26))
-            .background(DS.well, in: .capsule)
+            .frame(height: DS.s(28))
+            .background(isDark ? Color(white: 0.12) : Color(white: 0.94), in: .capsule)
             .overlay {
-                Capsule().strokeBorder(DS.border)
+                Capsule().strokeBorder(isDark ? Color.white.opacity(0.14) : Color.black.opacity(0.10))
             }
+            .environment(\.colorScheme, isDark ? .dark : .light)
+    }
+}
+
+private struct StyleFilterChip: View {
+    let title: String
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(DS.font(11.5, selected ? .semibold : .regular))
+                .foregroundStyle(selected ? DS.onPrimary : DS.textSecondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(selected ? DS.toggle : DS.well, in: .capsule)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct MenuBarStyleCard: View {
+    let style: CalendarMenuBarStyle
+    let snapshot: CalendarMenuBarSnapshot
+    let isDark: Bool
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let rendered = CalendarMenuBarRenderer.renderImage(
+            snapshot: snapshot,
+            style: style,
+            isDark: isDark,
+            scale: 2.0
+        )
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Spacer(minLength: 0)
+                    Image(nsImage: rendered)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxHeight: CalendarMenuBarRenderer.barHeight)
+                        .foregroundStyle(isDark ? Color.white : Color.black)
+                        .environment(\.colorScheme, isDark ? .dark : .light)
+                }
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity)
+                .frame(height: DS.s(36))
+                .background(
+                    isDark
+                        ? Color(red: 0.09, green: 0.11, blue: 0.15)
+                        : Color(red: 0.92, green: 0.93, blue: 0.96),
+                    in: .rect(cornerRadius: 7)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7)
+                        .strokeBorder(isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.08), lineWidth: 0.5)
+                }
+
+                HStack(spacing: 6) {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(DS.font(12))
+                        .foregroundStyle(selected ? DS.toggle : DS.textTertiary)
+                    Text("#\(style.code)")
+                        .font(DS.font(10.5, .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(selected ? DS.toggle : DS.textTertiary)
+                    Text(style.displayName)
+                        .font(DS.font(12.5, selected ? .semibold : .medium))
+                        .foregroundStyle(DS.text)
+                        .lineLimit(1)
+                    Spacer(minLength: 2)
+                    Text(style.category.displayName)
+                        .font(DS.font(10))
+                        .foregroundStyle(DS.textTertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(DS.well, in: .capsule)
+                }
+
+                Text(style.subtitle)
+                    .font(DS.font(10.5))
+                    .foregroundStyle(DS.textSecondary)
+                    .lineLimit(1)
+                    .padding(.leading, 18)
+            }
+            .padding(9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(hovering ? DS.hover : DS.card, in: .rect(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(selected ? DS.toggle : DS.border, lineWidth: selected ? 1.8 : 1)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 

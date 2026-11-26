@@ -16,7 +16,9 @@
 - **`workEnd(on:)`**：返回指定日期的正常下班 `Date`（仅含弹性规则顺延，不含加班），专供禅道日志「正常/加班提交拆条分界线」使用。当天有上班打卡记录时按弹性规则顺延（见下节），否则就是 `work.end`。
 - **`overtimeHours(on:)` / `setOvertimeHours(_:on:)`**：读写指定日期的计划加班小时数（按 `0.5h` 步进限制在 `0...12`，`<= 0` 时清除），持久化在核心数据库 `dailyOvertime` 表（`core.v4` 迁移），写入后通过 `com.taopaox.ironbowl.holidaysDidChange` 通知跨进程刷新。
 - **`effectiveWorkEnd(on:)` / `offWorkTimeText(on:)`**：在 `workEnd(on:)` 的基础上顺延当日 `overtimeHours(on:)` 小时，得到实际下班时刻（及格式化文字，跨零点时显示 `次日 HH:mm`），供主工作台侧栏「距下班倒计时」、首页「下班卡」、菜单栏「离下班还有多久」以及禅道日志工时卡「XX:XX 下班」标签使用。
-- **`workStart(on:)`**：同样按弹性偏移折算后的上班时刻，侧栏今日卡片的下班进度条以它为起点。
+- **`onWorkTimeText(on:)`**：返回当日上班时间文字，有打卡记录时显示实际打卡时间（`HH:mm`），否则显示配置的固定上班时间（`work.start`），供侧栏今日卡片展示。
+- **`workStart(on:)`**：同样按弹性偏移折算后的上班时刻，侧栏今日卡片与状态栏面板主卡的下班进度条以它为起点。
+- **`workProgress(on:)`**：计算当前时刻在 `workStart(on:)` 与 `effectiveWorkEnd(on:)` 之间的工作进度比例（`0...1`），供主窗口侧栏 `TodayCard` 与状态栏 `MenuWorkHeroCard` 共用。
 - **`scheduleText(on:)`**：上下班说明文字，无加班时有打卡为「打卡 08:29 · 17:29 下班」、无打卡为「08:30–17:30」；设置加班后同步顺延下班时间并追加「（加班 Xh）」，用于首页下班卡与设置页。
 
 ## 弹性上下班与钉钉考勤

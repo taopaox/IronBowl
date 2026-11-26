@@ -12,53 +12,75 @@ struct FeishuMainView: View {
     @State private var copiedLink = false
 
     var body: some View {
-        let session = model.activeSession
-        let matchingPin = model.activePinnedPage ?? model.pinnedPage(matchingURL: session.currentURL)
+        Group {
+            if let session = model.activeSession {
+                let matchingPin = model.activePinnedPage ?? model.pinnedPage(matchingURL: session.currentURL)
 
-        VStack(spacing: 0) {
-            toolbar(session: session, matchingPin: matchingPin)
+                VStack(spacing: 0) {
+                    toolbar(session: session, matchingPin: matchingPin)
 
-            if let error = session.errorMessage {
-                HStack(spacing: 8) {
-                    DSBanner(.danger, error)
-                    Button("重试") { session.reload() }.buttonStyle(.dsSecondary)
-                    Button { session.errorMessage = nil } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.dsGhost)
+                    if let error = session.errorMessage {
+                        HStack(spacing: 8) {
+                            DSBanner(.danger, error)
+                            Button("重试") { session.reload() }.buttonStyle(.dsSecondary)
+                            Button { session.errorMessage = nil } label: { Image(systemName: "xmark") }
+                                .buttonStyle(.dsGhost)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(DS.canvas)
+                        .overlay(alignment: .bottom) { Rectangle().fill(DS.border).frame(height: 1) }
+                    }
+
+                    if let notice = session.downloadNotice {
+                        HStack(spacing: 8) {
+                            DSBanner(.info, notice)
+                            Button { session.downloadNotice = nil } label: { Image(systemName: "xmark") }
+                                .buttonStyle(.dsGhost)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(DS.canvas)
+                        .overlay(alignment: .bottom) { Rectangle().fill(DS.border).frame(height: 1) }
+                    }
+
+                    WebContainerView(session: session, manager: model.webSessions) {
+                        model.closeActivePage()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(DS.canvas)
-                .overlay(alignment: .bottom) { Rectangle().fill(DS.border).frame(height: 1) }
-            }
-
-            if let notice = session.downloadNotice {
-                HStack(spacing: 8) {
-                    DSBanner(.info, notice)
-                    Button { session.downloadNotice = nil } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.dsGhost)
+                .onChange(of: session.currentURL) { _, newURL in
+                    if !addressFocused {
+                        addressText = newURL
+                    }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(DS.canvas)
-                .overlay(alignment: .bottom) { Rectangle().fill(DS.border).frame(height: 1) }
+            } else {
+                closedEmptyView
             }
-
-            WebContainerView(session: session, manager: model.webSessions)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(DS.canvas)
         .onAppear {
-            addressText = session.currentURL
+            addressText = model.activeSession?.currentURL ?? ""
         }
         .onChange(of: model.activePageID) {
-            addressText = model.activeSession.currentURL
+            addressText = model.activeSession?.currentURL ?? ""
             addressFocused = false
         }
-        .onChange(of: session.currentURL) { _, newURL in
-            if !addressFocused {
-                addressText = newURL
+    }
+
+    private var closedEmptyView: some View {
+        ContentUnavailableView {
+            Label("网页已关闭", systemImage: "globe")
+        } description: {
+            Text("当前飞书网页会话已释放内存，可重新打开主页或从左侧栏选择固定网页。")
+        } actions: {
+            Button("打开飞书知识库") {
+                model.selectHome()
             }
+            .buttonStyle(.dsPrimary)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .top) { WindowTitleBarArea(height: 52) }
     }
 
     private func toolbar(session: WebSession, matchingPin: FeishuPinnedPage?) -> some View {
@@ -139,6 +161,19 @@ struct FeishuMainView: View {
                 }
                 .buttonStyle(.dsGhost)
                 .help("在默认浏览器中打开")
+
+                Rectangle()
+                    .fill(DS.border)
+                    .frame(width: 1, height: DS.s(16))
+
+                Button {
+                    model.closeActivePage()
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.dsGhost)
+                .help("关闭网页")
+                .accessibilityLabel("关闭网页")
             }
         }
         .padding(.leading, sidebarCollapsed ? 120 : 14)

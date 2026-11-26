@@ -3,6 +3,7 @@ import Foundation
 /// 定时任务调度周期类型。
 public nonisolated enum TaskScheduleKind: String, Codable, Sendable, Hashable, CaseIterable, Identifiable {
     case workdays
+    case beforeWorkEnd
     case daily
     case weekly
     case interval
@@ -12,6 +13,7 @@ public nonisolated enum TaskScheduleKind: String, Codable, Sendable, Hashable, C
     public var displayName: String {
         switch self {
         case .workdays: "仅工作日"
+        case .beforeWorkEnd: "下班前（工作日）"
         case .daily: "每天"
         case .weekly: "每周指定日期"
         case .interval: "每隔固定分钟"
@@ -21,6 +23,7 @@ public nonisolated enum TaskScheduleKind: String, Codable, Sendable, Hashable, C
     public var detail: String {
         switch self {
         case .workdays: "跟随饭碗工作日历，自动跳过周末与法定节假日、包含调休补班。"
+        case .beforeWorkEnd: "按工作日历的当天实际下班时间（含弹性打卡与计划加班）提前指定分钟触发，自动跳过节假日。"
         case .daily: "每天固定时间执行，不区分工作日与节假日。"
         case .weekly: "按选中的星期几在固定时间执行。"
         case .interval: "按固定分钟间隔循环执行。"
@@ -36,13 +39,25 @@ public nonisolated struct TaskSchedule: Codable, Sendable, Hashable {
     /// Calendar.weekday（1=周日, 2=周一 ... 7=周六）。
     public var weekdays: [Int]
     public var intervalMinutes: Int
+    /// `.beforeWorkEnd` 模式下提前触发的分钟数（0 表示准点下班时）。
+    public var minutesBeforeWorkEnd: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case hour
+        case minute
+        case weekdays
+        case intervalMinutes
+        case minutesBeforeWorkEnd
+    }
 
     public init(
         kind: TaskScheduleKind = .workdays,
         hour: Int = 17,
         minute: Int = 0,
         weekdays: [Int] = [2, 3, 4, 5, 6],
-        intervalMinutes: Int = 60
+        intervalMinutes: Int = 60,
+        minutesBeforeWorkEnd: Int = 5
     ) {
         self.kind = kind
         self.hour = min(23, max(0, hour))
@@ -50,6 +65,25 @@ public nonisolated struct TaskSchedule: Codable, Sendable, Hashable {
         let validWeekdays = weekdays.filter { (1...7).contains($0) }
         self.weekdays = validWeekdays.isEmpty ? [2, 3, 4, 5, 6] : Array(Set(validWeekdays)).sorted()
         self.intervalMinutes = max(1, intervalMinutes)
+        self.minutesBeforeWorkEnd = min(180, max(0, minutesBeforeWorkEnd))
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try c.decodeIfPresent(TaskScheduleKind.self, forKey: .kind) ?? .workdays
+        let hour = try c.decodeIfPresent(Int.self, forKey: .hour) ?? 17
+        let minute = try c.decodeIfPresent(Int.self, forKey: .minute) ?? 0
+        let weekdays = try c.decodeIfPresent([Int].self, forKey: .weekdays) ?? [2, 3, 4, 5, 6]
+        let intervalMinutes = try c.decodeIfPresent(Int.self, forKey: .intervalMinutes) ?? 60
+        let minutesBeforeWorkEnd = try c.decodeIfPresent(Int.self, forKey: .minutesBeforeWorkEnd) ?? 5
+        self.init(
+            kind: kind,
+            hour: hour,
+            minute: minute,
+            weekdays: weekdays,
+            intervalMinutes: intervalMinutes,
+            minutesBeforeWorkEnd: minutesBeforeWorkEnd
+        )
     }
 
     public var timeText: String {
@@ -60,6 +94,8 @@ public nonisolated struct TaskSchedule: Codable, Sendable, Hashable {
         switch kind {
         case .workdays:
             return "仅工作日 \(timeText)"
+        case .beforeWorkEnd:
+            return minutesBeforeWorkEnd == 0 ? "工作日准点下班时" : "工作日下班前 \(minutesBeforeWorkEnd) 分钟"
         case .daily:
             return "每天 \(timeText)"
         case .weekly:
@@ -80,6 +116,7 @@ public nonisolated struct TaskSchedule: Codable, Sendable, Hashable {
     public func nextRun(
         after reference: Date,
         isWorkday: (Date) -> Bool,
+        workEndOnDay: ((Date) -> Date?)? = nil,
         calendar: Calendar = .current
     ) -> Date? {
         switch kind {
@@ -104,6 +141,19 @@ public nonisolated struct TaskSchedule: Codable, Sendable, Hashable {
                 if candidate > reference { return candidate }
             }
             return nil
+        case .beforeWorkEnd:
+            let startDay = calendar.startOfDay(for: reference)
+            let lead = TimeInterval(max(0, minutesBeforeWorkEnd) * 60)
+            for offset in -1..<366 {
+                guard let day = calendar.date(byAdding: .day, value: offset, to: startDay),
+                      isWorkday(day)
+                else { continue }
+                let end = workEndOnDay?(day) ?? calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day)
+                guard let end else { continue }
+                let candidate = end.addingTimeInterval(-lead)
+                if candidate > reference { return candidate }
+            }
+            return nil
         case .weekly:
             let valid = weekdays.filter { (1...7).contains($0) }
             let targetWeekdays = Set(valid.isEmpty ? [2, 3, 4, 5, 6] : valid)
@@ -125,7 +175,12 @@ public nonisolated struct TaskSchedule: Codable, Sendable, Hashable {
         workCalendar: WorkCalendar,
         calendar: Calendar = .current
     ) -> Date? {
-        nextRun(after: reference, isWorkday: { workCalendar.isWorkday($0) }, calendar: calendar)
+        nextRun(
+            after: reference,
+            isWorkday: { workCalendar.isWorkday($0) },
+            workEndOnDay: { workCalendar.effectiveWorkEnd(on: $0) },
+            calendar: calendar
+        )
     }
 
     /// 生成时间槽唯一标识，用于防止重启或反复 tick 时重复触发同一槽位。
@@ -133,7 +188,7 @@ public nonisolated struct TaskSchedule: Codable, Sendable, Hashable {
         switch kind {
         case .interval:
             return "interval:\(Int(fireDate.timeIntervalSince1970))"
-        case .workdays, .daily, .weekly:
+        case .workdays, .beforeWorkEnd, .daily, .weekly:
             let c = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
             return String(
                 format: "%04d-%02d-%02d %02d:%02d",

@@ -6,12 +6,22 @@ public protocol IronBowlPlugin: AnyObject {
     /// 稳定唯一 ID，用于设置里的启用开关和侧边栏选择。
     var id: String { get }
     var title: String { get }
+    /// 左侧栏显示的标题（默认与 `title` 相同）。
+    var sidebarTitle: String { get }
+    /// 左侧栏所属分组标题（如「汇报」）；为 nil 或空白时显示在顶部主列表。
+    var sidebarSection: String? { get }
     /// SF Symbol 名称。
     var systemImage: String { get }
     /// 只占位、尚未实现。
     var isComingSoon: Bool { get }
+    /// 左侧边栏标题右侧的语义状态角标（如「今日未写」「本周未写」）。
+    var sidebarBadge: SidebarBadge? { get }
     /// 是否以可折叠目录形式在左侧栏展示（子条目来自 `sidebarChildren`）。
     var isSidebarDirectory: Bool { get }
+    /// 当前插件自身是否已打开内嵌网页（例如飞书主页）。
+    var isSidebarWebOpen: Bool { get }
+    /// 当前插件自身的内嵌网页是否处于休眠状态。
+    var isSidebarWebSuspended: Bool { get }
     /// 插件自己的数据库迁移。
     var migrations: [DatabaseMigration] { get }
 
@@ -24,37 +34,111 @@ public protocol IronBowlPlugin: AnyObject {
     var settingsPages: [SettingsPage] { get }
     /// 插件能提供给菜单栏显示的信息项。
     var menuBarItems: [MenuBarItem] { get }
-    /// 侧栏「最近」里的条目。
-    var sidebarRecents: [SidebarRecent] { get }
     /// 固定在主窗口左侧栏「固定网页」分区的条目。
     var sidebarPinnedItems: [SidebarPinnedItem] { get }
     /// 紧跟在目录插件下方缩进展示的子条目。
     var sidebarChildren: [SidebarPinnedItem] { get }
     /// 用户从主窗口左侧栏主动点击该插件时调用。
     func onSidebarSelect()
+    /// 用户从左侧栏关闭该插件当前打开的内嵌网页时调用。
+    func onSidebarCloseWeb()
+    /// 按会话 ID 关闭归属本插件的内嵌网页；若不属于本插件返回 false。
+    func closeWebSession(id: String) -> Bool
     /// 首页的快捷标签。
     var quickActions: [QuickAction] { get }
     /// 首页的小卡片。
     var homeCards: [HomeCard] { get }
     /// 首页输入框的内容交给插件处理；处理了返回给用户看的结果，不处理返回 nil。
     func handleHomeInput(_ text: String) async -> String?
+    /// 判断首页「今天」AI 对话是否应交由本插件按工作台业务规则处理。
+    func canHandleChatIntent(_ text: String) -> Bool
+    /// 按工作台业务规则处理首页对话意图，并通过 `onProgress` 实时上报执行步骤。
+    func handleChatIntent(
+        _ text: String,
+        onProgress: @escaping @MainActor (ChatActivityItem) -> Void
+    ) async -> ChatPluginExecutionResult?
+    /// 若插件识别该对话卡片附件，返回可在聊天流内直接交互操作（编辑/重生成/提交）的视图。
+    func makeInteractiveChatCard(for attachment: ChatCardAttachment) -> AnyView?
 }
 
 public extension IronBowlPlugin {
+    var sidebarTitle: String { title }
+    var sidebarSection: String? { nil }
     var isComingSoon: Bool { false }
+    var sidebarBadge: SidebarBadge? { nil }
     var isSidebarDirectory: Bool { false }
+    var isSidebarWebOpen: Bool { false }
+    var isSidebarWebSuspended: Bool { false }
     var migrations: [DatabaseMigration] { [] }
     func start(context: PluginContext) {}
     func stop() {}
     var settingsPages: [SettingsPage] { [] }
     var menuBarItems: [MenuBarItem] { [] }
-    var sidebarRecents: [SidebarRecent] { [] }
     var sidebarPinnedItems: [SidebarPinnedItem] { [] }
     var sidebarChildren: [SidebarPinnedItem] { [] }
     func onSidebarSelect() {}
+    func onSidebarCloseWeb() {}
+    func closeWebSession(id: String) -> Bool { false }
     var quickActions: [QuickAction] { [] }
     var homeCards: [HomeCard] { [] }
     func handleHomeInput(_ text: String) async -> String? { nil }
+    func canHandleChatIntent(_ text: String) -> Bool { false }
+    func handleChatIntent(
+        _ text: String,
+        onProgress: @escaping @MainActor (ChatActivityItem) -> Void
+    ) async -> ChatPluginExecutionResult? { nil }
+    func makeInteractiveChatCard(for attachment: ChatCardAttachment) -> AnyView? { nil }
+}
+
+/// 左侧栏插件条目右侧的状态角标。
+public struct SidebarBadge: Equatable {
+    public let text: String
+    public let color: Color
+
+    public init(_ text: String, color: Color) {
+        self.text = text
+        self.color = color
+    }
+}
+
+/// 侧栏中按 `sidebarSection` 归组后的插件分区。
+public struct SidebarPluginSection: Identifiable {
+    public let title: String
+    public let plugins: [IronBowlPlugin]
+    public var id: String { title }
+
+    public init(title: String, plugins: [IronBowlPlugin]) {
+        self.title = title
+        self.plugins = plugins
+    }
+}
+
+/// 将已启用插件按 `sidebarSection` 拆分为顶部未分组列表与保序分组列表。
+public enum SidebarPluginGrouping {
+    public static func partition(_ plugins: [IronBowlPlugin]) -> (ungrouped: [IronBowlPlugin], sections: [SidebarPluginSection]) {
+        var ungrouped: [IronBowlPlugin] = []
+        var sectionOrder: [String] = []
+        var grouped: [String: [IronBowlPlugin]] = [:]
+
+        for plugin in plugins {
+            let raw = plugin.sidebarSection?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let section = raw, !section.isEmpty else {
+                ungrouped.append(plugin)
+                continue
+            }
+            if grouped[section] == nil {
+                sectionOrder.append(section)
+                grouped[section] = []
+            }
+            grouped[section]?.append(plugin)
+        }
+
+        let sections = sectionOrder.compactMap { title -> SidebarPluginSection? in
+            guard let items = grouped[title], !items.isEmpty else { return nil }
+            return SidebarPluginSection(title: title, plugins: items)
+        }
+        return (ungrouped, sections)
+    }
 }
 
 /// 设置窗口里的一页。
@@ -72,21 +156,6 @@ public struct SettingsPage: Identifiable {
     }
 }
 
-/// 侧栏「最近」里的一条。
-public struct SidebarRecent: Identifiable {
-    public let id: String
-    public let title: String
-    public let trailing: String
-    public let action: () -> Void
-
-    public init(id: String, title: String, trailing: String, action: @escaping () -> Void) {
-        self.id = id
-        self.title = title
-        self.trailing = trailing
-        self.action = action
-    }
-}
-
 /// 固定在主窗口左侧栏的条目（例如固定网页、AI 目录子项）。
 public struct SidebarPinnedItem: Identifiable {
     public let id: String
@@ -97,11 +166,13 @@ public struct SidebarPinnedItem: Identifiable {
     public let iconImage: NSImage?
     public let iconIsTemplate: Bool
     public let isSelected: Bool
+    public let isOpen: Bool
     public let isSuspended: Bool
     public let isNeverSuspend: Bool
     public let canMoveUp: Bool
     public let canMoveDown: Bool
     public let action: () -> Void
+    public let onClose: (() -> Void)?
     public let onRename: ((String) -> Void)?
     public let onEdit: (() -> Void)?
     public let onMoveUp: (() -> Void)?
@@ -121,11 +192,13 @@ public struct SidebarPinnedItem: Identifiable {
         iconImage: NSImage? = nil,
         iconIsTemplate: Bool = false,
         isSelected: Bool,
+        isOpen: Bool = false,
         isSuspended: Bool = false,
         isNeverSuspend: Bool = false,
         canMoveUp: Bool = false,
         canMoveDown: Bool = false,
         action: @escaping () -> Void,
+        onClose: (() -> Void)? = nil,
         onRename: ((String) -> Void)? = nil,
         onEdit: (() -> Void)? = nil,
         onMoveUp: (() -> Void)? = nil,
@@ -144,11 +217,13 @@ public struct SidebarPinnedItem: Identifiable {
         self.iconImage = iconImage
         self.iconIsTemplate = iconIsTemplate
         self.isSelected = isSelected
+        self.isOpen = isOpen
         self.isSuspended = isSuspended
         self.isNeverSuspend = isNeverSuspend
         self.canMoveUp = canMoveUp
         self.canMoveDown = canMoveDown
         self.action = action
+        self.onClose = onClose
         self.onRename = onRename
         self.onEdit = onEdit
         self.onMoveUp = onMoveUp
@@ -269,7 +344,7 @@ public final class ComingSoonPlugin: IronBowlPlugin {
             ContentUnavailableView(
                 "\(title) 即将推出",
                 systemImage: systemImage,
-                description: Text("先把饭碗端稳，再慢慢加菜。")
+                description: Text(AppBrand.slogan)
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DS.canvas)

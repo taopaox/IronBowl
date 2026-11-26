@@ -3,29 +3,58 @@ import SwiftUI
 
 /// 主窗口：左边浅灰侧栏，右边白色内容区（WorkBuddy 风格）。
 struct MainView: View {
+    static let sidebarAnimation: Animation = .spring(duration: 0.26, bounce: 0)
+
     @Bindable var app: AppModel
-    @AppStorage("sidebarCollapsed") private var collapsed = false
+    @AppStorage("sidebarCollapsed") private var storedCollapsed = false
+    @State private var collapsed = UserDefaults.standard.bool(forKey: "sidebarCollapsed")
+
+    private func setSidebarCollapsed(_ next: Bool) {
+        guard collapsed != next else { return }
+        withAnimation(Self.sidebarAnimation) {
+            collapsed = next
+        }
+        storedCollapsed = next
+    }
 
     var body: some View {
-        HStack(spacing: 0) {
-            if !collapsed {
-                Sidebar(app: app, collapsed: $collapsed)
-                    .frame(width: DS.s(216))
-                    .transition(.move(edge: .leading))
-                Rectangle().fill(DS.border).frame(width: 1)
-            }
-            ZStack(alignment: .topLeading) {
+        let sidebarWidth = DS.s(216)
+        let totalSidebarWidth = sidebarWidth + 1
+
+        ZStack(alignment: .topLeading) {
+            HStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    Sidebar(app: app, isVisible: !collapsed)
+                        .frame(width: sidebarWidth)
+                    Rectangle().fill(DS.border).frame(width: 1)
+                }
+                .frame(width: totalSidebarWidth)
+                .frame(width: collapsed ? 0 : totalSidebarWidth, alignment: .trailing)
+                .clipped()
+                .allowsHitTesting(!collapsed)
+                .accessibilityHidden(collapsed)
+
                 detail
                     .environment(\.sidebarCollapsed, collapsed)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(DS.canvas)
-                if collapsed {
-                    Button { withAnimation(.snappy) { collapsed = false } } label: { Image(systemName: "sidebar.left") }
-                        .buttonStyle(.dsGhost)
-                        .help("展开侧边栏")
-                        .padding(.leading, 82)
-                        .padding(.top, 10)
-                }
+            }
+
+            Button {
+                setSidebarCollapsed(!collapsed)
+            } label: {
+                Image(systemName: "sidebar.left")
+            }
+            .buttonStyle(.dsGhost)
+            .help(collapsed ? "展开侧边栏" : "收起侧边栏")
+            .padding(.leading, collapsed ? 82 : sidebarWidth - DS.s(32) - 10)
+            .padding(.top, collapsed ? 10 : 6)
+        }
+        .animation(Self.sidebarAnimation, value: collapsed)
+        .onChange(of: storedCollapsed) { _, newValue in
+            guard collapsed != newValue else { return }
+            withAnimation(Self.sidebarAnimation) {
+                collapsed = newValue
             }
         }
         .ignoresSafeArea()
@@ -40,6 +69,8 @@ struct MainView: View {
     private var detail: some View {
         if app.selection == AppModel.homeID {
             HomeView(app: app)
+        } else if app.selection == AppModel.remindersID {
+            RemindersView(app: app)
         } else if let plugin = app.plugin(app.selection), app.enabledIDs.contains(plugin.id) {
             plugin.makeMainView().id(plugin.id)
         } else {
@@ -50,7 +81,7 @@ struct MainView: View {
 
 struct Sidebar: View {
     let app: AppModel
-    @Binding var collapsed: Bool
+    let isVisible: Bool
     @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarCollapsedDirs") private var collapsedDirsRaw = ""
     @State private var renamingItem: SidebarPinnedItem?
@@ -72,79 +103,54 @@ struct Sidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 顶部：给红绿灯留位置，右边是收起按钮
-            HStack {
-                Spacer()
-                Button { withAnimation(.snappy) { collapsed = true } } label: { Image(systemName: "sidebar.left") }
-                    .buttonStyle(.dsGhost)
-                    .help("收起侧边栏")
-            }
-            .frame(height: 40)
-            .padding(.horizontal, 10)
-            .windowTitleBar()
+            // 顶部：给红绿灯与展开/收起按钮留位置
+            Color.clear
+                .frame(height: 40)
+                .windowTitleBar()
 
-            HStack(spacing: 6) {
-                Text("饭碗").font(DS.font(16, .semibold))
-                Text(Bundle.main.displayVersion)
-                    .font(DS.font(11, .medium))
-                    .monospacedDigit()
-                    .foregroundStyle(DS.textTertiary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(DS.well, in: .capsule)
-                    .help("当前版本 \(Bundle.main.fullVersion)")
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Text(AppBrand.name).font(DS.font(17, .semibold))
+                    Text(Bundle.main.displayVersion)
+                        .font(DS.font(11, .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(DS.textTertiary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(DS.well, in: .capsule)
+                        .help("当前版本 \(Bundle.main.fullVersion)")
+                }
+
+                DSSloganView(style: .sidebar)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
+            .padding(.horizontal, 18)
+            .padding(.bottom, 14)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
+                    let partitioned = SidebarPluginGrouping.partition(app.enabledPlugins)
+                    let unreadCount = app.reminders.unreadCount
+
                     DSSidebarItem("今天", systemImage: "house", selected: app.selection == AppModel.homeID) {
                         app.select(AppModel.homeID)
                     }
-                    ForEach(app.enabledPlugins, id: \.id) { plugin in
-                        let children = plugin.sidebarChildren
-                        let hasSelectedChild = app.selection == plugin.id && (
-                            plugin.sidebarPinnedItems.contains(where: \.isSelected) ||
-                            children.contains(where: \.isSelected)
-                        )
-                        if plugin.isSidebarDirectory {
-                            SidebarDirectoryHeader(
-                                title: plugin.title,
-                                systemImage: plugin.systemImage,
-                                selected: app.selection == plugin.id && !hasSelectedChild,
-                                isCollapsed: isDirCollapsed(plugin.id),
-                                hasChildren: !children.isEmpty,
-                                onSelect: {
-                                    plugin.onSidebarSelect()
-                                    app.select(plugin.id)
-                                },
-                                onToggleCollapse: {
-                                    withAnimation(.snappy(duration: 0.18)) {
-                                        toggleDir(plugin.id)
-                                    }
-                                }
-                            )
-                            if !isDirCollapsed(plugin.id), !children.isEmpty {
-                                ForEach(children) { item in
-                                    PinnedSidebarRow(
-                                        item: item,
-                                        selected: app.selection == item.pluginID && item.isSelected,
-                                        indent: 14,
-                                        onStartRename: {
-                                            renameText = item.title
-                                            renamingItem = item
-                                        }
-                                    )
-                                }
-                            }
-                        } else {
-                            DSSidebarItem(plugin.title, systemImage: plugin.systemImage,
-                                          selected: app.selection == plugin.id && !hasSelectedChild,
-                                          badge: plugin.isComingSoon ? "即将推出" : nil) {
-                                plugin.onSidebarSelect()
-                                app.select(plugin.id)
-                            }
+                    DSSidebarItem(
+                        "消息提醒",
+                        systemImage: unreadCount > 0 ? "bell.badge" : "bell",
+                        selected: app.selection == AppModel.remindersID,
+                        badge: unreadCount > 0 ? (unreadCount > 99 ? "99+" : "\(unreadCount)") : nil,
+                        badgeColor: unreadCount > 0 ? DS.danger : nil
+                    ) {
+                        app.select(AppModel.remindersID)
+                    }
+                    ForEach(partitioned.ungrouped, id: \.id) { plugin in
+                        pluginRow(plugin)
+                    }
+
+                    ForEach(partitioned.sections) { section in
+                        DSSidebarSection(section.title)
+                        ForEach(section.plugins, id: \.id) { plugin in
+                            pluginRow(plugin)
                         }
                     }
 
@@ -162,25 +168,21 @@ struct Sidebar: View {
                             )
                         }
                     }
-
-                    let recents = app.enabledPlugins.flatMap(\.sidebarRecents)
-                    if !recents.isEmpty {
-                        DSSidebarSection("最近日志")
-                        ForEach(recents) { item in
-                            RecentRow(item: item)
-                        }
-                    }
                 }
                 .padding(.horizontal, 10)
             }
             .scrollIndicators(.never)
 
             Spacer(minLength: 0)
-            ResourceCard(app: app).padding(.horizontal, 10).padding(.bottom, 8)
+            ResourceCard(app: app, isVisible: isVisible).padding(.horizontal, 10).padding(.bottom, 8)
             TodayCard(app: app).padding(.horizontal, 10).padding(.bottom, 8)
 
-            HStack(spacing: 2) {
-                Text("🍚").font(DS.font(16))
+            HStack(spacing: 6) {
+                Image("AppLogo")
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: DS.s(18), height: DS.s(18))
                 Text(NSFullUserName().isEmpty ? "我" : NSFullUserName()).font(DS.font(13.5))
                     .lineLimit(1)
                 Spacer()
@@ -218,6 +220,138 @@ struct Sidebar: View {
             .padding(18)
             .frame(width: DS.s(320))
             .background(DS.card)
+        }
+    }
+
+    @ViewBuilder
+    private func pluginRow(_ plugin: IronBowlPlugin) -> some View {
+        let children = plugin.sidebarChildren
+        let hasSelectedChild = app.selection == plugin.id && (
+            plugin.sidebarPinnedItems.contains(where: \.isSelected) ||
+            children.contains(where: \.isSelected)
+        )
+        if plugin.isSidebarDirectory {
+            SidebarDirectoryHeader(
+                title: plugin.sidebarTitle,
+                systemImage: plugin.systemImage,
+                selected: app.selection == plugin.id && !hasSelectedChild,
+                isCollapsed: isDirCollapsed(plugin.id),
+                hasChildren: !children.isEmpty,
+                onSelect: {
+                    plugin.onSidebarSelect()
+                    app.select(plugin.id)
+                },
+                onToggleCollapse: {
+                    withAnimation(.snappy(duration: 0.18)) {
+                        toggleDir(plugin.id)
+                    }
+                }
+            )
+            if !isDirCollapsed(plugin.id), !children.isEmpty {
+                ForEach(children) { item in
+                    PinnedSidebarRow(
+                        item: item,
+                        selected: app.selection == item.pluginID && item.isSelected,
+                        indent: 14,
+                        onStartRename: {
+                            renameText = item.title
+                            renamingItem = item
+                        }
+                    )
+                }
+            }
+        } else if plugin.isSidebarWebOpen {
+            SidebarWebPluginRow(
+                plugin: plugin,
+                selected: app.selection == plugin.id && !hasSelectedChild,
+                onSelect: {
+                    plugin.onSidebarSelect()
+                    app.select(plugin.id)
+                }
+            )
+        } else {
+            let badge = plugin.sidebarBadge
+            DSSidebarItem(
+                plugin.sidebarTitle,
+                systemImage: plugin.systemImage,
+                selected: app.selection == plugin.id && !hasSelectedChild,
+                badge: plugin.isComingSoon ? "即将推出" : badge?.text,
+                badgeColor: plugin.isComingSoon ? nil : badge?.color
+            ) {
+                plugin.onSidebarSelect()
+                app.select(plugin.id)
+            }
+        }
+    }
+}
+
+private struct SidebarWebPluginRow: View {
+    let plugin: IronBowlPlugin
+    let selected: Bool
+    let onSelect: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let badge = plugin.sidebarBadge
+        HStack(spacing: 4) {
+            Button(action: onSelect) {
+                HStack(spacing: 9) {
+                    Image(systemName: plugin.systemImage)
+                        .font(DS.font(15))
+                        .frame(width: DS.s(18))
+                    Text(plugin.sidebarTitle)
+                        .font(DS.font(14.5))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if let badge {
+                        Text(badge.text)
+                            .font(DS.font(10.5, .semibold))
+                            .foregroundStyle(badge.color)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(badge.color.opacity(0.14), in: .capsule)
+                            .overlay { Capsule().strokeBorder(badge.color.opacity(0.32)) }
+                    }
+                }
+                .foregroundStyle(DS.text)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+
+            if hovering {
+                Button {
+                    plugin.onSidebarCloseWeb()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(DS.font(11, .medium))
+                        .foregroundStyle(DS.textSecondary)
+                        .frame(width: DS.s(20), height: DS.s(20))
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help("关闭网页")
+            } else if badge == nil {
+                if plugin.isSidebarWebSuspended {
+                    Image(systemName: "moon.zzz")
+                        .font(DS.font(11))
+                        .foregroundStyle(DS.textTertiary)
+                        .padding(.trailing, 3)
+                } else {
+                    Circle()
+                        .fill(DS.success)
+                        .frame(width: 6, height: 6)
+                        .padding(.trailing, 5)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: DS.s(30))
+        .background(selected ? DS.selected : hovering ? DS.hover : .clear, in: .rect(cornerRadius: DS.controlRadius))
+        .contentShape(.rect)
+        .onHover { hovering = $0 }
+        .contextMenu {
+            Button("打开\(plugin.sidebarTitle)", action: onSelect)
+            Button("关闭网页") { plugin.onSidebarCloseWeb() }
         }
     }
 }
@@ -314,23 +448,42 @@ private struct PinnedSidebarRow: View {
             .buttonStyle(.plain)
 
             if hovering {
-                Menu {
-                    menuContent()
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(DS.font(12))
-                        .foregroundStyle(DS.textSecondary)
-                        .frame(width: DS.s(22), height: DS.s(22))
-                        .contentShape(.rect)
+                HStack(spacing: 2) {
+                    Menu {
+                        menuContent()
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(DS.font(12))
+                            .foregroundStyle(DS.textSecondary)
+                            .frame(width: DS.s(22), height: DS.s(22))
+                            .contentShape(.rect)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+
+                    if item.isOpen, let onClose = item.onClose {
+                        Button(action: onClose) {
+                            Image(systemName: "xmark")
+                                .font(DS.font(11, .medium))
+                                .foregroundStyle(DS.textSecondary)
+                                .frame(width: DS.s(20), height: DS.s(20))
+                                .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .help("关闭网页")
+                    }
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
             } else if item.isSuspended {
                 Image(systemName: "moon.zzz")
                     .font(DS.font(11))
                     .foregroundStyle(DS.textTertiary)
                     .padding(.trailing, 3)
+            } else if item.isOpen {
+                Circle()
+                    .fill(DS.success)
+                    .frame(width: 6, height: 6)
+                    .padding(.trailing, 5)
             }
         }
         .padding(.leading, 10 + indent)
@@ -357,14 +510,17 @@ private struct PinnedSidebarRow: View {
         if let onMoveDown = item.onMoveDown {
             Button("下移") { onMoveDown() }.disabled(!item.canMoveDown)
         }
-        if item.onSuspendNow != nil || item.onToggleNeverSuspend != nil {
+        if item.onSuspendNow != nil || item.onToggleNeverSuspend != nil || (item.isOpen && item.onClose != nil) {
             Divider()
         }
         if let onSuspendNow = item.onSuspendNow {
-            Button("立即休眠") { onSuspendNow() }.disabled(item.isSuspended)
+            Button("立即休眠") { onSuspendNow() }.disabled(item.isSuspended || !item.isOpen)
         }
         if let onToggleNeverSuspend = item.onToggleNeverSuspend {
             Button(item.isNeverSuspend ? "取消免休眠" : "设为免休眠") { onToggleNeverSuspend() }
+        }
+        if item.isOpen, let onClose = item.onClose {
+            Button("关闭网页") { onClose() }
         }
         if let onOpenInBrowser = item.onOpenInBrowser {
             Divider()
@@ -382,31 +538,10 @@ private struct PinnedSidebarRow: View {
     }
 }
 
-private struct RecentRow: View {
-    let item: SidebarRecent
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: item.action) {
-            HStack {
-                Text(item.title).font(DS.font(13.5)).lineLimit(1)
-                Spacer(minLength: 6)
-                Text(item.trailing).font(DS.font(12)).foregroundStyle(DS.textTertiary)
-            }
-            .foregroundStyle(DS.text)
-            .padding(.horizontal, 10)
-            .frame(height: 26)
-            .background(hovering ? DS.hover : .clear, in: .rect(cornerRadius: DS.controlRadius))
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-    }
-}
-
 /// 侧栏底部的小卡：实时 CPU 与内存占用（支持系统 / 饭碗切换及明细查看）。
 private struct ResourceCard: View {
     let app: AppModel
+    let isVisible: Bool
     @AppStorage("sidebarResourceScope") private var scopeRaw = ResourceScope.system.rawValue
     @State private var showDetail = false
 
@@ -521,10 +656,16 @@ private struct ResourceCard: View {
                 showDetail = false
             }
         }
+        .onChange(of: isVisible) { _, visible in
+            if !visible {
+                showDetail = false
+            }
+        }
         .popover(isPresented: $showDetail, arrowEdge: .trailing) {
             ResourceDetailPopover(app: app, isPresented: $showDetail)
         }
-        .task {
+        .task(id: isVisible) {
+            guard isVisible else { return }
             await app.systemMonitor.run()
         }
     }
@@ -641,7 +782,16 @@ private struct ResourceDetailPopover: View {
                                         try? await Task.sleep(for: .milliseconds(300))
                                         app.systemMonitor.sampleNow()
                                     }
-                                }
+                                },
+                                onClose: item.kind == .webPage && !item.sessionIDs.isEmpty ? {
+                                    for sid in item.sessionIDs {
+                                        app.closeWebSession(id: sid)
+                                    }
+                                    Task {
+                                        try? await Task.sleep(for: .milliseconds(300))
+                                        app.systemMonitor.sampleNow()
+                                    }
+                                } : nil
                             )
                             if index < items.count - 1 {
                                 Divider().overlay(DS.border).padding(.horizontal, 14)
@@ -709,6 +859,7 @@ private struct ResourceDetailRow: View {
     let totalAppMemory: UInt64
     let sortMode: ResourceDetailPopover.SortMode
     let onSuspend: () -> Void
+    let onClose: (() -> Void)?
 
     var body: some View {
         let memoryShare = totalAppMemory > 0 ? min(1, max(0, Double(item.memoryBytes) / Double(totalAppMemory))) : 0
@@ -768,13 +919,25 @@ private struct ResourceDetailRow: View {
                     .foregroundStyle(DS.textSecondary)
             }
 
-            if item.canSuspend {
-                Button(action: onSuspend) {
-                    Image(systemName: "moon.zzz")
-                        .font(DS.font(12))
+            if item.canSuspend || onClose != nil {
+                HStack(spacing: 2) {
+                    if item.canSuspend {
+                        Button(action: onSuspend) {
+                            Image(systemName: "moon.zzz")
+                                .font(DS.font(12))
+                        }
+                        .buttonStyle(.dsGhost)
+                        .help("立即休眠释放内存")
+                    }
+                    if let onClose {
+                        Button(action: onClose) {
+                            Image(systemName: "xmark")
+                                .font(DS.font(12))
+                        }
+                        .buttonStyle(.dsGhost)
+                        .help("关闭网页")
+                    }
                 }
-                .buttonStyle(.dsGhost)
-                .help("立即休眠释放内存")
             }
         }
         .padding(.horizontal, 14)
@@ -832,7 +995,7 @@ private struct ResourceMeterRow: View {
     }
 }
 
-/// 侧栏底部的小卡：今日工时 + 下班倒计时。
+/// 侧栏底部的小卡：今日上班时间、下班时间与下班倒计时。
 private struct TodayCard: View {
     let app: AppModel
 
@@ -843,56 +1006,88 @@ private struct TodayCard: View {
         let info = cal.dayInfo(now)
         let ot = cal.overtimeHours(on: now)
         let end = cal.effectiveWorkEnd(on: now)
-        VStack(alignment: .leading, spacing: 4) {
+        let hasClockIn = cal.clockIn(on: now) != nil
+
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
                 if info.isWorkday {
-                    Text(ot > 0 ? "加班 +\(WorkCalendar.hoursText(ot))h" : "今天上班")
-                        .font(DS.font(12.5))
-                        .foregroundStyle(ot > 0 ? .purple : DS.textSecondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    if let endText = cal.offWorkTimeText(on: now) {
-                        Text("\(endText) 下班")
-                            .font(DS.font(11.5).monospacedDigit())
-                            .foregroundStyle(ot > 0 ? .purple : DS.textTertiary)
-                            .lineLimit(1)
-                    }
-                } else {
-                    Text(info.name ?? "今天休息")
-                        .font(DS.font(12.5))
+                    Text("今天上班")
+                        .font(DS.font(12))
                         .foregroundStyle(DS.textSecondary)
                         .lineLimit(1)
                     Spacer(minLength: 4)
                     if ot > 0 {
                         Text("加班 +\(WorkCalendar.hoursText(ot))h")
-                            .font(DS.font(11.5).monospacedDigit())
+                            .font(DS.font(11.5, .medium).monospacedDigit())
+                            .foregroundStyle(.purple)
+                            .lineLimit(1)
+                    } else if hasClockIn {
+                        Text("已打卡")
+                            .font(DS.font(11))
+                            .foregroundStyle(DS.success)
+                            .lineLimit(1)
+                    }
+                } else {
+                    Text(info.name ?? "今天休息")
+                        .font(DS.font(12))
+                        .foregroundStyle(DS.textSecondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if ot > 0 {
+                        Text("加班 +\(WorkCalendar.hoursText(ot))h")
+                            .font(DS.font(11.5, .medium).monospacedDigit())
                             .foregroundStyle(.purple)
                             .lineLimit(1)
                     }
                 }
             }
-            if info.isWorkday, let end, end > now {
-                Text("距下班 \(countdown(to: end, from: now))").font(DS.font(15, .semibold)).monospacedDigit()
-                ProgressView(value: workProgress(end: end, now: now))
-                    .progressViewStyle(.linear)
-                    .tint(ot > 0 ? .purple : DS.brand)
-            } else if !info.isWorkday && ot > 0 {
+
+            if info.isWorkday {
+                if let end, end > now {
+                    Text("距下班 \(remainingTimeText(to: end, from: now))")
+                        .font(DS.font(15, .semibold))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    let progress = cal.workProgress(on: now) ?? 0
+                    GeometryReader { geo in
+                        let width = progress > 0 ? max(4, geo.size.width * progress) : 0
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(DS.well)
+                            if width > 0 {
+                                Capsule().fill(ot > 0 ? .purple : DS.brand).frame(width: width)
+                            }
+                        }
+                    }
+                    .frame(height: 4)
+                } else {
+                    Text("已下班，辛苦了")
+                        .font(DS.font(15, .semibold))
+                }
+
+                HStack(spacing: 4) {
+                    Text("上班 \(cal.onWorkTimeText(on: now))")
+                        .font(DS.font(11.5).monospacedDigit())
+                        .foregroundStyle(DS.textSecondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if let endText = cal.offWorkTimeText(on: now) {
+                        Text("下班 \(endText)")
+                            .font(DS.font(11.5).monospacedDigit())
+                            .foregroundStyle(ot > 0 ? .purple : DS.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+            } else if ot > 0 {
                 Text("辛苦加班").font(DS.font(15, .semibold))
             } else {
-                Text(info.isWorkday ? "已下班，辛苦了" : "好好休息").font(DS.font(15, .semibold))
+                Text("好好休息").font(DS.font(15, .semibold))
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DS.card, in: .rect(cornerRadius: 10))
         .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(DS.border) }
-    }
-
-    func workProgress(end: Date, now: Date) -> Double {
-        let start = app.workCalendar.workStart(on: now)
-            ?? end.addingTimeInterval(-(app.workCalendar.defaultWorkHours * 3600 + Double(app.settings[WorkCalendar.lunchMinutesKey]) * 60))
-        let total = end.timeIntervalSince(start)
-        guard total > 0 else { return 0 }
-        return min(1, max(0, now.timeIntervalSince(start) / total))
+        .help(info.isWorkday ? cal.scheduleText(on: now) : (info.name ?? "今天休息"))
     }
 }

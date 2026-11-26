@@ -187,14 +187,34 @@ public struct CalendarPopover: View {
             appAppearance: model.appAppearance,
             systemColorScheme: effectiveSystemColorScheme
         )
-        HStack(spacing: 0) {
-            PopoverMonthPane(model: model, palette: palette, activeMenu: $activeMenu, onQuit: onQuit)
-                .frame(width: DS.s(388))
-            if let divider = palette.sidebarDivider {
-                Rectangle().fill(divider).frame(width: 1)
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                PopoverMonthPane(model: model, palette: palette, activeMenu: $activeMenu, onQuit: onQuit)
+                    .frame(width: DS.s(388))
+                if let divider = palette.sidebarDivider {
+                    Rectangle().fill(divider).frame(width: 1)
+                }
+                PopoverSidePanel(model: model, palette: palette, activeMenu: $activeMenu)
+                    .frame(width: DS.s(152))
             }
-            PopoverSidePanel(model: model, palette: palette, activeMenu: $activeMenu)
-                .frame(width: DS.s(152))
+
+            Rectangle()
+                .fill(palette.gridBorder)
+                .frame(height: 1)
+
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(DS.brand)
+                    .frame(width: 6, height: 6)
+                Text(AppBrand.slogan)
+                    .font(DS.font(11.5, .semibold))
+                    .foregroundStyle(palette.dayText.opacity(0.88))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: DS.s(26))
+            .background(palette.gridBackground)
         }
         .background(palette.gridBackground)
         .overlay {
@@ -224,7 +244,7 @@ public struct CalendarPopover: View {
                 PopoverStyleDropdown(model: model, palette: palette) {
                     activeMenu = nil
                 }
-                .padding(.bottom, DS.s(38))
+                .padding(.bottom, DS.s(64))
                 .padding(.trailing, 10)
             }
         }

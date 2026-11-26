@@ -323,11 +323,15 @@ public final class ComingSoonPlugin: IronBowlPlugin {
 
     public func makeMainView() -> AnyView {
         AnyView(
-            ContentUnavailableView(
-                "\(title) 即将推出",
-                systemImage: systemImage,
-                description: Text("先把饭碗端稳，再慢慢加菜。")
-            )
+            VStack(spacing: 16) {
+                ContentUnavailableView(
+                    "\(title) 即将推出",
+                    systemImage: systemImage,
+                    description: Text(AppBrand.slogan)
+                )
+                .fixedSize(horizontal: false, vertical: true)
+                DSSloganView(style: .hero)
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DS.canvas)
             .overlay(alignment: .top) { WindowTitleBarArea(height: 52) }

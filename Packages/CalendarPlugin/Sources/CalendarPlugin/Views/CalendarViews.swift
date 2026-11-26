@@ -15,14 +15,17 @@ public struct CalendarMainView: View {
     public var body: some View {
         VStack(spacing: 0) {
             DSPageHeader("万年历", topPadding: 8) {
-                if let versionText, !versionText.isEmpty {
-                    Text(versionText)
-                        .font(DS.font(11.5, .medium))
-                        .monospacedDigit()
-                        .foregroundStyle(DS.textTertiary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(DS.well, in: .capsule)
+                HStack(spacing: 10) {
+                    if let versionText, !versionText.isEmpty {
+                        Text(versionText)
+                            .font(DS.font(11.5, .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(DS.textTertiary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(DS.well, in: .capsule)
+                    }
+                    DSSloganView(style: .inline)
                 }
             } actions: {
                 if let w = model.weatherShort {

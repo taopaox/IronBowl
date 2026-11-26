@@ -17,6 +17,13 @@ struct IronBowlApp: App {
         .defaultSize(width: 1120, height: 760)
         .defaultLaunchBehavior(.suppressed)
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("关于饭碗") {
+                    NSApp.orderFrontStandardAboutPanel(options: [
+                        .credits: AppBrand.aboutCredits(),
+                    ])
+                }
+            }
             CommandGroup(replacing: .appSettings) {
                 SettingsCommand(app: app)
             }

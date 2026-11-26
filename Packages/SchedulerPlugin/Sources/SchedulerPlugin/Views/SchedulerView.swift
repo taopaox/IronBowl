@@ -65,6 +65,10 @@ struct SchedulerView: View {
                     } else {
                         runsContent
                     }
+
+                    DSSloganView(style: .inline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 4)
                 }
                 .padding(28)
                 .frame(maxWidth: .infinity, alignment: .leading)

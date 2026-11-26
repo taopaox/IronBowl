@@ -421,8 +421,25 @@ public struct JournalSpreadShell<HeaderActions: View, LeftPage: View, RightPage:
                     .scrollIndicators(.never)
                 }
             }
+
+            journalSloganFooter(palette: p)
+                .padding(.bottom, 10)
         }
         .background(p.desk)
+    }
+
+    private func journalSloganFooter(palette p: JournalPalette) -> some View {
+        HStack(spacing: 7) {
+            Text("🍚")
+                .font(DS.font(12.5))
+            Text(AppBrand.slogan)
+                .font(JournalPalette.serif(12.5, .semibold))
+                .foregroundStyle(p.ink)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+        .background(p.paperCard.opacity(0.88), in: .capsule)
+        .overlay { Capsule().strokeBorder(p.stampAmber.opacity(0.45)) }
     }
 
     private func topBar(palette p: JournalPalette) -> some View {

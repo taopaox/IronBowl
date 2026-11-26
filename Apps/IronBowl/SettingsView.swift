@@ -65,15 +65,19 @@ struct SettingsView: View {
                 }
                 .scrollIndicators(.never)
 
-                Text("饭碗 \(Bundle.main.displayVersion)")
-                    .font(DS.font(11.5))
-                    .monospacedDigit()
-                    .foregroundStyle(DS.textTertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
-                    .help("当前版本 \(Bundle.main.fullVersion)")
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("饭碗 \(Bundle.main.displayVersion)")
+                        .font(DS.font(11.5))
+                        .monospacedDigit()
+                        .foregroundStyle(DS.textTertiary)
+                        .help("当前版本 \(Bundle.main.fullVersion)")
+
+                    DSSloganView(style: .sidebar)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
             }
             .frame(width: 220)
             .background(DS.sidebar)
@@ -131,6 +135,36 @@ struct GeneralSettings: View {
             }
         }
         DSSection("关于") {
+            DSBlockRow {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Text("🍚")
+                            .font(DS.font(20))
+                            .frame(width: DS.s(36), height: DS.s(36))
+                            .background(DS.well, in: .rect(cornerRadius: 9))
+                            .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(DS.border) }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text("\(AppBrand.name) \(AppBrand.englishName)")
+                                    .font(DS.font(15, .semibold))
+                                Text(Bundle.main.displayVersion)
+                                    .font(DS.font(11, .medium))
+                                    .monospacedDigit()
+                                    .foregroundStyle(DS.textTertiary)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 1.5)
+                                    .background(DS.well, in: .capsule)
+                            }
+                            Text("macOS 本地效率工作台")
+                                .font(DS.caption)
+                                .foregroundStyle(DS.textSecondary)
+                        }
+                    }
+
+                    DSSloganView(style: .hero)
+                }
+            }
             DSRow("当前版本", description: "饭碗工作台 · \(Bundle.main.fullVersion)") {
                 Button(copiedVersion ? "已复制" : "复制版本信息") {
                     NSPasteboard.general.clearContents()

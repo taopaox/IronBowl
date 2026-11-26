@@ -52,6 +52,7 @@ struct AIWebMainView: View {
                 Text("\(model.pinnedApps.count) 个已固定 · 共 \(model.apps.count) 个")
                     .font(DS.caption)
                     .foregroundStyle(DS.textSecondary)
+                DSSloganView(style: .inline)
                 Spacer()
                 Button("添加 AI") {
                     model.beginCreating()

@@ -576,3 +576,94 @@ public extension EnvironmentValues {
     /// 主窗口侧边栏是否处于收起状态（收起时内容区左上角要给展开按钮让位置）。
     @Entry var sidebarCollapsed = false
 }
+
+// MARK: - 品牌标语
+
+public enum DSSloganStyle: Sendable {
+    case hero
+    case sidebar
+    case banner
+    case inline
+}
+
+/// 饭碗全局品牌标语展示组件。
+public struct DSSloganView: View {
+    let text: String
+    let style: DSSloganStyle
+
+    public init(_ text: String = AppBrand.slogan, style: DSSloganStyle = .inline) {
+        self.text = text
+        self.style = style
+    }
+
+    public var body: some View {
+        switch style {
+        case .hero:
+            HStack(spacing: 8) {
+                Text("🍚")
+                    .font(DS.font(15))
+                Text(text)
+                    .font(DS.font(15, .semibold))
+                    .tracking(0.3)
+                    .foregroundStyle(DS.text)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(DS.brand.opacity(0.14), in: .capsule)
+            .overlay { Capsule().strokeBorder(DS.brand.opacity(0.38)) }
+
+        case .sidebar:
+            Text(text)
+                .font(DS.font(12, .semibold))
+                .foregroundStyle(DS.text)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 11)
+                .padding(.trailing, 9)
+                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(DS.brand.opacity(0.11), in: .rect(cornerRadius: 8))
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(DS.brand)
+                        .frame(width: 3.5)
+                }
+                .clipShape(.rect(cornerRadius: 8))
+                .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(DS.brand.opacity(0.30)) }
+
+        case .banner:
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(DS.brand)
+                    .frame(width: 6, height: 6)
+                Text(text)
+                    .font(DS.font(12, .semibold))
+                    .foregroundStyle(DS.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(DS.brand.opacity(0.12), in: .rect(cornerRadius: 8))
+            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(DS.brand.opacity(0.32)) }
+
+        case .inline:
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(DS.brand)
+                    .frame(width: 5.5, height: 5.5)
+                Text(text)
+                    .font(DS.font(12, .semibold))
+                    .foregroundStyle(DS.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(DS.brand.opacity(0.12), in: .capsule)
+            .overlay { Capsule().strokeBorder(DS.brand.opacity(0.32)) }
+        }
+    }
+}

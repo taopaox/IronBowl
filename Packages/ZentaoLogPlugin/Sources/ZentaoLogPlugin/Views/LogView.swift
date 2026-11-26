@@ -102,6 +102,7 @@ struct LogView: View {
                 Text("先连上禅道，开启每日手账")
                     .font(JournalPalette.serif(20, .bold))
                     .foregroundStyle(p.ink)
+                DSSloganView(style: .inline)
                 Text("填写禅道地址、账号和密码后，就能从 Git 提交自动生成草稿并盖章写入工时。")
                     .font(DS.body)
                     .foregroundStyle(p.inkSecondary)

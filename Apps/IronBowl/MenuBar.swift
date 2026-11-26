@@ -38,6 +38,8 @@ struct MenuPanel: View {
         VStack(alignment: .leading, spacing: 12) {
             header(now: now)
 
+            DSSloganView(style: .banner)
+
             MenuWorkHeroCard(app: app, now: now) {
                 runAndDismiss { app.open(plugin: AppModel.homeID) }
             }

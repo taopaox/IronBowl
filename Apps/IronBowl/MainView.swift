@@ -83,9 +83,9 @@ struct Sidebar: View {
             .padding(.horizontal, 10)
             .windowTitleBar()
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
-                    Text(AppBrand.name).font(DS.font(16, .semibold))
+                    Text(AppBrand.name).font(DS.font(17, .semibold))
                     Text(Bundle.main.displayVersion)
                         .font(DS.font(11, .medium))
                         .monospacedDigit()
@@ -95,12 +95,11 @@ struct Sidebar: View {
                         .background(DS.well, in: .capsule)
                         .help("当前版本 \(Bundle.main.fullVersion)")
                 }
-                .padding(.horizontal, 6)
 
                 DSSloganView(style: .sidebar)
             }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 10)
+            .padding(.horizontal, 18)
+            .padding(.bottom, 14)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {

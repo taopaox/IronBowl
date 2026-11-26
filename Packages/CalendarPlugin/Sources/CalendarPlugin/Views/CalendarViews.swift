@@ -6,6 +6,7 @@ import SwiftUI
 public struct CalendarMainView: View {
     let model: CalendarModel
     let versionText: String?
+    @Environment(\.sidebarCollapsed) private var sidebarCollapsed
 
     public init(model: CalendarModel, versionText: String? = nil) {
         self.model = model
@@ -25,7 +26,12 @@ public struct CalendarMainView: View {
                             .padding(.vertical, 2)
                             .background(DS.well, in: .capsule)
                     }
-                    DSSloganView(style: .inline)
+                    if versionText != nil || sidebarCollapsed {
+                        Text("·")
+                            .font(DS.font(12))
+                            .foregroundStyle(DS.textTertiary)
+                        DSSloganView(style: .inline)
+                    }
                 }
             } actions: {
                 if let w = model.weatherShort {

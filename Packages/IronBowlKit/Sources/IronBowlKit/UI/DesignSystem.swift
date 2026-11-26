@@ -55,6 +55,10 @@ public enum DS {
         .system(size: size * fontScale, design: .monospaced)
     }
 
+    public static func serif(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .system(size: size * fontScale, weight: weight, design: .serif)
+    }
+
     /// 跟着字号一起缩放的尺寸（控件高度等）。
     public static func s(_ v: CGFloat) -> CGFloat { (v * fontScale).rounded() }
 
@@ -586,7 +590,7 @@ public enum DSSloganStyle: Sendable {
     case inline
 }
 
-/// 饭碗全局品牌标语展示组件。
+/// 饭碗全局品牌标语展示组件：无框衬线排版配合纤细暖琥珀竖线/细线点缀。
 public struct DSSloganView: View {
     let text: String
     let style: DSSloganStyle
@@ -596,74 +600,65 @@ public struct DSSloganView: View {
         self.style = style
     }
 
+    private var sidebarText: String {
+        text == AppBrand.slogan ? AppBrand.twoLineSlogan : text
+    }
+
     public var body: some View {
         switch style {
         case .hero:
-            HStack(spacing: 8) {
-                Text("🍚")
-                    .font(DS.font(15))
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(DS.brand.opacity(0.55))
+                    .frame(width: 18, height: 1.5)
                 Text(text)
-                    .font(DS.font(15, .semibold))
-                    .tracking(0.3)
-                    .foregroundStyle(DS.text)
+                    .font(DS.serif(15.5, .medium))
+                    .tracking(1.0)
+                    .foregroundStyle(DS.text.opacity(0.84))
+                Capsule()
+                    .fill(DS.brand.opacity(0.55))
+                    .frame(width: 18, height: 1.5)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(DS.brand.opacity(0.14), in: .capsule)
-            .overlay { Capsule().strokeBorder(DS.brand.opacity(0.38)) }
 
         case .sidebar:
-            Text(text)
-                .font(DS.font(12, .semibold))
-                .foregroundStyle(DS.text)
-                .lineSpacing(2)
+            Text(sidebarText)
+                .font(DS.serif(12, .medium))
+                .tracking(0.3)
+                .foregroundStyle(DS.text.opacity(0.76))
+                .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.leading, 11)
-                .padding(.trailing, 9)
-                .padding(.vertical, 7)
+                .padding(.leading, 9)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(DS.brand.opacity(0.11), in: .rect(cornerRadius: 8))
                 .overlay(alignment: .leading) {
-                    Rectangle()
-                        .fill(DS.brand)
-                        .frame(width: 3.5)
+                    Capsule()
+                        .fill(DS.brand.opacity(0.75))
+                        .frame(width: 2)
+                        .padding(.vertical, 1.5)
                 }
-                .clipShape(.rect(cornerRadius: 8))
-                .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(DS.brand.opacity(0.30)) }
 
         case .banner:
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(DS.brand)
-                    .frame(width: 6, height: 6)
-                Text(text)
-                    .font(DS.font(12, .semibold))
-                    .foregroundStyle(DS.text)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DS.brand.opacity(0.12), in: .rect(cornerRadius: 8))
-            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(DS.brand.opacity(0.32)) }
+            Text(text)
+                .font(DS.serif(13, .medium))
+                .tracking(0.5)
+                .foregroundStyle(DS.text.opacity(0.82))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .padding(.leading, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(DS.brand.opacity(0.75))
+                        .frame(width: 2.5)
+                        .padding(.vertical, 1.5)
+                }
 
         case .inline:
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(DS.brand)
-                    .frame(width: 5.5, height: 5.5)
-                Text(text)
-                    .font(DS.font(12, .semibold))
-                    .foregroundStyle(DS.text)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(DS.brand.opacity(0.12), in: .capsule)
-            .overlay { Capsule().strokeBorder(DS.brand.opacity(0.32)) }
+            Text(text)
+                .font(DS.serif(12.5, .medium))
+                .tracking(0.4)
+                .foregroundStyle(DS.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
     }
 }

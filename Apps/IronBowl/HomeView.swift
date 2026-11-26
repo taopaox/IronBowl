@@ -324,9 +324,10 @@ struct HomeView: View {
         ScrollView {
             VStack(spacing: 18) {
                 Spacer().frame(height: 36)
-                Text(greeting).font(DS.heroTitle)
-
-                DSSloganView(style: .hero)
+                VStack(spacing: 8) {
+                    Text(greeting).font(DS.heroTitle)
+                    DSSloganView(style: .hero)
+                }
 
                 Text("已绑定目录「\(activeWorkspaceName)」· \(activePermissionMode.displayName) · 支持多轮对话与执行详情")
                     .font(DS.caption)
@@ -600,14 +601,10 @@ struct HomeView: View {
             }
 
             if activeThread != nil, !app.chat.currentMessages.isEmpty {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(DS.brand)
-                        .frame(width: 5, height: 5)
-                    Text(AppBrand.slogan)
-                        .font(DS.font(11.5, .medium))
-                        .foregroundStyle(DS.textSecondary)
-                }
+                Text(AppBrand.slogan)
+                    .font(DS.serif(11.5, .regular))
+                    .tracking(0.6)
+                    .foregroundStyle(DS.textTertiary)
             }
         }
         .frame(maxWidth: 760)

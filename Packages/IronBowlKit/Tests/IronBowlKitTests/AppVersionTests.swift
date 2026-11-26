@@ -40,5 +40,6 @@ func appBrandExposesOfficialSloganAndAboutCredits() {
     #expect(AppBrand.name == "饭碗")
     #expect(AppBrand.englishName == "IronBowl")
     #expect(AppBrand.slogan == "先把饭碗端稳，再慢慢加菜，不烧心。")
+    #expect(AppBrand.twoLineSlogan.replacingOccurrences(of: "\n", with: "") == AppBrand.slogan)
     #expect(AppBrand.aboutCredits().string.contains(AppBrand.slogan))
 }

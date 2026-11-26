@@ -202,11 +202,11 @@ struct StandaloneSettings: View {
                         .help("当前版本 \(Bundle.main.fullVersion)")
                     DSSloganView(style: .sidebar)
                 }
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 8)
                 .padding(.bottom, 4)
             }
             .padding(10)
-            .frame(width: 196)
+            .frame(width: 190)
             .background(DS.sidebar)
             Rectangle().fill(DS.border).frame(width: 1)
             ScrollView {
@@ -270,7 +270,7 @@ private struct StandaloneAboutSettings: View {
                         }
                     }
 
-                    DSSloganView(style: .hero)
+                    DSSloganView(style: .banner)
                 }
             }
             DSRow("当前版本", description: "饭碗万年历 · \(Bundle.main.fullVersion)") {

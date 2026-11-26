@@ -75,8 +75,8 @@ struct SettingsView: View {
                     DSSloganView(style: .sidebar)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
                 .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
             }
             .frame(width: 220)
@@ -162,7 +162,7 @@ struct GeneralSettings: View {
                         }
                     }
 
-                    DSSloganView(style: .hero)
+                    DSSloganView(style: .banner)
                 }
             }
             DSRow("当前版本", description: "饭碗工作台 · \(Bundle.main.fullVersion)") {

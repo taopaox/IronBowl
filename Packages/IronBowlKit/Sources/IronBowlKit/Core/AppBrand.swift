@@ -6,6 +6,7 @@ public nonisolated enum AppBrand {
     public static let name = "饭碗"
     public static let englishName = "IronBowl"
     public static let slogan = "先把饭碗端稳，再慢慢加菜，不烧心。"
+    public static let twoLineSlogan = "先把饭碗端稳，\n再慢慢加菜，不烧心。"
 
     /// 供 macOS 原生「关于」面板展示的居中品牌说明文案。
     public static func aboutCredits() -> NSAttributedString {

@@ -39,6 +39,7 @@ struct MenuPanel: View {
             header(now: now)
 
             DSSloganView(style: .banner)
+                .padding(.horizontal, 2)
 
             MenuWorkHeroCard(app: app, now: now) {
                 runAndDismiss { app.open(plugin: AppModel.homeID) }

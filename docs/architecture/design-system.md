@@ -25,7 +25,7 @@ IronBowl 的 UI 规范集中在 [`DesignSystem.swift`](../../Packages/IronBowlKi
 
 - **缩放档位**（`AppSharedKeys.fontScales`）：`[0.9, 1.0, 1.1, 1.2, 1.3, 1.4]`，对应设置页滑块「小 · 默认 · 大」。
 - **使用方式**：
-  - 文本统一通过 `DS.font(_ size: CGFloat, _ weight: Font.Weight)`、`DS.mono(_ size: CGFloat)` 或预设样式（`DS.heroTitle`、`DS.pageTitle`、`DS.sectionTitle`、`DS.rowTitle`、`DS.body`、`DS.caption`）获取字号。
+  - 文本统一通过 `DS.font(_ size: CGFloat, _ weight: Font.Weight)`、`DS.mono(_ size: CGFloat)`、`DS.serif(_ size: CGFloat, _ weight: Font.Weight)` 或预设样式（`DS.heroTitle`、`DS.pageTitle`、`DS.sectionTitle`、`DS.rowTitle`、`DS.body`、`DS.caption`）获取字号。
   - 控件宽高通过 `DS.s(_ v: CGFloat)` 等比取整缩放。
   - 宿主根视图绑定 `.id(app.fontScale)`，在滑块松手变更 `DS.fontScale` 后触发全局视图重建刷新（见 `WebHostRepresentable.dismantleNSView` 对重建时 `WKWebView` 的保护）。
 
@@ -42,7 +42,7 @@ IronBowl 的 UI 规范集中在 [`DesignSystem.swift`](../../Packages/IronBowlKi
 | `DSToggle` / `DSPicker` / `DSStepper` / `DSTabs` | 绿色开关、浮层卡片下拉选择器（[`DSPicker.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/UI/DSPicker.swift)，支持 `DSPickerOption` 副标题与绿色选中对勾）、数字步进器、分段标签 |
 | `DSSidebarItem` / `DSSidebarSection` | 侧边栏条目（支持 `badgeColor` 语义状态角标）与分区小标题 |
 | `DSPrimaryButtonStyle` 等 | `.dsPrimary`、`.dsSecondary`、`.dsGhost`、`.dsChip`、`.textFieldStyle(.ds)` |
-| `AppBrand` / `DSSloganView` | 全局品牌常量（[`AppBrand.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/Core/AppBrand.swift)）与标语组件（支持 `hero` / `sidebar` / `banner` / `inline` 四种样式），统一展示「先把饭碗端稳，再慢慢加菜，不烧心。」 |
+| `AppBrand` / `DSSloganView` | 全局品牌常量（[`AppBrand.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/Core/AppBrand.swift)，含单行 `slogan` 与双行断句 `twoLineSlogan`）与无框衬线标语组件（支持 `hero` / `sidebar` / `banner` / `inline` 四种样式，辅以纤细暖琥珀竖线/细线点缀），统一展示「先把饭碗端稳，再慢慢加菜，不烧心。」 |
 | `Tag`（`Format.swift`） | 圆角胶囊语义标签 |
 | `DSAppearanceSettingsView` / `DSHolidaySettingsView` | 主应用与独立版万年历复用的外观与节假日设置视图 |
 
@@ -67,5 +67,5 @@ IronBowl 的 UI 规范集中在 [`DesignSystem.swift`](../../Packages/IronBowlKi
   - `journal.highlightedItems`（`[String]`，通过 `JournalHighlight.toggle(date:work:in:)` 持久化荧光笔重点，上限 200 条）
 - **核心组件**：
   - `JournalPalette`：提供桌垫、皮革封边、书写纸/格纹纸、横线/网格、朱红/松绿/琥珀/紫色/靛蓝印章与便利贴语义色及衬线标题字体 `JournalPalette.serif(_:_:)`。
-  - `JournalSpreadShell`：双页活页容器（左页格纹素材区 + 中央 6 环书脊 `JournalBinderSpine` + 右页横线书写区 + 右缘彩色索引签 `JournalIndexTabs`，宽度低于 `860pt` 时自动折叠为单页纵向布局），内置纸感预设切换胶囊、章节实心身份胶囊、`JournalStatusState` 高对比状态胶囊、右页顶部状态色带（未写态叠加朱红描边提示）以及桌面底栏手账风格品牌标语。
+  - `JournalSpreadShell`：双页活页容器（左页格纹素材区 + 中央 6 环书脊 `JournalBinderSpine` + 右页横线书写区 + 右缘彩色索引签 `JournalIndexTabs`，宽度低于 `860pt` 时自动折叠为单页纵向布局），内置纸感预设切换胶囊、章节实心身份胶囊、`JournalStatusState` 高对比状态胶囊、右页顶部状态色带（未写态叠加朱红描边提示）以及桌面底部无框衬线落款标语。
   - `JournalStatusBanner` / `JournalStampBadge` / `JournalPaperCard` / `JournalStickyNote` / `JournalProgressBar` / `JournalPrimaryButtonStyle` / `JournalSecondaryButtonStyle`：未写/草稿/完成强视觉状态横幅、倾斜橡皮印章（带落印动画）、纸张小卡（支持色条、回形针与高亮态）、淡黄和纸便利贴、三段工时进度条与高对比手账按钮。

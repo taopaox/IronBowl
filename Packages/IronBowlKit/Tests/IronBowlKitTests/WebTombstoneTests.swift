@@ -23,7 +23,9 @@ import Testing
 
     // 1. 超过闲置时间后自动休眠，未超时的与免休眠、正在显示的保持活跃
     let now = Date()
+    #expect(manager.hasSession(id: "s1") == false)
     let s1 = manager.session(id: "s1", initialURL: "https://example.com/1")
+    #expect(manager.hasSession(id: "s1") == true)
     let s2 = manager.session(id: "s2", initialURL: "https://example.com/2")
     let s3 = manager.session(id: "s3", initialURL: "https://example.com/3", neverSuspend: true)
     let s4 = manager.session(id: "s4", initialURL: "https://example.com/4")
@@ -75,8 +77,14 @@ import Testing
     await manager.sweep(now: now)
     #expect(s2.state == .active)
 
-    // 手动强制休眠对免休眠页也生效
+    // 手动强制休眠对免休眠页也生效，且休眠状态仍保留会话直到显式移除
     let forced = await manager.suspend(id: "s3", force: true)
     #expect(forced == true)
     #expect(s3.state == .tombstoned)
+    #expect(manager.hasSession(id: "s3") == true)
+
+    // 关闭（移除）网页会话后 hasSession 变为 false
+    manager.remove(id: "s3")
+    #expect(manager.hasSession(id: "s3") == false)
+    #expect(manager.existingSession(id: "s3") == nil)
 }

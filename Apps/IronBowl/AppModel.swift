@@ -206,6 +206,13 @@ final class AppModel {
         NSApp.activate()
     }
 
+    func closeWebSession(id: String) {
+        for plugin in enabledPlugins where plugin.closeWebSession(id: id) {
+            return
+        }
+        webSessions.remove(id: id)
+    }
+
     // MARK: 设置窗口
 
     /// 钉钉考勤自动同步遇到没安装 / 没登录 / 没权限时，右上角提醒一次（同一天同类问题只提醒一次）。

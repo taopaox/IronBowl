@@ -148,6 +148,46 @@ import Testing
     #expect(model.pinnedApps.count == 6)
 }
 
+@MainActor @Test func closeAppReleasesSessionAndReturnsToDirectoryWhenActive() throws {
+    let dbURL = FileManager.default.temporaryDirectory.appending(path: "ib-aiweb-close-\(UUID().uuidString).sqlite")
+    let logoDir = FileManager.default.temporaryDirectory.appending(path: "ib-aiweb-close-logos-\(UUID().uuidString)")
+    defer {
+        try? FileManager.default.removeItem(at: dbURL)
+        try? FileManager.default.removeItem(at: logoDir)
+    }
+
+    let db = try AppDatabase(url: dbURL, migrations: [])
+    let settings = SettingsStore(database: db)
+    let web = WebSessionManager(settings: settings, startTimer: false, headlessForTesting: true)
+    let model = AIWebModel(settings: settings, webSessions: web, logoStore: AILogoStore(baseDirectory: logoDir))
+
+    let firstID = "preset.chatgpt"
+    let secondID = "preset.claude"
+    #expect(model.hasOpenSession(appID: firstID) == false)
+
+    // 打开两个 AI 网页，停留在第二个
+    model.selectApp(firstID)
+    _ = model.activeSession
+    model.selectApp(secondID)
+    _ = model.activeSession
+    #expect(model.hasOpenSession(appID: firstID) == true)
+    #expect(model.hasOpenSession(appID: secondID) == true)
+    #expect(model.activeAppID == secondID)
+
+    // 关闭后台 AI 网页：释放会话但不影响当前视图与应用本身
+    model.closeApp(id: firstID)
+    #expect(model.hasOpenSession(appID: firstID) == false)
+    #expect(model.existingSession(for: firstID) == nil)
+    #expect(model.app(withID: firstID) != nil)
+    #expect(model.activeAppID == secondID)
+
+    // 关闭当前正在查看的 AI 网页：释放会话并回到 AI 目录总览
+    model.closeApp(id: secondID)
+    #expect(model.hasOpenSession(appID: secondID) == false)
+    #expect(model.activeAppID == nil)
+    #expect(model.app(withID: secondID) != nil)
+}
+
 @Test func legacyAIWebAppDecodesWithoutOptionalFields() throws {
     let json = #"{"id":"a1","name":"Custom","url":"https://example.com"}"#
     let decoded = try JSONDecoder().decode(AIWebApp.self, from: Data(json.utf8))

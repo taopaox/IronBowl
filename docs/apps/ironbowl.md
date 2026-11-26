@@ -7,8 +7,8 @@
 | 文件 | 核心类型 | 职责 |
 | :--- | :--- | :--- |
 | `IronBowlApp.swift` | `IronBowlApp`, `AppDelegate` | 声明主窗口、`设置` 窗口、主菜单栏及独立万年历菜单栏 Scene；关闭主窗口时不退出应用 |
-| `AppModel.swift` | `AppModel`, `AppKeys`, `DockMode` | 持有共享服务（DB/Settings/WorkCalendar/AI/Chat/Web/Reminders/SystemMonitor）、管理插件启停、Dock 策略与开机自启 |
-| `MainView.swift` | `MainView`, `Sidebar`, `ResourceCard`, `ResourceDetailPopover`, `TodayCard` | 可平滑滑动收起/展开的左侧栏（顶部切换按钮随侧栏收放同步滑移）+ 右侧内容区，展示版本号徽标、未分组插件与目录子项、插件分组（如「汇报」包含日报、周报、月报）、固定网页、系统/饭碗 CPU 与内存占用卡片（含逐进程明细弹层）及下班倒计时 |
+| `AppModel.swift` | `AppModel`, `AppKeys`, `DockMode` | 持有共享服务（DB/Settings/WorkCalendar/AI/Chat/Web/Reminders/SystemMonitor）、管理插件启停、网页会话关闭调度（`closeWebSession(id:)`）、Dock 策略与开机自启 |
+| `MainView.swift` | `MainView`, `Sidebar`, `SidebarWebPluginRow`, `ResourceCard`, `ResourceDetailPopover`, `TodayCard` | 可平滑滑动收起/展开的左侧栏（顶部切换按钮随侧栏收放同步滑移、已打开网页行展示运行/休眠状态与悬停关闭按钮）+ 右侧内容区，展示版本号徽标、未分组插件与目录子项、插件分组（如「汇报」包含日报、周报、月报）、固定网页、系统/饭碗 CPU 与内存占用卡片（含逐进程明细弹层）及下班倒计时 |
 | `HomeView.swift` | `HomeView` | 首页「今天」T3 Code 风格工作台：顶栏（目录与读写/只读权限切换、详略选择器、插入卡片）、欢迎卡片网格（含一键对话生成日报/周报/月报快捷胶囊）与底部多模式输入器（支持双选择 AI 提供商与模型、按对话记忆模型，或切到「记日志」） |
 | `HomeChatSidebar.swift` | `HomeChatSidebar` | 「今天」页内可平滑滑动收起/展开的多对话列表栏（搜索、置顶、按天分组、运行状态、重命名、Finder 打开目录、删除） |
 | `HomeChatTimeline.swift` | `HomeChatTimeline` | 对话时间线、基于 `DSMarkdownView` 的完整 Markdown 渲染、实时功能卡片与失败重试 |
@@ -30,7 +30,8 @@
   - 启用 `CalendarPlugin` 时，可额外在系统菜单栏显示独立的天气/日期/农历/时间图标与月历弹出面板（由 `app.calendarMenuShown` 控制）；当检测到独立版 `IronBowlCalendar`（`com.taopaox.ironbowl.calendar`）正在运行时，主工作台自动隐藏内置状态栏日历以避免顶部状态栏出现两个重复万年历，且不修改用户的 `calendar.menuBar.enabled` 配置，独立版退出后自动恢复。
   - 两个状态栏 `MenuBarExtra(.window)` 面板均挂载了 `.menuBarPopoverDismissable()`：在 `MenuPanel` 点击「今天」、各插件入口、「设置」或「退出饭碗」，以及在万年历弹层点击离开弹层的操作后，会立即收起弹出面板。
 - **主窗口关闭清理**：`AppModel.mainWindow(isOpen: false)` 会调用 `webSessions.detachAllDisplays()`，将可见网页标记为后台以允许按墓碑策略回收内存。
-- **侧栏资源监控**：左下角 `ResourceCard` 位于「今天上班」卡片上方，展示 CPU 与内存占用，支持在「系统」（整机）与「饭碗」（自身主进程、子进程及活跃 `WKWebView` 渲染进程）间切换；切至「饭碗」时会在卡内直接展示 Top 3 占用项，点击可打开 `ResourceDetailPopover` 查看逐进程内存/CPU 明细、按内存或 CPU 排序，并一键休眠后台网页释放内存；采样通过 `.task(id: isVisible)` 在侧栏展开可见时定时执行（收起侧栏或关窗自动停止，展开时恢复）。
+- **侧栏资源监控**：左下角 `ResourceCard` 位于「今天上班」卡片上方，展示 CPU 与内存占用，支持在「系统」（整机）与「饭碗」（自身主进程、子进程及活跃 `WKWebView` 渲染进程）间切换；切至「饭碗」时会在卡内直接展示 Top 3 占用项，点击可打开 `ResourceDetailPopover` 查看逐进程内存/CPU 明细、按内存或 CPU 排序，并一键休眠后台网页或直接关闭网页进程释放内存；采样通过 `.task(id: isVisible)` 在侧栏展开可见时定时执行（收起侧栏或关窗自动停止，展开时恢复）。
+- **侧栏已打开网页管理**：侧栏中的固定网页（`PinnedSidebarRow`）与打开了主页的网页插件行（`SidebarWebPluginRow`）在运行中显示绿色状态圆点、休眠时显示 `moon.zzz`，悬停或右键菜单提供「关闭网页」按钮以随时销毁会话释放内存。
 - **侧栏下班倒计时卡片（`TodayCard`）**：依据 `WorkCalendar.onWorkTimeText(on:)`、`offWorkTimeText(on:)` 与 `effectiveWorkEnd(on:)` 展示今日上班时间（有打卡时显示实际打卡时间，否则显示配置上班时间）、实际下班时间以及 `距下班 X小时Y分` 剩余时长与进度条；有打卡记录时右上角显示「已打卡」，设置当日加班后右上角切换为紫色「加班 +Xh」、下班时间同步顺延，进度条亦切为紫色；休息日设置加班时显示「加班 +Xh」与「辛苦加班」。
 - **版本展示**：通过 `IronBowlKit` 的 `AppVersionInfo` 与 `Bundle` 扩展（`displayVersion` / `fullVersion`）在侧栏顶部「饭碗」旁、菜单栏面板顶部、设置窗口左侧栏底部以及「通用 → 关于」卡片中展示当前版本号（支持一键复制）。
 - **全局品牌标语**：通过 `AppBrand.slogan`（及窄栏双行版 `AppBrand.twoLineSlogan`）与无框衬线 `DSSloganView` 在主窗口左侧栏顶部、首页「今天」欢迎区主标题下方与对话输入区底部、菜单栏快捷面板顶部、收起侧栏时的万年历页头、手账（日报/周报/月报）桌面底部落款与未配置/即将推出页面、设置窗口左侧栏底部、「通用 → 关于」品牌卡以及 macOS 原生「关于饭碗」面板中统一醒目展示「先把饭碗端稳，再慢慢加菜，不烧心。」。

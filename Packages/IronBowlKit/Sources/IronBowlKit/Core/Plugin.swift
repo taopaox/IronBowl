@@ -18,6 +18,10 @@ public protocol IronBowlPlugin: AnyObject {
     var sidebarBadge: SidebarBadge? { get }
     /// 是否以可折叠目录形式在左侧栏展示（子条目来自 `sidebarChildren`）。
     var isSidebarDirectory: Bool { get }
+    /// 当前插件自身是否已打开内嵌网页（例如飞书主页）。
+    var isSidebarWebOpen: Bool { get }
+    /// 当前插件自身的内嵌网页是否处于休眠状态。
+    var isSidebarWebSuspended: Bool { get }
     /// 插件自己的数据库迁移。
     var migrations: [DatabaseMigration] { get }
 
@@ -36,6 +40,10 @@ public protocol IronBowlPlugin: AnyObject {
     var sidebarChildren: [SidebarPinnedItem] { get }
     /// 用户从主窗口左侧栏主动点击该插件时调用。
     func onSidebarSelect()
+    /// 用户从左侧栏关闭该插件当前打开的内嵌网页时调用。
+    func onSidebarCloseWeb()
+    /// 按会话 ID 关闭归属本插件的内嵌网页；若不属于本插件返回 false。
+    func closeWebSession(id: String) -> Bool
     /// 首页的快捷标签。
     var quickActions: [QuickAction] { get }
     /// 首页的小卡片。
@@ -59,6 +67,8 @@ public extension IronBowlPlugin {
     var isComingSoon: Bool { false }
     var sidebarBadge: SidebarBadge? { nil }
     var isSidebarDirectory: Bool { false }
+    var isSidebarWebOpen: Bool { false }
+    var isSidebarWebSuspended: Bool { false }
     var migrations: [DatabaseMigration] { [] }
     func start(context: PluginContext) {}
     func stop() {}
@@ -67,6 +77,8 @@ public extension IronBowlPlugin {
     var sidebarPinnedItems: [SidebarPinnedItem] { [] }
     var sidebarChildren: [SidebarPinnedItem] { [] }
     func onSidebarSelect() {}
+    func onSidebarCloseWeb() {}
+    func closeWebSession(id: String) -> Bool { false }
     var quickActions: [QuickAction] { [] }
     var homeCards: [HomeCard] { [] }
     func handleHomeInput(_ text: String) async -> String? { nil }
@@ -154,11 +166,13 @@ public struct SidebarPinnedItem: Identifiable {
     public let iconImage: NSImage?
     public let iconIsTemplate: Bool
     public let isSelected: Bool
+    public let isOpen: Bool
     public let isSuspended: Bool
     public let isNeverSuspend: Bool
     public let canMoveUp: Bool
     public let canMoveDown: Bool
     public let action: () -> Void
+    public let onClose: (() -> Void)?
     public let onRename: ((String) -> Void)?
     public let onEdit: (() -> Void)?
     public let onMoveUp: (() -> Void)?
@@ -178,11 +192,13 @@ public struct SidebarPinnedItem: Identifiable {
         iconImage: NSImage? = nil,
         iconIsTemplate: Bool = false,
         isSelected: Bool,
+        isOpen: Bool = false,
         isSuspended: Bool = false,
         isNeverSuspend: Bool = false,
         canMoveUp: Bool = false,
         canMoveDown: Bool = false,
         action: @escaping () -> Void,
+        onClose: (() -> Void)? = nil,
         onRename: ((String) -> Void)? = nil,
         onEdit: (() -> Void)? = nil,
         onMoveUp: (() -> Void)? = nil,
@@ -201,11 +217,13 @@ public struct SidebarPinnedItem: Identifiable {
         self.iconImage = iconImage
         self.iconIsTemplate = iconIsTemplate
         self.isSelected = isSelected
+        self.isOpen = isOpen
         self.isSuspended = isSuspended
         self.isNeverSuspend = isNeverSuspend
         self.canMoveUp = canMoveUp
         self.canMoveDown = canMoveDown
         self.action = action
+        self.onClose = onClose
         self.onRename = onRename
         self.onEdit = onEdit
         self.onMoveUp = onMoveUp

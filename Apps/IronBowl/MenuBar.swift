@@ -63,7 +63,10 @@ struct MenuPanel: View {
                     ) {
                         ForEach(shortcuts) { entry in
                             MenuShortcutTile(entry: entry) {
-                                runAndDismiss { app.open(plugin: entry.id) }
+                                runAndDismiss {
+                                    app.plugin(entry.id)?.onSidebarSelect()
+                                    app.open(plugin: entry.id)
+                                }
                             }
                         }
                     }

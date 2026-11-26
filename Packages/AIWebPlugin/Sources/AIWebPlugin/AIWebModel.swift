@@ -109,6 +109,10 @@ public final class AIWebModel {
         webSessions.existingSession(id: sessionID(for: appID))
     }
 
+    public func hasOpenSession(appID: String) -> Bool {
+        webSessions.hasSession(id: sessionID(for: appID))
+    }
+
     public func isSuspended(appID: String) -> Bool {
         webSessions.isTombstoned(id: sessionID(for: appID))
     }
@@ -127,6 +131,15 @@ public final class AIWebModel {
         }
         activeAppID = id
         settings[AIWebKeys.activeAppID] = id
+    }
+
+    public func closeApp(id: String) {
+        let sid = sessionID(for: id)
+        webSessions.remove(id: sid)
+        ownedSessionIDs.remove(sid)
+        if activeAppID == id {
+            selectDirectory()
+        }
     }
 
     public func beginCreating() {

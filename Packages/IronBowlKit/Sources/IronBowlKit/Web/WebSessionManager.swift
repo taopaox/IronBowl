@@ -156,12 +156,18 @@ public final class WebSessionManager {
         sessions[id]?.displayName = name
     }
 
+    public func hasSession(id: String) -> Bool {
+        sessionIDs.contains(id) && sessions[id] != nil
+    }
+
     public func existingSession(id: String) -> WebSession? {
-        sessions[id]
+        _ = sessionIDs
+        return sessions[id]
     }
 
     public func isTombstoned(id: String) -> Bool {
-        sessions[id]?.isTombstoned ?? false
+        _ = sessionIDs
+        return sessions[id]?.isTombstoned ?? false
     }
 
     public func setNeverSuspend(_ value: Bool, for id: String) {

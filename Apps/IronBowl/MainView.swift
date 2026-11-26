@@ -244,6 +244,15 @@ struct Sidebar: View {
                     )
                 }
             }
+        } else if plugin.isSidebarWebOpen {
+            SidebarWebPluginRow(
+                plugin: plugin,
+                selected: app.selection == plugin.id && !hasSelectedChild,
+                onSelect: {
+                    plugin.onSidebarSelect()
+                    app.select(plugin.id)
+                }
+            )
         } else {
             let badge = plugin.sidebarBadge
             DSSidebarItem(
@@ -256,6 +265,77 @@ struct Sidebar: View {
                 plugin.onSidebarSelect()
                 app.select(plugin.id)
             }
+        }
+    }
+}
+
+private struct SidebarWebPluginRow: View {
+    let plugin: IronBowlPlugin
+    let selected: Bool
+    let onSelect: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let badge = plugin.sidebarBadge
+        HStack(spacing: 4) {
+            Button(action: onSelect) {
+                HStack(spacing: 9) {
+                    Image(systemName: plugin.systemImage)
+                        .font(DS.font(15))
+                        .frame(width: DS.s(18))
+                    Text(plugin.sidebarTitle)
+                        .font(DS.font(14.5))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if let badge {
+                        Text(badge.text)
+                            .font(DS.font(10.5, .semibold))
+                            .foregroundStyle(badge.color)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(badge.color.opacity(0.14), in: .capsule)
+                            .overlay { Capsule().strokeBorder(badge.color.opacity(0.32)) }
+                    }
+                }
+                .foregroundStyle(DS.text)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+
+            if hovering {
+                Button {
+                    plugin.onSidebarCloseWeb()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(DS.font(11, .medium))
+                        .foregroundStyle(DS.textSecondary)
+                        .frame(width: DS.s(20), height: DS.s(20))
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help("关闭网页")
+            } else if badge == nil {
+                if plugin.isSidebarWebSuspended {
+                    Image(systemName: "moon.zzz")
+                        .font(DS.font(11))
+                        .foregroundStyle(DS.textTertiary)
+                        .padding(.trailing, 3)
+                } else {
+                    Circle()
+                        .fill(DS.success)
+                        .frame(width: 6, height: 6)
+                        .padding(.trailing, 5)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: DS.s(30))
+        .background(selected ? DS.selected : hovering ? DS.hover : .clear, in: .rect(cornerRadius: DS.controlRadius))
+        .contentShape(.rect)
+        .onHover { hovering = $0 }
+        .contextMenu {
+            Button("打开\(plugin.sidebarTitle)", action: onSelect)
+            Button("关闭网页") { plugin.onSidebarCloseWeb() }
         }
     }
 }
@@ -352,23 +432,42 @@ private struct PinnedSidebarRow: View {
             .buttonStyle(.plain)
 
             if hovering {
-                Menu {
-                    menuContent()
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(DS.font(12))
-                        .foregroundStyle(DS.textSecondary)
-                        .frame(width: DS.s(22), height: DS.s(22))
-                        .contentShape(.rect)
+                HStack(spacing: 2) {
+                    Menu {
+                        menuContent()
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(DS.font(12))
+                            .foregroundStyle(DS.textSecondary)
+                            .frame(width: DS.s(22), height: DS.s(22))
+                            .contentShape(.rect)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+
+                    if item.isOpen, let onClose = item.onClose {
+                        Button(action: onClose) {
+                            Image(systemName: "xmark")
+                                .font(DS.font(11, .medium))
+                                .foregroundStyle(DS.textSecondary)
+                                .frame(width: DS.s(20), height: DS.s(20))
+                                .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .help("关闭网页")
+                    }
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
             } else if item.isSuspended {
                 Image(systemName: "moon.zzz")
                     .font(DS.font(11))
                     .foregroundStyle(DS.textTertiary)
                     .padding(.trailing, 3)
+            } else if item.isOpen {
+                Circle()
+                    .fill(DS.success)
+                    .frame(width: 6, height: 6)
+                    .padding(.trailing, 5)
             }
         }
         .padding(.leading, 10 + indent)
@@ -395,14 +494,17 @@ private struct PinnedSidebarRow: View {
         if let onMoveDown = item.onMoveDown {
             Button("下移") { onMoveDown() }.disabled(!item.canMoveDown)
         }
-        if item.onSuspendNow != nil || item.onToggleNeverSuspend != nil {
+        if item.onSuspendNow != nil || item.onToggleNeverSuspend != nil || (item.isOpen && item.onClose != nil) {
             Divider()
         }
         if let onSuspendNow = item.onSuspendNow {
-            Button("立即休眠") { onSuspendNow() }.disabled(item.isSuspended)
+            Button("立即休眠") { onSuspendNow() }.disabled(item.isSuspended || !item.isOpen)
         }
         if let onToggleNeverSuspend = item.onToggleNeverSuspend {
             Button(item.isNeverSuspend ? "取消免休眠" : "设为免休眠") { onToggleNeverSuspend() }
+        }
+        if item.isOpen, let onClose = item.onClose {
+            Button("关闭网页") { onClose() }
         }
         if let onOpenInBrowser = item.onOpenInBrowser {
             Divider()
@@ -664,7 +766,16 @@ private struct ResourceDetailPopover: View {
                                         try? await Task.sleep(for: .milliseconds(300))
                                         app.systemMonitor.sampleNow()
                                     }
-                                }
+                                },
+                                onClose: item.kind == .webPage && !item.sessionIDs.isEmpty ? {
+                                    for sid in item.sessionIDs {
+                                        app.closeWebSession(id: sid)
+                                    }
+                                    Task {
+                                        try? await Task.sleep(for: .milliseconds(300))
+                                        app.systemMonitor.sampleNow()
+                                    }
+                                } : nil
                             )
                             if index < items.count - 1 {
                                 Divider().overlay(DS.border).padding(.horizontal, 14)
@@ -732,6 +843,7 @@ private struct ResourceDetailRow: View {
     let totalAppMemory: UInt64
     let sortMode: ResourceDetailPopover.SortMode
     let onSuspend: () -> Void
+    let onClose: (() -> Void)?
 
     var body: some View {
         let memoryShare = totalAppMemory > 0 ? min(1, max(0, Double(item.memoryBytes) / Double(totalAppMemory))) : 0
@@ -791,13 +903,25 @@ private struct ResourceDetailRow: View {
                     .foregroundStyle(DS.textSecondary)
             }
 
-            if item.canSuspend {
-                Button(action: onSuspend) {
-                    Image(systemName: "moon.zzz")
-                        .font(DS.font(12))
+            if item.canSuspend || onClose != nil {
+                HStack(spacing: 2) {
+                    if item.canSuspend {
+                        Button(action: onSuspend) {
+                            Image(systemName: "moon.zzz")
+                                .font(DS.font(12))
+                        }
+                        .buttonStyle(.dsGhost)
+                        .help("立即休眠释放内存")
+                    }
+                    if let onClose {
+                        Button(action: onClose) {
+                            Image(systemName: "xmark")
+                                .font(DS.font(12))
+                        }
+                        .buttonStyle(.dsGhost)
+                        .help("关闭网页")
+                    }
                 }
-                .buttonStyle(.dsGhost)
-                .help("立即休眠释放内存")
             }
         }
         .padding(.horizontal, 14)

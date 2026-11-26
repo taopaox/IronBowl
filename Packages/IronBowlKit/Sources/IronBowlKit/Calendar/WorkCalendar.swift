@@ -254,6 +254,16 @@ public final class WorkCalendar {
         time(settings[Self.startKey], on: date).map { $0.addingTimeInterval(flexOffset(on: date)) }
     }
 
+    /// 某天当前时刻在上班到实际下班之间的进度（0...1）；无有效下班时刻时返回 nil。
+    public func workProgress(on now: Date = Date()) -> Double? {
+        guard let end = effectiveWorkEnd(on: now) else { return nil }
+        let start = workStart(on: now)
+            ?? end.addingTimeInterval(-(defaultWorkHours * 3600 + Double(settings[Self.lunchMinutesKey]) * 60))
+        let total = end.timeIntervalSince(start)
+        guard total > 0 else { return 0 }
+        return min(1, max(0, now.timeIntervalSince(start) / total))
+    }
+
     /// 弹性偏移（秒）：当天打卡时间相对规定上班时间的差值，限制在 ±弹性时长内；没打卡记录时为 0。
     public func flexOffset(on date: Date) -> TimeInterval {
         guard let clockIn = clockIns[Self.dayString(date)],

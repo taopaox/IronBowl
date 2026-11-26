@@ -255,6 +255,31 @@ private func fakeDws(auth: String, attendance: String = #"{"ok":true,"data":{"re
     #expect(cal.scheduleText(on: day) == "08:30–17:30")
 }
 
+@MainActor @Test func workProgressComputesRatioAcrossWorkday() throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "ironbowl-progress-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let db = try AppDatabase(url: url, migrations: [])
+    let settings = SettingsStore(database: db)
+    settings[WorkCalendar.startKey] = "08:30"
+    settings[WorkCalendar.endKey] = "17:30"
+    settings[WorkCalendar.flexMinutesKey] = 30
+    let cal = WorkCalendar(database: db, settings: settings)
+
+    // 上班前为 0，工作时段中点（13:00）为 0.5，下班后为 1
+    #expect(cal.workProgress(on: time("2026-11-25", "08:00")) == 0)
+    let midpoint = cal.workProgress(on: time("2026-11-25", "13:00"))
+    #expect(midpoint != nil && abs((midpoint ?? 0) - 0.5) < 0.001)
+    #expect(cal.workProgress(on: time("2026-11-25", "18:00")) == 1)
+
+    // 设置当日加班 3h 后，实际下班顺延至 20:30（总跨度 12h），14:30 为 0.5、17:30 为 0.75
+    let day = time("2026-11-25", "12:00")
+    cal.setOvertimeHours(3, on: day)
+    let otMid = cal.workProgress(on: time("2026-11-25", "14:30"))
+    #expect(otMid != nil && abs((otMid ?? 0) - 0.5) < 0.001)
+    let otThreeQuarter = cal.workProgress(on: time("2026-11-25", "17:30"))
+    #expect(otThreeQuarter != nil && abs((otThreeQuarter ?? 0) - 0.75) < 0.001)
+}
+
 @MainActor @Test func coreV4MigratesZentaoDailyOvertime() throws {
     let url = FileManager.default.temporaryDirectory.appending(path: "ironbowl-v4-migrate-\(UUID().uuidString).sqlite")
     defer { try? FileManager.default.removeItem(at: url) }

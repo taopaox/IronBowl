@@ -875,7 +875,7 @@ private struct TodayCard: View {
                         .monospacedDigit()
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
-                    let progress = min(1, max(0, workProgress(end: end, now: now)))
+                    let progress = cal.workProgress(on: now) ?? 0
                     GeometryReader { geo in
                         let width = progress > 0 ? max(4, geo.size.width * progress) : 0
                         ZStack(alignment: .leading) {
@@ -915,13 +915,5 @@ private struct TodayCard: View {
         .background(DS.card, in: .rect(cornerRadius: 10))
         .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(DS.border) }
         .help(info.isWorkday ? cal.scheduleText(on: now) : (info.name ?? "今天休息"))
-    }
-
-    func workProgress(end: Date, now: Date) -> Double {
-        let start = app.workCalendar.workStart(on: now)
-            ?? end.addingTimeInterval(-(app.workCalendar.defaultWorkHours * 3600 + Double(app.settings[WorkCalendar.lunchMinutesKey]) * 60))
-        let total = end.timeIntervalSince(start)
-        guard total > 0 else { return 0 }
-        return min(1, max(0, now.timeIntervalSince(start) / total))
     }
 }

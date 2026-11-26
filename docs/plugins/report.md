@@ -17,7 +17,7 @@
 | `Tita/TitaHelpers.swift` | `TitaPeriodCode`, `TitaCredentialParser`, `TitaBSGlobalParser`, `TitaRichTextConverter`, `TitaContentMapper`, `TitaSubmitPayloadBuilder`, `TitaProseMirrorParser` | Tita 周期正反向编码（`YYYY-MM-WW` / `YYYY-MM-01` ↔ `WeekRange` / `MonthRange`）、cURL/Cookie 解析、`BSGlobal` 识别、ProseMirror HTML/JSON 与 Markdown 互转、4 模块内容映射与提交请求体拼装 |
 | `Tita/TitaClient.swift` | `TitaClient`, `TitaLog` | Tita 直连 HTTP 客户端（Cookie 鉴权、会话与身份探测、模板拉取、历史分页拉取 `summary/search`、草稿更新、正式提交与回查）及脱敏接口日志 `tita.log` |
 | `Tita/TitaHistorySyncService.swift` | `TitaHistorySyncService` | 自动分页拉取 Tita 个人全部历史周报/月报并安全合并写入本地 `weeklyReport` / `monthlyReport`（默认保护本地已编辑内容） |
-| `Views/ReportView.swift` | `ReportView` | 响应式双栏工作区：顶栏在独立菜单中固定展示「周报」或「月报」与对应历史弹层（支持弹层内直接「同步 Tita」），左栏展示周期汇总、7 天/按周分片筛选条与每日日报明细，右栏常驻展示补充说明、Tita 提交状态标签与文档纸张式预览/编辑区 |
+| `Views/ReportView.swift` | `ReportView` | 双页活页手账工作区（`JournalSpreadShell`）：顶栏提供历史弹层、刷新与 AI 选择器，右缘提供「日报 / 周报 / 月报 / 历史」彩签；左页展示周期撕历、三联汇总、周/月筛选条、折叠式黄色便利贴「补充说明」（`JournalStickyNote`）及联动日报荧光笔重点的每日摘录（支持 `+ 引用` 插入正文）；右页展示可点击的 Tita 状态橡皮印章、单行聚焦工具栏与手账排印正文/Markdown 编辑区 |
 | `Views/ReportSettingsView.swift` | `ReportSettingsView` | 按 `periodKind` 分别呈现「周报 → 周报生成」与「月报 → 月报生成」设置页：默认风格、草稿/工时开关、提示词编辑与「Tita 对接」跳转入口 |
 | `Views/TitaViews.swift` | `TitaAccountSettings`, `TitaWebLoginSheet`, `TitaSubmitSheet` | Tita 对接设置页（内置 `WKWebView` 登录提取 Cookie / 导入 cURL 与请求头 / 模板配置 / 一键同步全部历史周报与月报）与推送预览/存草稿/确认提交弹窗 |
 

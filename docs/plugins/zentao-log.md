@@ -13,15 +13,16 @@
 | `Draft/DraftGenerator.swift` | `DraftGenerator`, `DraftEntry`, `DraftInput` | 按工作日/下班时间拆条、权重分配工时、AI 结构化生成与失败拼接兜底、剩余工时递减 |
 | `Zentao/ZentaoClient.swift` | `ZentaoClient`, `ZentaoTask`, `ZentaoEstimate` | 禅道 PATH_INFO `.json` 客户端（登录、自动重登、企业版 `effort` 与开源版 `recordEstimate` 兼容、提交回查） |
 | `Store/LogSettings.swift` | `LogKeys`, `LogMigrations`, `LogStore` | SQLite 持久化（仓库映射、本地提交记录、上次任务、未提交草稿） |
-| `Views/LogView.swift` | `LogView`, `WorkHoursCard`, `DayTabs`, `DraftCard`, `RecordedLogCard`, `OvertimeSheet` | 日志主视图、当日需填工时卡、7 天切换、已写与待提交卡片 |
+| `Views/LogView.swift` | `LogView`, `JournalDayRingStrip`, `JournalWorkHoursCard`, `JournalCommitSlipCard`, `JournalDraftCard`, `JournalRecordedCard`, `OvertimeSheet` | 双页活页手账主视图（左页撕历、7 天圆环打卡条、三段工时刻度与 Git 小票摘录；右页橡皮印章、荧光笔重点标黄、待提交草稿与已入账记录） |
 | `Views/LogSettingsView.swift` | `ZentaoAccountSettings`, `RepoSettings`, `GenerateSettings`, `ReminderSettings` | 四个设置页：禅道账号、仓库映射、生成提示词与工时、提醒时间与样式 |
 
 ## 当日需填工时与「正常 + 加班」拆条生成
 
-1. **当日需填工时展示与快捷加班设置**：
-   - `WorkHoursCard` 实时展示选中日期的 `targetHours = baseWorkHours + plannedOvertimeHours`（工作日取 `WorkCalendar.defaultWorkHours`，休息日基础为 `0`），并显示已写工时、还需填写的差额以及当日下班时间标签（`WorkCalendar.offWorkTimeText(on:)`）。
-   - 提供 `+1h`、`+2h`、`+3h`、`+4h` 快捷胶囊按钮（再次点击同档位归零）和 `0.5h` 步进的 `DSStepper`（支持任意 `n` 小时，上限 12h）及「清除」按钮。
-   - 每日加班时长通过 `WorkCalendar.setOvertimeHours(_:on:)` 持久化到核心表 `dailyOvertime`（`core.v4`），选择或清除加班后会立即顺延或恢复 `WorkHoursCard`、侧栏 `TodayCard`、首页下班卡及菜单栏「离下班还有多久」的实际下班时间，并在 `DayTabs` 未写且已设加班时标记紫色「加班 Xh」、在菜单栏「今天的工时」同步显示目标工时。
+1. **手账式当日工时刻度与快捷加班设置**：
+   - `LogView` 使用 `IronBowlKit` 的 `JournalSpreadShell` 呈现双页活页手账（支持「暖米手账 / 清爽象牙」纸感切换，以及右缘「日报 / 周报 / 月报」索引签一键翻页）。
+   - 左页展示手账撕历头（日期、工作日/休息日标签、预计下班时刻 `WorkCalendar.offWorkTimeText(on:)` 与剩余缺口徽章）、`JournalDayRingStrip` 7 天圆环打卡条、`JournalWorkHoursCard`（`JournalProgressBar` 三段彩色工时刻度条 + `+1h`/`+2h`/`+3h`/`+4h` 快捷加班按钮与「清除」）以及按仓库分组的 Git 提交小票（支持点击 `+ 摘录` 调用 `LogModel.addDraftFromCommit(activity:commit:)` 直接生成一条草稿）。
+   - 右页右上角展示 `JournalStampBadge` 橡皮印章（待提交草稿 / 已入账 / 待填报），提供单一聚焦操作栏（`生成草稿`、`手写一条`、朱红主按钮 `盖章提交禅道`）；每条草稿与已入账记录支持通过 `JournalHighlight.toggle` 使用荧光笔标黄重点，并自动同步至周报/月报的每日摘录高亮显示。
+   - 每日加班时长通过 `WorkCalendar.setOvertimeHours(_:on:)` 持久化到核心表 `dailyOvertime`（`core.v4`），选择或清除加班后会立即顺延或恢复左页工时刻度、侧栏 `TodayCard`、首页下班卡及菜单栏「离下班还有多久」的实际下班时间。
 2. **正常上班时间与加班工时分别生成独立日志**（`DraftGenerator.generate`）：
    - 分别扣减当天已记录的正常工时与加班工时，得到独立的 `normalBudget` 和 `overtimeBudget`，且正常草稿与加班草稿分批构建，**同一任务在正常与加班时段不会合并成同一条**。
    - 当同时存在 `normalBudget > 0` 与 `overtimeBudget > 0` 时，仍按正常下班时刻 `WorkCalendar.workEnd(on:)` 拆分提交（`splitActivities`）：

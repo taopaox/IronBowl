@@ -55,3 +55,15 @@ IronBowl 的 UI 规范集中在 [`DesignSystem.swift`](../../Packages/IronBowlKi
 `MenuBarExtra(.window)` 内容根视图挂载 `.menuBarPopoverDismissable()` 后，会向子视图环境注入 `\.dismissMenuBarPopover`（`MenuBarPopoverDismissAction`）：
 - 点击需离开状态栏浮层的操作时调用 `dismissMenuBarPopover()`，通过 `MenuBarPopoverController` 优先执行 SwiftUI 原生 `dismiss()`，若对应的 `MenuBarExtra` 弹出窗口仍可见则调用 `NSWindow.close()` 关闭浮层。
 - 关闭后自动检查并复位 `NSStatusBarButton` 可能残留的高亮/按下态，避免下次点击需要点击两次才能重新打开。
+
+## 手账工作台视觉系统（`JournalStyle.swift`）
+
+[`JournalStyle.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/UI/JournalStyle.swift) 为「汇报」分组下的「日报」「周报」「月报」提供双页活页手账界面底座，随系统浅色/深色模式自动切换：
+
+- **设置键（`JournalKeys`）**：
+  - `journal.paperPreset`（`JournalPaperPreset`，默认 `.warm`「暖米手账」，可选 `.clean`「清爽象牙」）
+  - `journal.highlightedItems`（`[String]`，通过 `JournalHighlight.toggle(date:work:in:)` 持久化荧光笔重点，上限 200 条）
+- **核心组件**：
+  - `JournalPalette`：提供桌垫、皮革封边、书写纸/格纹纸、横线/网格、朱红/松绿/琥珀/紫色/靛蓝印章与便利贴语义色及衬线标题字体 `JournalPalette.serif(_:_:)`。
+  - `JournalSpreadShell`：双页活页容器（左页格纹素材区 + 中央 6 环书脊 `JournalBinderSpine` + 右页横线书写区 + 右缘彩色索引签 `JournalIndexTabs`，宽度低于 `860pt` 时自动折叠为单页纵向布局），内置纸感预设切换胶囊。
+  - `JournalStampBadge` / `JournalPaperCard` / `JournalStickyNote` / `JournalProgressBar` / `JournalPrimaryButtonStyle` / `JournalSecondaryButtonStyle`：倾斜橡皮印章（带落印动画）、纸张小卡（支持色条、回形针与高亮态）、淡黄和纸便利贴、三段工时进度条与高对比手账按钮。

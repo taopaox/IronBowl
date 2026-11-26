@@ -458,6 +458,31 @@ final class LogModel {
         recomputeLefts()
     }
 
+    /// 从左页 Git 提交小票摘录一条到待提交草稿。
+    func addDraftFromCommit(activity: RepoActivity, commit: GitCommit) {
+        let projectID = mappings[activity.repoPath]?.projectID
+        let matchedTaskID = projectID.flatMap { pid in
+            openTasks.first(where: { $0.projectID == pid })?.id
+        }
+        let lastTaskID = store.lastTasks()[activity.repoPath].flatMap { tid in
+            openTasks.contains(where: { $0.id == tid }) ? tid : nil
+        }
+        let taskID = lastTaskID ?? matchedTaskID ?? settings[LogKeys.fallbackTaskID]
+        let cleaned = DraftGenerator.cleanSubject(commit.subject)
+        let workText = cleaned.isEmpty ? commit.subject : cleaned
+        drafts.append(DraftEntry(
+            taskID: taskID,
+            hours: 1,
+            left: 0,
+            work: workText,
+            repoPaths: [activity.repoPath],
+            commitHashes: [commit.hash],
+            isFallback: taskID == settings[LogKeys.fallbackTaskID],
+            isManual: true
+        ))
+        recomputeLefts()
+    }
+
     func addOvertime(hours: Double, taskID: Int?, work: String) {
         drafts.append(DraftEntry(taskID: taskID, hours: hours, left: 0, work: work.isEmpty ? "加班处理工作" : work,
                                  isFallback: taskID == settings[LogKeys.fallbackTaskID], isOvertime: true, isManual: true))

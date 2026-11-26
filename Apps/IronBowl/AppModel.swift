@@ -43,11 +43,12 @@ enum AppKeys {
 @Observable
 final class AppModel {
     static let homeID = "home"
+    static let remindersID = "reminders"
     /// 给 AppDelegate 用（程序坞点击重新打开窗口）。
     nonisolated(unsafe) static weak var shared: AppModel?
     let database: AppDatabase
     let settings: SettingsStore
-    let reminders = ReminderCenter()
+    let reminders: ReminderCenter
     let workCalendar: WorkCalendar
     let providers: AIProviderStore
     let chat: ChatStore
@@ -84,6 +85,7 @@ final class AppModel {
         } catch {
             fatalError("打开数据库失败：\(error)")
         }
+        reminders = ReminderCenter(database: database)
         settings = SettingsStore(database: database)
         if let existingEnabled = settings[AppKeys.enabledPlugins] {
             let known = Set(settings[AppKeys.knownPlugins])
@@ -238,6 +240,8 @@ final class AppModel {
             title: "钉钉考勤同步不可用",
             message: "\(issue.localizedDescription)。今天先按固定的 \(settings[WorkCalendar.startKey])–\(settings[WorkCalendar.endKey]) 计算下班时间。",
             systemImage: "exclamationmark.triangle.fill",
+            source: .attendance,
+            targetSettingsPage: "worktime",
             actions: actions
         )
         reminders.show(content, style: .cornerCard)

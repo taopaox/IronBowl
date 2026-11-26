@@ -168,6 +168,7 @@ struct MenuPanel: View {
     // MARK: - 快捷入口数据
 
     private func shortcutEntries() -> [ShortcutEntry] {
+        let unreadCount = app.reminders.unreadCount
         var entries = [
             ShortcutEntry(
                 id: AppModel.homeID,
@@ -175,6 +176,13 @@ struct MenuPanel: View {
                 systemImage: "house",
                 tint: DS.brand,
                 badge: nil
+            ),
+            ShortcutEntry(
+                id: AppModel.remindersID,
+                title: "消息提醒",
+                systemImage: unreadCount > 0 ? "bell.badge" : "bell",
+                tint: .red,
+                badge: unreadCount > 0 ? SidebarBadge("\(unreadCount) 条未读", color: DS.danger) : nil
             ),
         ]
         for plugin in app.enabledPlugins where !plugin.isComingSoon {

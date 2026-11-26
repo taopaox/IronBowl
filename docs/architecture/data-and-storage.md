@@ -18,7 +18,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 
 `AppDatabase` 使用 GRDB `DatabasePool` 打开数据库，启用 `config.foreignKeysEnabled = true`，并在启动时按序执行 `coreMigrations + pluginMigrations`。
 
-### 核心迁移（`core.v1` ~ `core.v5`）
+### 核心迁移（`core.v1` ~ `core.v7`）
 
 | 迁移版本 | 表名 | 主键 | 字段 | 用途 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -32,6 +32,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `core.v5` | `chatThread` | `id` (TEXT) | `title`, `providerKind`, `model`（`core.v6` 新增）, `workspacePath`, `permissionMode`, `remoteSessionID`, `isPinned`, `createdAt`, `updatedAt`（索引） | 首页「今天」多对话工作台的对话线程、绑定工作目录、模型选择与 CLI 会话 ID |
 | `core.v5` | `chatMessage` | `id` (TEXT) | `threadID`（外键级联删除+索引）, `role`, `content`, `status`, `providerKind`, `modelName`, `durationSeconds`, `usageJSON`, `activitiesJSON`, `rawEventsJSON`, `cardsJSON`, `errorMessage`, `createdAt`（索引）, `updatedAt` | 对话消息正文、命令/工具执行明细、原始 JSONL 事件与插入的功能卡片快照 |
 | `core.v6` | `chatThread` | `id` (TEXT) | 新增列 `model` (TEXT, NOT NULL, DEFAULT `''`) | 按对话持久化各自选用的模型 ID |
+| `core.v7` | `reminderHistory` | `id` (自增 INT) | `reminderID`（索引）, `title`, `message`, `systemImage`, `source`（索引）, `style`, `deliveryStatus`, `deliveryDetail`, `isRead`（索引）, `readAt`, `handledActionTitle`, `handledAt`, `targetPluginID`, `targetSettingsPage`, `createdAt`（索引） | `ReminderCenter` 触发的历史桌面/系统提醒记录、投递结果、已读与操作状态 |
 
 ### 禅道日志插件迁移（`LogMigrations`）
 

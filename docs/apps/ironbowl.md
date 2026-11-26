@@ -7,14 +7,15 @@
 | 文件 | 核心类型 | 职责 |
 | :--- | :--- | :--- |
 | `IronBowlApp.swift` | `IronBowlApp`, `AppDelegate` | 声明主窗口、`设置` 窗口、主菜单栏及独立万年历菜单栏 Scene；关闭主窗口时不退出应用 |
-| `AppModel.swift` | `AppModel`, `AppKeys`, `DockMode` | 持有共享服务（DB/Settings/WorkCalendar/AI/Chat/Web/Reminders/SystemMonitor）、管理插件启停、网页会话关闭调度（`closeWebSession(id:)`）、Dock 策略与开机自启 |
-| `MainView.swift` | `MainView`, `Sidebar`, `SidebarWebPluginRow`, `ResourceCard`, `ResourceDetailPopover`, `TodayCard` | 可平滑滑动收起/展开的左侧栏（顶部切换按钮随侧栏收放同步滑移、已打开网页行展示运行/休眠状态与悬停关闭按钮）+ 右侧内容区，展示版本号徽标、未分组插件与目录子项、插件分组（如「汇报」包含日报、周报、月报）、固定网页、系统/饭碗 CPU 与内存占用卡片（含逐进程明细弹层）及下班倒计时 |
+| `AppModel.swift` | `AppModel`, `AppKeys`, `DockMode` | 持有共享服务（DB/Settings/WorkCalendar/AI/Chat/Web/Reminders/SystemMonitor，含核心页面 `homeID`/`remindersID`）、管理插件启停、网页会话关闭调度（`closeWebSession(id:)`）、Dock 策略与开机自启 |
+| `MainView.swift` | `MainView`, `Sidebar`, `SidebarWebPluginRow`, `ResourceCard`, `ResourceDetailPopover`, `TodayCard` | 可平滑滑动收起/展开的左侧栏（顶部切换按钮随侧栏收放同步滑移、包含「今天」「消息提醒」（带未读角标）、未分组插件与目录子项、插件分组、固定网页、资源监控卡片及下班倒计时）+ 右侧内容区 |
+| `RemindersView.swift` | `RemindersView`, `ReminderHistoryCard` | 左侧「消息提醒」历史消息中心：展示未读/今日/最近统计指标、全部/未读/已读标签、来源筛选与搜索、按天分组卡片、投递状态与操作记录标记、一键已读、删除清空及快捷跳转关联插件或设置页 |
 | `HomeView.swift` | `HomeView` | 首页「今天」T3 Code 风格工作台：顶栏（目录与读写/只读权限切换、详略选择器、插入卡片）、欢迎卡片网格（含一键对话生成日报/周报/月报快捷胶囊）与底部多模式输入器（支持双选择 AI 提供商与模型、按对话记忆模型，或切到「记日志」） |
 | `HomeChatSidebar.swift` | `HomeChatSidebar` | 「今天」页内可平滑滑动收起/展开的多对话列表栏（搜索、置顶、按天分组、运行状态、重命名、Finder 打开目录、删除） |
 | `HomeChatTimeline.swift` | `HomeChatTimeline` | 对话时间线、基于 `DSMarkdownView` 的完整 Markdown 渲染、实时功能卡片与失败重试 |
 | `HomeChatActivityView.swift` | `HomeChatActivityView` | 可折叠命令/工具/思考/文件改动输出详情、退出码与原始 JSONL 事件查看器 |
 | `HomeChatCards.swift` | `HomeCardCatalog`, `HomeChatCardStrip`, `HomeCardPickerPopover` | 汇总核心卡片与已启用插件 `homeCards`，支持通过 `makeInteractiveChatCard(for:)` 在对话内渲染可操作活卡片与卡片选择器 |
-| `MenuBar.swift` | `MenuBarLabel`, `MenuPanel`, `MenuWorkHeroCard`, `MenuStatusCard`, `MenuShortcutTile` | 菜单栏双行微缩仪表卡标签（调用 `MenuBarCardRenderer`），以及点击弹出的分层卡片式快捷面板（品牌日期栏、今日上下班主卡、概览状态卡片网格与快捷入口瓷砖） |
+| `MenuBar.swift` | `MenuBarLabel`, `MenuPanel`, `MenuWorkHeroCard`, `MenuStatusCard`, `MenuShortcutTile` | 菜单栏双行微缩仪表卡标签（调用 `MenuBarCardRenderer`），以及点击弹出的分层卡片式快捷面板（品牌日期栏、今日上下班主卡、概览状态卡片网格与含「今天」「消息提醒」及各启用插件的快捷入口瓷砖） |
 | `SettingsView.swift` | `SettingsView` 及各核心设置页 | 左侧搜索、分组导航与底部版本号，右侧各核心设置页（通用设置底部含「关于」版本信息与复制按钮） |
 
 ## 窗口与运行形态

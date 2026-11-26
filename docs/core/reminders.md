@@ -1,6 +1,6 @@
 # 提醒中心（`ReminderCenter`）
 
-[`ReminderCenter.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/Reminders/ReminderCenter.swift) 为插件提供跨样式的桌面提醒能力，同一 `ReminderContent.id` 再次触发时会自动替换旧提醒。
+[`ReminderCenter.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/Reminders/ReminderCenter.swift) 与 [`ReminderHistoryStore.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/Reminders/ReminderHistoryStore.swift) 为插件提供跨样式的桌面提醒能力与历史消息持久化，同一 `ReminderContent.id` 再次触发时会自动替换旧的桌面弹窗，同时每次触发的历史消息都会保留在本地数据库中供工作台「消息提醒」页面回看。
 
 ## 提醒样式（`ReminderStyle`）
 
@@ -12,9 +12,16 @@
 
 ## 交互机制
 
-- `ReminderContent` 包含 `id`、`title`、`message`、`systemImage` 与多个 `ReminderAction`（其中 `isPrimary = true` 渲染为 `.dsPrimary` 黑底主按钮，其余渲染为 `.dsSecondary`）。
-- 浮动面板（`ReminderPanelView`）遵循 `DS.card` 与 `DS.border` 规范，点任意按钮先 `dismiss(id:)` 再执行对应 `action.handler()`。
-- 系统通知模式下，将各按钮注册为 `UNNotificationCategory` 操作；点击通知本体等价于触发 `isPrimary` 主按钮。`dismiss(id:)` 会同步清理待投递与已投递的同 `id` 系统通知。
+- `ReminderContent` 包含 `id`、`title`、`message`、`systemImage`、`source`（默认按 `ReminderSource.infer(fromReminderID:)` 推断）、可选跳转目标（`targetPluginID` / `targetSettingsPage`）、`recordInHistory`（默认 `true`，设置页预览可设为 `false`）以及多个 `ReminderAction`（其中 `isPrimary = true` 渲染为 `.dsPrimary` 黑底主按钮，其余渲染为 `.dsSecondary`）。
+- 浮动面板（`ReminderPanelView`）遵循 `DS.card` 与 `DS.border` 规范，点任意按钮先 `dismiss(id:)`、标记历史记录已处理，再执行对应 `action.handler()`。
+- 系统通知模式下，将各按钮注册为 `UNNotificationCategory` 操作；点击通知本体等价于触发 `isPrimary` 主按钮，并自动将对应历史记录标为已读/已操作。`dismiss(id:)` 会同步清理待投递与已投递的同 `id` 系统通知。
+
+## 历史消息持久化与状态管理
+
+- **`ReminderSource`**：按来源区分提醒（`.zentao` 禅道日志 / `.scheduler` 定时任务 / `.attendance` 考勤同步 / `.general` 系统提醒）。
+- **`ReminderDeliveryStatus`**：记录投递状态（`.delivered` / `.unavailable` / `.permissionDenied` / `.alertsDisabled` / `.failed`）与详细原因 `deliveryDetail`，当系统通知未授权或横幅关闭时仍可在历史列表查看原因。
+- **`ReminderHistoryStore`**：基于 SQLite `reminderHistory` 表（迁移 `core.v7`，最多保留最近 500 条）提供 `insert`、`updateDelivery`、`markHandled`、`setRead`、`markAllRead`、`delete`、`clearAll`、`fetchRecent` 与 `prune`。
+- **`ReminderCenter`**：使用 `@Observable` 暴露 `history: [ReminderHistoryRecord]` 与 `unreadCount: Int`，通过 `ReminderCenter(database:)` 在启动时自动加载历史记录，并对外提供 `reloadHistory()`、`setRead(id:isRead:)`、`markAllRead(source:)`、`markHandled(id:actionTitle:)`、`deleteHistory(id:)` 与 `clearHistory(source:)`；`ReminderCenter()` 无参初始化仍保持兼容（仅在内存记录）。
 
 ## 系统通知权限检测与设置快捷跳转
 

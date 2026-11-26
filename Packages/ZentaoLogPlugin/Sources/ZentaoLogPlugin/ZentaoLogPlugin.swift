@@ -496,6 +496,8 @@ final class LogReminderScheduler {
             title: "今天的禅道日志还没写",
             message: "\(count)点一下就能生成草稿，确认后提交。",
             systemImage: "square.and.pencil",
+            source: .zentao,
+            targetPluginID: ZentaoLogPlugin.pluginID,
             actions: [
                 ReminderAction(id: "later", title: "\(snooze) 分钟后") { [weak self] in
                     self?.snoozeUntil = Date().addingTimeInterval(TimeInterval(snooze * 60))
@@ -527,6 +529,8 @@ final class LogReminderScheduler {
             title: "今天的禅道日志还没写（预览）",
             message: "这是「\(style.shortName)」样式的预览，点任意按钮关闭。",
             systemImage: "square.and.pencil",
+            source: .zentao,
+            recordInHistory: false,
             actions: [
                 ReminderAction(id: "later", title: "\(settings[LogKeys.snoozeMinutes]) 分钟后") {},
                 ReminderAction(id: "skip", title: "今天不写") {},

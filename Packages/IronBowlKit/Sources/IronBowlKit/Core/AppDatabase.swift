@@ -157,5 +157,25 @@ public nonisolated final class AppDatabase: Sendable {
                 t.add(column: "model", .text).notNull().defaults(to: "")
             }
         },
+        DatabaseMigration("core.v7") { db in
+            try db.create(table: "reminderHistory") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("reminderID", .text).notNull().indexed()
+                t.column("title", .text).notNull()
+                t.column("message", .text).notNull()
+                t.column("systemImage", .text).notNull().defaults(to: "bell.fill")
+                t.column("source", .text).notNull().defaults(to: "general").indexed()
+                t.column("style", .text).notNull()
+                t.column("deliveryStatus", .text).notNull().defaults(to: "delivered")
+                t.column("deliveryDetail", .text).notNull().defaults(to: "")
+                t.column("isRead", .boolean).notNull().defaults(to: false).indexed()
+                t.column("readAt", .datetime)
+                t.column("handledActionTitle", .text)
+                t.column("handledAt", .datetime)
+                t.column("targetPluginID", .text)
+                t.column("targetSettingsPage", .text)
+                t.column("createdAt", .datetime).notNull().indexed()
+            }
+        },
     ]
 }

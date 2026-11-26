@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 @preconcurrency import UserNotifications
 
@@ -13,6 +14,14 @@ public nonisolated enum ReminderStyle: String, Codable, Sendable, CaseIterable, 
         case .system: "系统通知"
         case .cornerCard: "右上角浮动卡片（不操作不消失）"
         case .centerDialog: "屏幕中央弹框"
+        }
+    }
+
+    public var shortDisplayName: String {
+        switch self {
+        case .system: "系统通知"
+        case .cornerCard: "右上角卡片"
+        case .centerDialog: "屏幕弹框"
         }
     }
 }
@@ -37,13 +46,31 @@ public struct ReminderContent {
     public let title: String
     public let message: String
     public let systemImage: String
+    public let source: ReminderSource
+    public let targetPluginID: String?
+    public let targetSettingsPage: String?
+    public let recordInHistory: Bool
     public let actions: [ReminderAction]
 
-    public init(id: String, title: String, message: String, systemImage: String = "bell.fill", actions: [ReminderAction]) {
+    public init(
+        id: String,
+        title: String,
+        message: String,
+        systemImage: String = "bell.fill",
+        source: ReminderSource? = nil,
+        targetPluginID: String? = nil,
+        targetSettingsPage: String? = nil,
+        recordInHistory: Bool = true,
+        actions: [ReminderAction]
+    ) {
         self.id = id
         self.title = title
         self.message = message
         self.systemImage = systemImage
+        self.source = source ?? ReminderSource.infer(fromReminderID: id)
+        self.targetPluginID = targetPluginID
+        self.targetSettingsPage = targetSettingsPage
+        self.recordInHistory = recordInHistory
         self.actions = actions
     }
 }
@@ -87,18 +114,34 @@ public nonisolated enum ReminderDeliveryResult: Equatable, Sendable {
 }
 
 /// 弹出提醒：系统通知，或工作台自己画的浮动面板（右上角 / 屏幕中央，点按钮才消失，勿扰模式下也会出现）。
-public final class ReminderCenter: NSObject, UNUserNotificationCenterDelegate {
-    private var panels: [String: NSPanel] = [:]
-    private var systemContents: [String: ReminderContent] = [:]
-    private var categories: Set<UNNotificationCategory> = []
+/// 同时将所有需要留存的提醒持久化到历史记录，供左侧「消息提醒」页统一查看与管理。
+@Observable
+public final class ReminderCenter {
+    public private(set) var history: [ReminderHistoryRecord] = []
+
+    public var unreadCount: Int {
+        history.reduce(0) { $0 + ($1.isRead ? 0 : 1) }
+    }
+
+    @ObservationIgnored private var panels: [String: NSPanel] = [:]
+    @ObservationIgnored private var systemContents: [String: (content: ReminderContent, historyID: Int64?)] = [:]
+    @ObservationIgnored private var categories: Set<UNNotificationCategory> = []
+    @ObservationIgnored private let historyStore: ReminderHistoryStore?
+    @ObservationIgnored private let notificationDelegate: NotificationDelegate
+    @ObservationIgnored private var nextInMemoryID: Int64 = 1
+    @ObservationIgnored private let maxHistoryCount = 500
 
     private var notificationCenter: UNUserNotificationCenter? {
         Bundle.main.bundleURL.pathExtension == "app" ? UNUserNotificationCenter.current() : nil
     }
 
-    override public init() {
-        super.init()
-        notificationCenter?.delegate = self
+    public init(database: AppDatabase? = nil) {
+        self.historyStore = database.map(ReminderHistoryStore.init(db:))
+        let delegate = NotificationDelegate()
+        self.notificationDelegate = delegate
+        delegate.owner = self
+        notificationCenter?.delegate = delegate
+        reloadHistory()
     }
 
     /// 读取当前系统通知权限与提醒样式状态。
@@ -159,10 +202,12 @@ public final class ReminderCenter: NSObject, UNUserNotificationCenterDelegate {
             Task { _ = await showAndReport(content, style: .system) }
         case .cornerCard:
             dismiss(id: content.id)
-            showPanel(content, centered: false)
+            let historyID = recordHistoryIfNeeded(content, style: .cornerCard)
+            showPanel(content, centered: false, historyID: historyID)
         case .centerDialog:
             dismiss(id: content.id)
-            showPanel(content, centered: true)
+            let historyID = recordHistoryIfNeeded(content, style: .centerDialog)
+            showPanel(content, centered: true, historyID: historyID)
         }
     }
 
@@ -171,12 +216,19 @@ public final class ReminderCenter: NSObject, UNUserNotificationCenterDelegate {
         dismiss(id: content.id)
         switch style {
         case .system:
-            return await showSystem(content)
+            let historyID = recordHistoryIfNeeded(content, style: .system)
+            let result = await showSystem(content, historyID: historyID)
+            if let historyID, result != .delivered {
+                updateDelivery(id: historyID, result: result)
+            }
+            return result
         case .cornerCard:
-            showPanel(content, centered: false)
+            let historyID = recordHistoryIfNeeded(content, style: .cornerCard)
+            showPanel(content, centered: false, historyID: historyID)
             return .delivered
         case .centerDialog:
-            showPanel(content, centered: true)
+            let historyID = recordHistoryIfNeeded(content, style: .centerDialog)
+            showPanel(content, centered: true, historyID: historyID)
             return .delivered
         }
     }
@@ -189,11 +241,119 @@ public final class ReminderCenter: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    // MARK: 历史消息管理
+
+    public func reloadHistory() {
+        guard let historyStore else { return }
+        history = historyStore.fetchRecent(limit: maxHistoryCount)
+    }
+
+    public func setRead(id: Int64, isRead: Bool) {
+        let now = Date()
+        historyStore?.setRead(id: id, isRead: isRead, at: now)
+        guard let idx = history.firstIndex(where: { $0.id == id }) else { return }
+        history[idx].isRead = isRead
+        history[idx].readAt = isRead ? now : nil
+    }
+
+    public func markAllRead(source: ReminderSource? = nil) {
+        let now = Date()
+        historyStore?.markAllRead(source: source, at: now)
+        for idx in history.indices where !history[idx].isRead {
+            if let source, history[idx].source != source { continue }
+            history[idx].isRead = true
+            history[idx].readAt = history[idx].readAt ?? now
+        }
+    }
+
+    public func markHandled(id: Int64, actionTitle: String) {
+        let now = Date()
+        historyStore?.markHandled(id: id, actionTitle: actionTitle, at: now)
+        guard let idx = history.firstIndex(where: { $0.id == id }) else { return }
+        history[idx].handledActionTitle = actionTitle
+        history[idx].handledAt = now
+        history[idx].isRead = true
+        history[idx].readAt = history[idx].readAt ?? now
+    }
+
+    public func deleteHistory(id: Int64) {
+        historyStore?.delete(id: id)
+        history.removeAll { $0.id == id }
+    }
+
+    public func clearHistory(source: ReminderSource? = nil) {
+        historyStore?.clearAll(source: source)
+        if let source {
+            history.removeAll { $0.source == source }
+        } else {
+            history.removeAll()
+        }
+    }
+
+    private func recordHistoryIfNeeded(_ content: ReminderContent, style: ReminderStyle) -> Int64? {
+        guard content.recordInHistory else { return nil }
+        let draft = ReminderHistoryDraft(
+            reminderID: content.id,
+            title: content.title,
+            message: content.message,
+            systemImage: content.systemImage,
+            source: content.source,
+            style: style,
+            deliveryStatus: .delivered,
+            deliveryDetail: "",
+            targetPluginID: content.targetPluginID,
+            targetSettingsPage: content.targetSettingsPage
+        )
+        let record: ReminderHistoryRecord
+        if let historyStore {
+            guard let inserted = historyStore.insert(draft) else { return nil }
+            historyStore.prune(keepingLatest: maxHistoryCount)
+            record = inserted
+        } else {
+            let assignedID = nextInMemoryID
+            nextInMemoryID += 1
+            record = ReminderHistoryRecord(
+                id: assignedID,
+                reminderID: draft.reminderID,
+                title: draft.title,
+                message: draft.message,
+                systemImage: draft.systemImage,
+                source: draft.source,
+                style: draft.style,
+                deliveryStatus: draft.deliveryStatus,
+                deliveryDetail: draft.deliveryDetail,
+                isRead: false,
+                readAt: nil,
+                handledActionTitle: nil,
+                handledAt: nil,
+                targetPluginID: draft.targetPluginID,
+                targetSettingsPage: draft.targetSettingsPage,
+                createdAt: draft.createdAt
+            )
+        }
+        history.insert(record, at: 0)
+        if history.count > maxHistoryCount {
+            history.removeLast(history.count - maxHistoryCount)
+        }
+        return record.id
+    }
+
+    private func updateDelivery(id: Int64, result: ReminderDeliveryResult) {
+        let mapped = ReminderDeliveryStatus.from(result)
+        historyStore?.updateDelivery(id: id, status: mapped.status, detail: mapped.detail)
+        guard let idx = history.firstIndex(where: { $0.id == id }) else { return }
+        history[idx].deliveryStatus = mapped.status
+        history[idx].deliveryDetail = mapped.detail
+    }
+
     // MARK: 玻璃面板
 
-    private func showPanel(_ content: ReminderContent, centered: Bool) {
+    private func showPanel(_ content: ReminderContent, centered: Bool, historyID: Int64?) {
         let view = ReminderPanelView(content: content, centered: centered) { [weak self] action in
             self?.dismiss(id: content.id)
+            if let historyID {
+                self?.markHandled(id: historyID, actionTitle: action.title)
+            }
             action.handler()
         }
         let hosting = NSHostingView(rootView: view)
@@ -230,7 +390,7 @@ public final class ReminderCenter: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: 系统通知
 
-    private func showSystem(_ content: ReminderContent) async -> ReminderDeliveryResult {
+    private func showSystem(_ content: ReminderContent, historyID: Int64?) async -> ReminderDeliveryResult {
         guard let center = notificationCenter else { return .unavailable }
         var status = await systemNotificationStatus()
         if status == .notDetermined {
@@ -253,7 +413,7 @@ public final class ReminderCenter: NSObject, UNUserNotificationCenterDelegate {
         case .alertsDisabled:
             return .alertsDisabled
         case .authorized:
-            systemContents[content.id] = content
+            systemContents[content.id] = (content, historyID)
             let category = UNNotificationCategory(
                 identifier: content.id,
                 actions: content.actions.map { UNNotificationAction(identifier: $0.id, title: $0.title, options: $0.isPrimary ? [.foreground] : []) },
@@ -279,21 +439,41 @@ public final class ReminderCenter: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    public nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                                   willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+    fileprivate func handleSystemResponse(identifier id: String, actionIdentifier actionID: String) {
+        guard let entry = systemContents.removeValue(forKey: id) else { return }
+        let content = entry.content
+        // 点通知本身 = 主按钮。
+        let action = content.actions.first { $0.id == actionID }
+            ?? (actionID == UNNotificationDefaultActionIdentifier ? content.actions.first { $0.isPrimary } : nil)
+        if let historyID = entry.historyID {
+            if let action {
+                markHandled(id: historyID, actionTitle: action.title)
+            } else {
+                setRead(id: historyID, isRead: true)
+            }
+        }
+        action?.handler()
+    }
+}
+
+private final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    weak var owner: ReminderCenter?
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
         [.banner, .sound, .list]
     }
 
-    public nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                                   didReceive response: UNNotificationResponse) async {
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
         let id = response.notification.request.identifier
         let actionID = response.actionIdentifier
         await MainActor.run {
-            guard let content = self.systemContents.removeValue(forKey: id) else { return }
-            // 点通知本身 = 主按钮。
-            let action = content.actions.first { $0.id == actionID }
-                ?? (actionID == UNNotificationDefaultActionIdentifier ? content.actions.first { $0.isPrimary } : nil)
-            action?.handler()
+            self.owner?.handleSystemResponse(identifier: id, actionIdentifier: actionID)
         }
     }
 }

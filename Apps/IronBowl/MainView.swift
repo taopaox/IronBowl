@@ -69,6 +69,8 @@ struct MainView: View {
     private var detail: some View {
         if app.selection == AppModel.homeID {
             HomeView(app: app)
+        } else if app.selection == AppModel.remindersID {
+            RemindersView(app: app)
         } else if let plugin = app.plugin(app.selection), app.enabledIDs.contains(plugin.id) {
             plugin.makeMainView().id(plugin.id)
         } else {
@@ -127,9 +129,19 @@ struct Sidebar: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     let partitioned = SidebarPluginGrouping.partition(app.enabledPlugins)
+                    let unreadCount = app.reminders.unreadCount
 
                     DSSidebarItem("今天", systemImage: "house", selected: app.selection == AppModel.homeID) {
                         app.select(AppModel.homeID)
+                    }
+                    DSSidebarItem(
+                        "消息提醒",
+                        systemImage: unreadCount > 0 ? "bell.badge" : "bell",
+                        selected: app.selection == AppModel.remindersID,
+                        badge: unreadCount > 0 ? (unreadCount > 99 ? "99+" : "\(unreadCount)") : nil,
+                        badgeColor: unreadCount > 0 ? DS.danger : nil
+                    ) {
+                        app.select(AppModel.remindersID)
                     }
                     ForEach(partitioned.ungrouped, id: \.id) { plugin in
                         pluginRow(plugin)

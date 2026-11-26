@@ -190,6 +190,8 @@ public final class TaskScheduler {
                 title: resolvedTitle,
                 message: resolvedMessage,
                 systemImage: "bell.badge",
+                source: .scheduler,
+                targetPluginID: Self.schedulerPluginID,
                 actions: [
                     ReminderAction(id: "ok", title: "知道了", isPrimary: true) {},
                 ]
@@ -542,6 +544,9 @@ public final class TaskScheduler {
             title: "\(titlePrefix)：\(task.name)",
             message: outcome.summary,
             systemImage: icon,
+            source: .scheduler,
+            targetPluginID: outcome.actionSettingsPageID == nil ? (outcome.actionPluginID ?? Self.schedulerPluginID) : nil,
+            targetSettingsPage: outcome.actionSettingsPageID,
             actions: [
                 ReminderAction(id: "close", title: "知道了") {},
                 primaryAction,

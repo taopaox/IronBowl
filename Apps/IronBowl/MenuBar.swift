@@ -1,3 +1,4 @@
+import AppKit
 import IronBowlKit
 import SwiftUI
 
@@ -87,11 +88,11 @@ struct MenuPanel: View {
     private func header(now: Date) -> some View {
         let info = app.workCalendar.dayInfo(now)
         return HStack(alignment: .center, spacing: 10) {
-            Text("🍚")
-                .font(DS.font(16))
-                .frame(width: DS.s(30), height: DS.s(30))
-                .background(DS.card, in: .rect(cornerRadius: 8))
-                .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(DS.border) }
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: DS.s(36), height: DS.s(36))
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .center, spacing: 6) {

@@ -246,11 +246,11 @@ private struct StandaloneAboutSettings: View {
             DSBlockRow {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {
-                        Text("🍚")
-                            .font(DS.font(20))
-                            .frame(width: DS.s(36), height: DS.s(36))
-                            .background(DS.well, in: .rect(cornerRadius: 9))
-                            .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(DS.border) }
+                        Image(nsImage: NSApp.applicationIconImage)
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: DS.s(42), height: DS.s(42))
 
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {

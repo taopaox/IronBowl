@@ -13,5 +13,5 @@
 - **三个 SwiftUI Scene**：
   1. `MenuBarExtra`（`.window`）：顶部菜单栏显示天气/日期/星期/农历/时间，点开展示紧凑月历面板 `CalendarPopover`（独立版底栏展示版本号与「退出万年历」按钮），并挂载 `.menuBarPopoverDismissable()` 以便点击跳转大窗口、设置或退出时立即收起弹层。
   2. `Window("饭碗万年历", id: "calendar")`：大窗口月历 `CalendarMainView`（顶部标题旁展示当前版本号与 `DSSloganView(style: .inline)`）。
-  3. `Window("万年历设置", id: "settings")`：精简设置窗口，直接复用插件的「月历」「状态栏」「外观」「节假日」「天气」五个设置页，并在「外观」页中通过 `StandaloneAppearanceSettings` 合并展示 `CalendarAppearanceSettings`（弹出面板样式）与 `DSAppearanceSettingsView`（应用主题与字体缩放）；同时在侧栏底部展示版本号与无框衬线品牌标语，并附带「关于」设置页支持查看品牌标语与复制完整版本信息。
+  3. `Window("万年历设置", id: "settings")`：精简设置窗口，直接复用插件的「月历」「状态栏」「外观」「节假日」「天气」五个设置页，并在「外观」页中通过 `StandaloneAppearanceSettings` 合并展示 `CalendarAppearanceSettings`（弹出面板样式）与 `DSAppearanceSettingsView`（应用主题与字体缩放）；同时在侧栏底部展示版本号与无框衬线品牌标语，并附带「关于」设置页展示独立版应用图标（`NSApp.applicationIconImage`，来源于 `Apps/Calendar/Assets.xcassets/AppIcon.appiconset`）、品牌标语与复制完整版本信息。
 - **系统菜单关于面板**：通过 `.commands` 替换 `.appInfo`，点击「关于饭碗万年历」时以 `AppBrand.aboutCredits()` 展示品牌标语。

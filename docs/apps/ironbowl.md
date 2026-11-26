@@ -14,7 +14,7 @@
 | `HomeChatTimeline.swift` | `HomeChatTimeline` | 对话时间线、基于 `DSMarkdownView` 的完整 Markdown 渲染、实时功能卡片与失败重试 |
 | `HomeChatActivityView.swift` | `HomeChatActivityView` | 可折叠命令/工具/思考/文件改动输出详情、退出码与原始 JSONL 事件查看器 |
 | `HomeChatCards.swift` | `HomeCardCatalog`, `HomeChatCardStrip`, `HomeCardPickerPopover` | 汇总核心卡片与已启用插件 `homeCards`，支持通过 `makeInteractiveChatCard(for:)` 在对话内渲染可操作活卡片与卡片选择器 |
-| `MenuBar.swift` | `MenuBarLabel`, `MenuPanel`, `MenuWorkHeroCard`, `MenuStatusCard`, `MenuShortcutTile` | 菜单栏图标与可自定义拼接文案，以及点击弹出的分层卡片式快捷面板（品牌日期栏、今日上下班主卡、概览状态卡片网格与快捷入口瓷砖） |
+| `MenuBar.swift` | `MenuBarLabel`, `MenuPanel`, `MenuWorkHeroCard`, `MenuStatusCard`, `MenuShortcutTile` | 菜单栏双行微缩仪表卡标签（调用 `MenuBarCardRenderer`），以及点击弹出的分层卡片式快捷面板（品牌日期栏、今日上下班主卡、概览状态卡片网格与快捷入口瓷砖） |
 | `SettingsView.swift` | `SettingsView` 及各核心设置页 | 左侧搜索、分组导航与底部版本号，右侧各核心设置页（通用设置底部含「关于」版本信息与复制按钮） |
 
 ## 窗口与运行形态
@@ -25,7 +25,7 @@
   - `.always`：始终在程序坞显示。
   - `.never`：从不在程序坞显示。
 - **菜单栏组合**：
-  - 主菜单栏图标 `🍚` 后可按用户自定义顺序拼接任意插件 `MenuBarItem`（见 `app.menuBarItems`）；内置倒计时项（如 `core.offwork`「离下班还有多久」）与提醒/任务倒计时项使用中文时长格式（如 `距下班 5小时44分`、`距下班 23分`、`距下班 不到1分`），避免与时刻混淆。
+  - 主菜单栏采用 `IronBowlKit` 的 `MenuBarCardRenderer` 将 `🍚` 与用户自定义顺序拼接的 `MenuBarItem`（见 `app.menuBarItems`）离线绘制为 `22pt` 全彩非模板 `NSImage`「双行微缩仪表卡」：深石板微卡底配 1px 亮描边，`core.offwork`、提醒与定时任务以双行堆叠展示（上行显示 `距下班 · XX%` / 加班紫色 `加班 · XX%`，下行显示中文紧凑倒计时），其余状态以竖线分隔语义色展示；「设置 → 通用 → 菜单栏显示」同步提供实时微卡预览。
   - 点击主菜单栏图标弹出的 `MenuPanel` 采用灰底白卡分层布局（`DS.groupBackground` + `DS.card`）：顶部展示品牌、版本胶囊、日期/农历/节假日标签与「工作台」快捷按钮；中部展示今日上下班主卡（`MenuWorkHeroCard`，含倒计时、进度条、加班/打卡状态与上下班时间）以及最多 4 张已启用插件概览卡片（`MenuStatusCard` 2 列网格）；下方展示「今天」与各已启用插件的快捷入口瓷砖卡（`MenuShortcutTile`，带 `sidebarBadge` 状态圆点），底部提供「设置」与「退出饭碗」。
   - 启用 `CalendarPlugin` 时，可额外在系统菜单栏显示独立的天气/日期/农历/时间图标与月历弹出面板（由 `app.calendarMenuShown` 控制）。
   - 两个状态栏 `MenuBarExtra(.window)` 面板均挂载了 `.menuBarPopoverDismissable()`：在 `MenuPanel` 点击「今天」、各插件入口、「设置」或「退出饭碗」，以及在万年历弹层点击离开弹层的操作后，会立即收起弹出面板。
@@ -33,3 +33,4 @@
 - **侧栏资源监控**：左下角 `ResourceCard` 位于「今天上班」卡片上方，展示 CPU 与内存占用，支持在「系统」（整机）与「饭碗」（自身主进程、子进程及活跃 `WKWebView` 渲染进程）间切换；切至「饭碗」时会在卡内直接展示 Top 3 占用项，点击可打开 `ResourceDetailPopover` 查看逐进程内存/CPU 明细、按内存或 CPU 排序，并一键休眠后台网页释放内存；采样仅在侧栏可见时通过 `.task` 定时执行（收起或关窗自动停止）。
 - **侧栏下班倒计时卡片（`TodayCard`）**：依据 `WorkCalendar.onWorkTimeText(on:)`、`offWorkTimeText(on:)` 与 `effectiveWorkEnd(on:)` 展示今日上班时间（有打卡时显示实际打卡时间，否则显示配置上班时间）、实际下班时间以及 `距下班 X小时Y分` 剩余时长与进度条；有打卡记录时右上角显示「已打卡」，设置当日加班后右上角切换为紫色「加班 +Xh」、下班时间同步顺延，进度条亦切为紫色；休息日设置加班时显示「加班 +Xh」与「辛苦加班」。
 - **版本展示**：通过 `IronBowlKit` 的 `AppVersionInfo` 与 `Bundle` 扩展（`displayVersion` / `fullVersion`）在侧栏顶部「饭碗」旁、菜单栏面板顶部、设置窗口左侧栏底部以及「通用 → 关于」卡片中展示当前版本号（支持一键复制）。
+- **全局品牌标语**：通过 `AppBrand.slogan` 与 `DSSloganView` 在主窗口左侧栏顶部、首页「今天」欢迎区与对话底栏、菜单栏快捷面板顶部通栏、各插件主视图（万年历、AI 目录、定时任务、手账日报/周报/月报及未配置/即将推出页面）、设置窗口左侧栏底部、「通用 → 关于」品牌卡以及 macOS 原生「关于饭碗」面板中统一醒目展示「先把饭碗端稳，再慢慢加菜，不烧心。」。

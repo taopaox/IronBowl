@@ -157,6 +157,12 @@ struct MenuBarItemsEditor: View {
         let availableIDs = Set(all.map(\.id))
         let activeSelected = selected.filter { availableIDs.contains($0) }
         let ordered = activeSelected.compactMap { id in all.first { $0.id == id } } + all.filter { !activeSelected.contains($0.id) }
+        DSRow("当前预览", description: "双行微缩仪表卡会实时渲染在系统菜单栏右侧。") {
+            Image(nsImage: MenuBarCardRenderer.renderImage(segments: app.menuBarCardSegments))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(DS.well, in: .rect(cornerRadius: 8))
+        }
         ForEach(ordered) { item in
             DSRow(item.title, description: activeSelected.contains(item.id) ? "当前显示：\(item.text() ?? "—")" : nil) {
                 HStack(spacing: 4) {

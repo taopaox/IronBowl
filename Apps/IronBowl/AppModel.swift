@@ -278,6 +278,64 @@ final class AppModel {
         return settings[AppKeys.menuBarItems].compactMap { items[$0]?.text() }.joined(separator: " ")
     }
 
+    /// 供主状态栏与设置页预览渲染「双行微缩仪表卡」的分段数据。
+    var menuBarCardSegments: [MenuBarCardSegment] {
+        _ = now // 每 30 秒刷新一次倒计时
+        let current = Date()
+        let items = Dictionary(availableMenuBarItems.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var segments: [MenuBarCardSegment] = []
+
+        for id in settings[AppKeys.menuBarItems] {
+            if id == "core.offwork" {
+                guard workCalendar.isWorkday(current),
+                      let end = workCalendar.effectiveWorkEnd(on: current),
+                      end > current else { continue }
+                let ot = workCalendar.overtimeHours(on: current)
+                let pct = Int(((workCalendar.workProgress(on: current) ?? 0) * 100).rounded())
+                let top = ot > 0 ? "加班 · \(pct)%" : "距下班 · \(pct)%"
+                segments.append(.stacked(
+                    top: top,
+                    bottom: countdown(to: end, from: current),
+                    topTone: ot > 0 ? .purple : .amber
+                ))
+                continue
+            }
+
+            guard let text = items[id]?.text(), !text.isEmpty else { continue }
+            if id == "zentao.nextReminder", text.hasPrefix("距提醒 ") {
+                segments.append(.stacked(
+                    top: "距提醒",
+                    bottom: String(text.dropFirst("距提醒 ".count)),
+                    topTone: .amber
+                ))
+            } else if id == "scheduler.next", text.hasPrefix("距任务 ") {
+                segments.append(.stacked(
+                    top: "距任务",
+                    bottom: String(text.dropFirst("距任务 ".count)),
+                    topTone: .indigo
+                ))
+            } else {
+                segments.append(.inline(text: text, tone: inlineTone(for: id, text: text)))
+            }
+        }
+        return segments
+    }
+
+    private func inlineTone(for id: String, text: String) -> MenuBarCardTone {
+        switch id {
+        case "zentao.status":
+            text == "✓" ? .green : .rose
+        case "zentao.hours":
+            text.hasPrefix("已写") ? .green : .rose
+        case "calendar.weather":
+            .sky
+        case "zentao.commits", "calendar.date", "calendar.lunar":
+            .slate
+        default:
+            .white
+        }
+    }
+
     // MARK: 外观
 
     var appearance: AppearanceMode {

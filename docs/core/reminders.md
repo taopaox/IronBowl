@@ -7,13 +7,13 @@
 | 样式 | 说明 | 行为特点 |
 | :--- | :--- | :--- |
 | `.system` | 系统通知 | 通过 `UNUserNotificationCenter` 发送原生通知（仅 `.app` 运行时生效），受系统通知权限和勿扰模式约束 |
-| `.cornerCard` | 右上角浮动卡片 | 自绘无边框非激活 `NSPanel`（`.statusBar` 层级），定位在主屏幕 `visibleFrame` 右上角，**不点击操作按钮不消失**，勿扰模式下仍可弹出 |
-| `.centerDialog` | 屏幕中央弹框 | 自绘居中 `NSPanel`（宽度 420pt），盖在所有工作区窗口之上，支持拖拽移动 |
+| `.cornerCard` | 右上角浮动卡片 | 自绘无边框非激活 `NSPanel`（`.statusBar` 层级，`canHide = false`），定位在主屏幕 `visibleFrame` 右上角并支持多张卡片自上而下纵向堆叠，**不点击操作按钮不消失**，勿扰模式下仍可弹出 |
+| `.centerDialog` | 屏幕中央弹框 | 自绘居中 `NSPanel`（宽度 420pt，`canHide = false`），盖在所有工作区窗口之上，支持拖拽移动，**不点击操作按钮不消失** |
 
 ## 交互机制
 
-- `ReminderContent` 包含 `id`、`title`、`message`、`systemImage`、`source`（默认按 `ReminderSource.infer(fromReminderID:)` 推断）、可选跳转目标（`targetPluginID` / `targetSettingsPage`）、`recordInHistory`（默认 `true`，设置页预览可设为 `false`）以及多个 `ReminderAction`（其中 `isPrimary = true` 渲染为 `.dsPrimary` 黑底主按钮，其余渲染为 `.dsSecondary`）。
-- 浮动面板（`ReminderPanelView`）遵循 `DS.card` 与 `DS.border` 规范，点任意按钮先 `dismiss(id:)`、标记历史记录已处理，再执行对应 `action.handler()`。
+- `ReminderContent` 包含 `id`、`title`、`message`、`systemImage`、`source`（默认按 `ReminderSource.infer(fromReminderID:)` 推断）、可选跳转目标（`targetPluginID` / `targetSettingsPage`）、`recordInHistory`（默认 `true`，设置页预览可设为 `false`）、`isPersistent`（默认 `false`；为 `true` 时卡片内展示「未确认前常驻显示」标识并强化边框）以及多个 `ReminderAction`（其中 `isPrimary = true` 渲染为 `.dsPrimary` 黑底主按钮，其余渲染为 `.dsSecondary`）。
+- 浮动面板（`ReminderPanelView`）遵循 `DS.card` 与 `DS.border`（常驻面板使用 `DS.borderStrong`）规范，点任意按钮先 `dismiss(id:)`、重排剩余右上角面板、标记历史记录已处理，再执行对应 `action.handler()`；同时监听屏幕参数变化（`didChangeScreenParametersNotification`）重新定位右上角卡片。
 - 系统通知模式下，将各按钮注册为 `UNNotificationCategory` 操作；点击通知本体等价于触发 `isPrimary` 主按钮，并自动将对应历史记录标为已读/已操作。`dismiss(id:)` 会同步清理待投递与已投递的同 `id` 系统通知。
 
 ## 历史消息持久化与状态管理

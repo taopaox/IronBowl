@@ -13,7 +13,7 @@ public nonisolated enum ReminderStyle: String, Codable, Sendable, CaseIterable, 
         switch self {
         case .system: "系统通知"
         case .cornerCard: "右上角浮动卡片（不操作不消失）"
-        case .centerDialog: "屏幕中央弹框"
+        case .centerDialog: "屏幕中央弹框（不操作不消失）"
         }
     }
 
@@ -50,6 +50,7 @@ public struct ReminderContent {
     public let targetPluginID: String?
     public let targetSettingsPage: String?
     public let recordInHistory: Bool
+    public let isPersistent: Bool
     public let actions: [ReminderAction]
 
     public init(
@@ -61,6 +62,7 @@ public struct ReminderContent {
         targetPluginID: String? = nil,
         targetSettingsPage: String? = nil,
         recordInHistory: Bool = true,
+        isPersistent: Bool = false,
         actions: [ReminderAction]
     ) {
         self.id = id
@@ -71,6 +73,7 @@ public struct ReminderContent {
         self.targetPluginID = targetPluginID
         self.targetSettingsPage = targetSettingsPage
         self.recordInHistory = recordInHistory
+        self.isPersistent = isPersistent
         self.actions = actions
     }
 }
@@ -124,10 +127,12 @@ public final class ReminderCenter {
     }
 
     @ObservationIgnored private var panels: [String: NSPanel] = [:]
+    @ObservationIgnored private var cornerPanelOrder: [String] = []
     @ObservationIgnored private var systemContents: [String: (content: ReminderContent, historyID: Int64?)] = [:]
     @ObservationIgnored private var categories: Set<UNNotificationCategory> = []
     @ObservationIgnored private let historyStore: ReminderHistoryStore?
     @ObservationIgnored private let notificationDelegate: NotificationDelegate
+    @ObservationIgnored nonisolated(unsafe) private var screenObserver: NSObjectProtocol?
     @ObservationIgnored private var nextInMemoryID: Int64 = 1
     @ObservationIgnored private let maxHistoryCount = 500
 
@@ -141,7 +146,22 @@ public final class ReminderCenter {
         self.notificationDelegate = delegate
         delegate.owner = self
         notificationCenter?.delegate = delegate
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.layoutCornerPanels()
+            }
+        }
         reloadHistory()
+    }
+
+    deinit {
+        if let screenObserver {
+            NotificationCenter.default.removeObserver(screenObserver)
+        }
     }
 
     /// 读取当前系统通知权限与提醒样式状态。
@@ -235,6 +255,10 @@ public final class ReminderCenter {
 
     public func dismiss(id: String) {
         panels.removeValue(forKey: id)?.orderOut(nil)
+        if cornerPanelOrder.contains(id) {
+            cornerPanelOrder.removeAll { $0 == id }
+            layoutCornerPanels()
+        }
         if systemContents.removeValue(forKey: id) != nil {
             notificationCenter?.removePendingNotificationRequests(withIdentifiers: [id])
             notificationCenter?.removeDeliveredNotifications(withIdentifiers: [id])
@@ -369,23 +393,44 @@ public final class ReminderCenter {
         panel.hasShadow = false
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
+        panel.canHide = false
         panel.appearance = NSApp?.appearance
         panel.contentView = hosting
 
-        let screen = NSScreen.main ?? NSScreen.screens.first
-        if let frame = screen?.visibleFrame {
-            let origin = centered
-                ? NSPoint(x: frame.midX - size.width / 2, y: frame.midY - size.height / 2)
-                : NSPoint(x: frame.maxX - size.width - 16, y: frame.maxY - size.height - 12)
-            panel.setFrameOrigin(origin)
+        if centered {
+            cornerPanelOrder.removeAll { $0 == content.id }
+            let screen = NSScreen.main ?? NSScreen.screens.first
+            if let frame = screen?.visibleFrame {
+                let origin = NSPoint(x: frame.midX - size.width / 2, y: frame.midY - size.height / 2)
+                panel.setFrameOrigin(origin)
+            }
         }
         panel.alphaValue = 0
+        panels[content.id] = panel
+        if !centered {
+            cornerPanelOrder.removeAll { $0 == content.id }
+            cornerPanelOrder.append(content.id)
+            layoutCornerPanels()
+        }
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.22
             panel.animator().alphaValue = 1
         }
-        panels[content.id] = panel
+    }
+
+    private func layoutCornerPanels() {
+        let screen = NSScreen.main ?? NSScreen.screens.first
+        guard let frame = screen?.visibleFrame else { return }
+        var topY = frame.maxY - 12
+        for id in cornerPanelOrder {
+            guard let panel = panels[id] else { continue }
+            let size = panel.frame.size
+            let y = max(frame.minY + 12, topY - size.height)
+            let x = frame.maxX - size.width - 16
+            panel.setFrameOrigin(NSPoint(x: x, y: y))
+            topY -= max(64, size.height - 36)
+        }
     }
 
     // MARK: 系统通知
@@ -495,6 +540,12 @@ struct ReminderPanelView: View {
                     Text(content.title).font(DS.font(15, .semibold))
                     Text(content.message).font(DS.body).foregroundStyle(DS.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    if content.isPersistent {
+                        Label("未确认前常驻显示", systemImage: "pin.fill")
+                            .font(DS.caption)
+                            .foregroundStyle(DS.warning)
+                            .padding(.top, 2)
+                    }
                 }
             }
             HStack(spacing: 8) {
@@ -511,7 +562,7 @@ struct ReminderPanelView: View {
         .padding(18)
         .frame(width: centered ? 420 : 350)
         .background(DS.card, in: .rect(cornerRadius: 14))
-        .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(DS.border) }
+        .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(content.isPersistent ? DS.borderStrong : DS.border) }
         .shadow(color: .black.opacity(0.07), radius: 12, y: 4)
         .padding(24) // 给阴影留空间
     }

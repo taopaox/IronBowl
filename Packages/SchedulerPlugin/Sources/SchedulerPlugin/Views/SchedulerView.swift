@@ -72,7 +72,7 @@ struct SchedulerView: View {
         }
         .background(DS.canvas)
         .sheet(item: $editorDraft) { draft in
-            TaskEditorSheet(scheduler: scheduler, existingTask: draft.task)
+            TaskEditorSheet(scheduler: scheduler, workCalendar: workCalendar, existingTask: draft.task)
         }
         .alert("删除定时任务？", isPresented: Binding(
             get: { deletingTask != nil },
@@ -178,6 +178,10 @@ struct SchedulerView: View {
                             }
                             if action == nil {
                                 Tag("对应插件未启用", color: DS.warning)
+                            }
+                            if task.actionID == TaskScheduler.coreClockOutReminderActionID,
+                               (task.parameters["keepVisible"] ?? "true").lowercased() != "false" {
+                                Tag("常驻不消失", color: DS.warning)
                             }
                         }
 

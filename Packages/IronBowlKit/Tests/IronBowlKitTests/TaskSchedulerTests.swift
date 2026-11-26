@@ -202,3 +202,170 @@ import Testing
     #expect(shellRun?.status == .succeeded)
     #expect(shellRun?.detail.contains("ironbowl-ok") == true)
 }
+
+@MainActor @Test func beforeWorkEndScheduleRespectsWorkdaysFlexOvertimeAndCrossMidnight() throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "scheduler-workend-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let db = try AppDatabase(url: url, migrations: [])
+    let settings = SettingsStore(database: db)
+    settings[WorkCalendar.weekdaysKey] = [2, 3, 4, 5, 6]
+    settings[WorkCalendar.startKey] = "09:00"
+    settings[WorkCalendar.endKey] = "18:00"
+    settings[WorkCalendar.flexMinutesKey] = 30
+
+    let workCal = WorkCalendar(database: db, settings: settings)
+    let cal = Calendar.current
+    let schedule = TaskSchedule(kind: .beforeWorkEnd, minutesBeforeWorkEnd: 5)
+
+    // 周三 2026-11-25 10:00 -> 当天下班前 5 分钟（17:55）
+    let wedMorning = cal.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 10, minute: 0))!
+    #expect(schedule.nextRun(after: wedMorning, workCalendar: workCal, calendar: cal)
+        == cal.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 17, minute: 55)))
+
+    // 周三 17:56 -> 推进到周四 17:55
+    let wedLate = cal.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 17, minute: 56))!
+    #expect(schedule.nextRun(after: wedLate, workCalendar: workCal, calendar: cal)
+        == cal.date(from: DateComponents(year: 2026, month: 11, day: 26, hour: 17, minute: 55)))
+
+    // 周四 08:40 弹性打卡 -> 下班提前 20 分钟至 17:40，触发提前到 17:35
+    let thu = cal.date(from: DateComponents(year: 2026, month: 11, day: 26))!
+    let thuClockIn = cal.date(from: DateComponents(year: 2026, month: 11, day: 26, hour: 8, minute: 40))!
+    workCal.setClockIn(thuClockIn, on: thu)
+    let thuMorning = cal.date(from: DateComponents(year: 2026, month: 11, day: 26, hour: 10, minute: 0))!
+    #expect(schedule.nextRun(after: thuMorning, workCalendar: workCal, calendar: cal)
+        == cal.date(from: DateComponents(year: 2026, month: 11, day: 26, hour: 17, minute: 35)))
+
+    // 周四计划加班 2 小时 -> 下班顺延至 19:40，触发顺延到 19:35
+    workCal.setOvertimeHours(2.0, on: thu)
+    let thuEvening = cal.date(from: DateComponents(year: 2026, month: 11, day: 26, hour: 18, minute: 0))!
+    #expect(schedule.nextRun(after: thuEvening, workCalendar: workCal, calendar: cal)
+        == cal.date(from: DateComponents(year: 2026, month: 11, day: 26, hour: 19, minute: 35)))
+
+    // 周五 2026-11-27 计划加班 6.5 小时（次日 00:30 下班）-> 周六 00:10 查询应命中周六 00:25
+    let fri = cal.date(from: DateComponents(year: 2026, month: 11, day: 27))!
+    workCal.setOvertimeHours(6.5, on: fri)
+    let satMidnight = cal.date(from: DateComponents(year: 2026, month: 11, day: 28, hour: 0, minute: 10))!
+    #expect(schedule.nextRun(after: satMidnight, workCalendar: workCal, calendar: cal)
+        == cal.date(from: DateComponents(year: 2026, month: 11, day: 28, hour: 0, minute: 25)))
+
+    // 清除周五加班，将周六设为补班、下周一设为调休放假
+    workCal.setOvertimeHours(0, on: fri)
+    let sat = cal.date(from: DateComponents(year: 2026, month: 11, day: 28))!
+    let mon = cal.date(from: DateComponents(year: 2026, month: 11, day: 30))!
+    workCal.setOverride(sat, isOffDay: false, note: "补班")
+    workCal.setOverride(mon, isOffDay: true, note: "调休")
+    let friEvening = cal.date(from: DateComponents(year: 2026, month: 11, day: 27, hour: 18, minute: 0))!
+    #expect(schedule.nextRun(after: friEvening, workCalendar: workCal, calendar: cal)
+        == cal.date(from: DateComponents(year: 2026, month: 11, day: 28, hour: 17, minute: 55)))
+}
+
+@Test func taskScheduleLegacyJSONDecodesWithoutMinutesBeforeWorkEnd() throws {
+    let legacyJSON = #"{"kind":"workdays","hour":17,"minute":0,"weekdays":[2,3,4,5,6],"intervalMinutes":60}"#
+    let decoded = try JSONDecoder().decode(TaskSchedule.self, from: Data(legacyJSON.utf8))
+    #expect(decoded.kind == .workdays)
+    #expect(decoded.hour == 17)
+    #expect(decoded.minute == 0)
+    #expect(decoded.minutesBeforeWorkEnd == 5)
+}
+
+@Test func evaluateDueHandlesBeforeWorkEndOnTimeCatchUpAndHolidaySkip() {
+    let cal = Calendar(identifier: .gregorian)
+    let scheduledFor = cal.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 17, minute: 55))!
+    let schedule = TaskSchedule(kind: .beforeWorkEnd, minutesBeforeWorkEnd: 5)
+    let workEnd: (Date) -> Date? = { day in
+        cal.date(bySettingHour: 18, minute: 0, second: 0, of: day)
+    }
+
+    let task = ScheduledTask(
+        id: "clockout.eval",
+        name: "打卡提醒",
+        actionID: TaskScheduler.coreClockOutReminderActionID,
+        isEnabled: true,
+        schedule: schedule,
+        misfirePolicy: .runIfMissedToday,
+        nextRunAt: scheduledFor
+    )
+
+    // 准点宽限期内
+    let onTime = scheduledFor.addingTimeInterval(60)
+    if case .fire(let trigger, _, _, _) = TaskScheduler.evaluateDue(
+        task: task,
+        now: onTime,
+        isWorkday: { _ in true },
+        workEndOnDay: workEnd,
+        calendar: cal
+    ) {
+        #expect(trigger == .scheduled)
+    } else {
+        Issue.record("预期准点触发")
+    }
+
+    // 同日迟到且今天仍为工作日 -> 补执行
+    let sameDayLate = cal.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 18, minute: 10))!
+    if case .fire(let trigger, _, _, _) = TaskScheduler.evaluateDue(
+        task: task,
+        now: sameDayLate,
+        isWorkday: { _ in true },
+        workEndOnDay: workEnd,
+        calendar: cal
+    ) {
+        #expect(trigger == .misfireCatchUp)
+    } else {
+        Issue.record("预期同日补执行")
+    }
+
+    // 今天变成非工作日 -> 不补跑，仅推进
+    if case .advanceOnly = TaskScheduler.evaluateDue(
+        task: task,
+        now: sameDayLate,
+        isWorkday: { day in !cal.isDate(day, inSameDayAs: sameDayLate) },
+        workEndOnDay: workEnd,
+        calendar: cal
+    ) {
+    } else {
+        Issue.record("预期非工作日跳过补跑")
+    }
+}
+
+@MainActor @Test func clockOutReminderActionResolvesPersistentStyleAndRecordsSingleHistory() async throws {
+    #expect(TaskScheduler.resolveClockOutStyle(configured: .system, keepVisible: true) == .cornerCard)
+    #expect(TaskScheduler.resolveClockOutStyle(configured: .centerDialog, keepVisible: true) == .centerDialog)
+    #expect(TaskScheduler.resolveClockOutStyle(configured: .system, keepVisible: false) == .system)
+
+    let url = FileManager.default.temporaryDirectory.appending(path: "scheduler-clockout-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let db = try AppDatabase(url: url, migrations: [])
+    let settings = SettingsStore(database: db)
+    let workCal = WorkCalendar(database: db, settings: settings)
+    let reminders = ReminderCenter(database: db)
+    let scheduler = TaskScheduler(
+        database: db,
+        settings: settings,
+        workCalendar: workCal,
+        reminders: reminders
+    )
+
+    let task = ScheduledTask(
+        id: "test.clockout",
+        name: "打卡提醒",
+        actionID: TaskScheduler.coreClockOutReminderActionID,
+        isEnabled: false,
+        schedule: TaskSchedule(kind: .beforeWorkEnd, minutesBeforeWorkEnd: 5),
+        notifyStyle: .system,
+        parameters: [
+            "title": "下班打卡提醒",
+            "message": "",
+            "keepVisible": "true",
+            "snoozeMinutes": "5",
+        ]
+    )
+    scheduler.saveTask(task)
+    await scheduler.runNow(taskID: task.id)
+    reminders.dismiss(id: "scheduler.clockout.\(task.id)")
+
+    #expect(scheduler.recentRuns.first?.status == .succeeded)
+    #expect(reminders.history.count == 1)
+    #expect(reminders.history[0].source == .scheduler)
+    #expect(reminders.history[0].style == .cornerCard)
+    #expect(reminders.history[0].title == "下班打卡提醒")
+}

@@ -36,6 +36,17 @@ import Testing
     plugin.start(context: context)
     #expect(scheduler.isStarted)
 
+    let seeded = try #require(scheduler.tasks.first(where: { $0.id == TaskScheduler.defaultClockOutReminderTaskID }))
+    #expect(seeded.name == "打卡提醒")
+    #expect(seeded.actionID == TaskScheduler.coreClockOutReminderActionID)
+    #expect(seeded.isEnabled)
+    #expect(seeded.schedule.kind == .beforeWorkEnd)
+    #expect(seeded.schedule.minutesBeforeWorkEnd == 5)
+    #expect(seeded.notifyStyle == .cornerCard)
+    #expect(seeded.parameters["keepVisible"] == "true")
+
+    scheduler.setEnabled(taskID: seeded.id, enabled: false)
+
     scheduler.saveTask(ScheduledTask(
         id: "t.card",
         name: "测试提醒",

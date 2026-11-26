@@ -16,9 +16,16 @@ public nonisolated enum DueDecision: Sendable, Equatable {
 /// 通用定时任务调度引擎（仅主工作台启动，独立版应用不启动定时器）。
 @Observable
 public final class TaskScheduler {
-    public static let coreReminderActionID = "core.reminder"
-    public static let coreShellActionID = "core.shell"
-    public static let schedulerPluginID = "scheduler"
+    public nonisolated static let coreReminderActionID = "core.reminder"
+    public nonisolated static let coreClockOutReminderActionID = "core.clockOutReminder"
+    public nonisolated static let coreShellActionID = "core.shell"
+    public nonisolated static let defaultClockOutReminderTaskID = "builtin.core.clockOutReminder"
+    public nonisolated static let schedulerPluginID = "scheduler"
+
+    /// 勾选「常驻不消失」时，若原本设为系统通知，强制改用右上角浮动卡片以确保不点不消失。
+    public nonisolated static func resolveClockOutStyle(configured: ReminderStyle, keepVisible: Bool) -> ReminderStyle {
+        (keepVisible && configured == .system) ? .cornerCard : configured
+    }
 
     @ObservationIgnored private let store: TaskSchedulerStore
     @ObservationIgnored private let settings: SettingsStore
@@ -29,6 +36,7 @@ public final class TaskScheduler {
 
     @ObservationIgnored nonisolated(unsafe) private var timer: Timer?
     @ObservationIgnored nonisolated(unsafe) private var wakeObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var snoozeTimers: [String: Timer] = [:]
     @ObservationIgnored private var actionsByID: [String: ScheduledTaskAction] = [:]
 
     public private(set) var tasks: [ScheduledTask] = []
@@ -63,6 +71,9 @@ public final class TaskScheduler {
 
     deinit {
         timer?.invalidate()
+        for snoozeTimer in snoozeTimers.values {
+            snoozeTimer.invalidate()
+        }
         if let wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
         }
@@ -99,6 +110,10 @@ public final class TaskScheduler {
         isStarted = false
         timer?.invalidate()
         timer = nil
+        for snoozeTimer in snoozeTimers.values {
+            snoozeTimer.invalidate()
+        }
+        snoozeTimers.removeAll()
         if let wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
             self.wakeObserver = nil
@@ -184,7 +199,10 @@ public final class TaskScheduler {
             let title = ctx.string("title", default: ctx.task.name).trimmingCharacters(in: .whitespacesAndNewlines)
             let message = ctx.string("message", default: "到点啦").trimmingCharacters(in: .whitespacesAndNewlines)
             let resolvedTitle = title.isEmpty ? ctx.task.name : title
-            let resolvedMessage = message.isEmpty ? "已到达计划时间 \(ctx.task.schedule.timeText)" : message
+            let fallbackMessage = ctx.task.schedule.kind == .beforeWorkEnd
+                ? "已到达\(ctx.task.schedule.summaryText)"
+                : "已到达计划时间 \(ctx.task.schedule.timeText)"
+            let resolvedMessage = message.isEmpty ? fallbackMessage : message
             let content = ReminderContent(
                 id: "scheduler.task.\(ctx.task.id)",
                 title: resolvedTitle,
@@ -192,6 +210,7 @@ public final class TaskScheduler {
                 systemImage: "bell.badge",
                 source: .scheduler,
                 targetPluginID: Self.schedulerPluginID,
+                isPersistent: ctx.task.notifyStyle != .system,
                 actions: [
                     ReminderAction(id: "ok", title: "知道了", isPrimary: true) {},
                 ]
@@ -199,6 +218,70 @@ public final class TaskScheduler {
             self?.reminders.show(content, style: ctx.task.notifyStyle)
             return .succeeded(
                 summary: "已发送桌面提醒：\(resolvedTitle)",
+                detail: resolvedMessage,
+                shouldNotifyOverride: false
+            )
+        })
+
+        register(action: ScheduledTaskAction(
+            id: Self.coreClockOutReminderActionID,
+            title: "下班打卡提醒",
+            subtitle: "到点弹出常驻桌面的下班打卡提醒卡片，点「已打卡」或「稍后提醒」前不会自动消失。",
+            pluginID: nil,
+            systemImage: "clock.badge.exclamationmark",
+            defaultName: "打卡提醒",
+            parameterSpecs: [
+                ScheduledActionParameterSpec(
+                    key: "title",
+                    title: "提醒标题",
+                    description: nil,
+                    kind: .text(placeholder: "例如：下班打卡提醒"),
+                    defaultValue: "下班打卡提醒"
+                ),
+                ScheduledActionParameterSpec(
+                    key: "message",
+                    title: "自定义提醒内容",
+                    description: "留空时自动显示今日实际下班时间与剩余分钟。",
+                    kind: .multiline(placeholder: "留空自动计算，例如：快到下班时间了，记得打卡。"),
+                    defaultValue: ""
+                ),
+                ScheduledActionParameterSpec(
+                    key: "keepVisible",
+                    title: "常驻不消失",
+                    description: "开启后强制使用桌面浮动卡片或中央弹框，点击按钮前不会自动消失。",
+                    kind: .bool,
+                    defaultValue: "true"
+                ),
+                ScheduledActionParameterSpec(
+                    key: "snoozeMinutes",
+                    title: "稍后提醒间隔",
+                    description: "点击「稍后提醒」后再次弹窗等待的分钟数。",
+                    kind: .int(min: 1, max: 30, step: 1, unit: "分钟"),
+                    defaultValue: "5"
+                ),
+            ]
+        ) { [weak self] ctx in
+            guard let self else {
+                return .failed(summary: "调度器不可用", detail: "TaskScheduler 已释放。")
+            }
+            let rawTitle = ctx.string("title", default: ctx.task.name).trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedTitle = rawTitle.isEmpty ? ctx.task.name : rawTitle
+            let customMessage = ctx.string("message")
+            let keepVisible = ctx.bool("keepVisible", default: true)
+            let snoozeMinutes = min(30, max(1, ctx.int("snoozeMinutes", default: 5)))
+
+            self.cancelSnoozeReminder(taskID: ctx.task.id)
+            let resolvedMessage = self.presentClockOutReminder(
+                taskID: ctx.task.id,
+                title: resolvedTitle,
+                customMessage: customMessage,
+                keepVisible: keepVisible,
+                snoozeMinutes: snoozeMinutes,
+                configuredStyle: ctx.task.notifyStyle,
+                now: ctx.now
+            )
+            return .succeeded(
+                summary: "已弹出打卡提醒：\(resolvedTitle)",
                 detail: resolvedMessage,
                 shouldNotifyOverride: false
             )
@@ -272,6 +355,79 @@ public final class TaskScheduler {
         })
     }
 
+    private func buildClockOutMessage(customMessage: String, now: Date) -> String {
+        let trimmed = customMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        if let end = workCalendar.effectiveWorkEnd(on: now),
+           let offWorkText = workCalendar.offWorkTimeText(on: now) {
+            let remainingMinutes = Int(ceil(end.timeIntervalSince(now) / 60))
+            if remainingMinutes > 0 {
+                return "距离今日下班（\(offWorkText)）还有约 \(remainingMinutes) 分钟，请记得下班打卡。"
+            }
+            return "已到今日下班时间（\(offWorkText)），别忘了下班打卡！"
+        }
+        return "快到下班时间了，请记得下班打卡。"
+    }
+
+    private func presentClockOutReminder(
+        taskID: String,
+        title: String,
+        customMessage: String,
+        keepVisible: Bool,
+        snoozeMinutes: Int,
+        configuredStyle: ReminderStyle,
+        now: Date = Date()
+    ) -> String {
+        let resolvedMessage = buildClockOutMessage(customMessage: customMessage, now: now)
+        let resolvedStyle = Self.resolveClockOutStyle(configured: configuredStyle, keepVisible: keepVisible)
+        let content = ReminderContent(
+            id: "scheduler.clockout.\(taskID)",
+            title: title,
+            message: resolvedMessage,
+            systemImage: "clock.badge.exclamationmark",
+            source: .scheduler,
+            targetPluginID: Self.schedulerPluginID,
+            isPersistent: resolvedStyle != .system,
+            actions: [
+                ReminderAction(id: "snooze", title: "\(snoozeMinutes) 分钟后再提醒") { [weak self] in
+                    self?.scheduleSnoozeReminder(taskID: taskID, minutes: snoozeMinutes) { [weak self] in
+                        guard let self else { return }
+                        _ = self.presentClockOutReminder(
+                            taskID: taskID,
+                            title: title,
+                            customMessage: customMessage,
+                            keepVisible: keepVisible,
+                            snoozeMinutes: snoozeMinutes,
+                            configuredStyle: configuredStyle
+                        )
+                    }
+                },
+                ReminderAction(id: "done", title: "已打卡", isPrimary: true) { [weak self] in
+                    self?.cancelSnoozeReminder(taskID: taskID)
+                },
+            ]
+        )
+        reminders.show(content, style: resolvedStyle)
+        return resolvedMessage
+    }
+
+    private func scheduleSnoozeReminder(taskID: String, minutes: Int, show: @escaping @MainActor () -> Void) {
+        cancelSnoozeReminder(taskID: taskID)
+        let interval = TimeInterval(max(1, minutes) * 60)
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.snoozeTimers.removeValue(forKey: taskID)
+                show()
+            }
+        }
+        timer.tolerance = min(5, interval * 0.1)
+        snoozeTimers[taskID] = timer
+    }
+
+    private func cancelSnoozeReminder(taskID: String) {
+        snoozeTimers.removeValue(forKey: taskID)?.invalidate()
+    }
+
     // MARK: - 任务管理
 
     public func saveTask(_ incoming: ScheduledTask, now: Date = Date()) {
@@ -279,6 +435,9 @@ public final class TaskScheduler {
         task.name = task.name.trimmingCharacters(in: .whitespacesAndNewlines)
         if task.name.isEmpty {
             task.name = action(id: task.actionID)?.defaultName ?? "未命名定时任务"
+        }
+        if !task.isEnabled {
+            cancelSnoozeReminder(taskID: task.id)
         }
         task.updatedAt = now
         task.nextRunAt = task.isEnabled ? task.schedule.nextRun(after: now, workCalendar: workCalendar) : nil
@@ -288,6 +447,9 @@ public final class TaskScheduler {
 
     public func setEnabled(taskID: String, enabled: Bool, now: Date = Date()) {
         guard var task = tasks.first(where: { $0.id == taskID }) else { return }
+        if !enabled {
+            cancelSnoozeReminder(taskID: taskID)
+        }
         task.isEnabled = enabled
         task.updatedAt = now
         task.nextRunAt = enabled ? task.schedule.nextRun(after: now, workCalendar: workCalendar) : nil
@@ -296,6 +458,7 @@ public final class TaskScheduler {
     }
 
     public func deleteTask(id: String, deleteRuns: Bool = false) {
+        cancelSnoozeReminder(taskID: id)
         store.deleteTask(id: id, deleteRuns: deleteRuns)
         tasks = store.allTasks()
         if deleteRuns {
@@ -344,12 +507,18 @@ public final class TaskScheduler {
         task: ScheduledTask,
         now: Date,
         isWorkday: (Date) -> Bool,
+        workEndOnDay: ((Date) -> Date?)? = nil,
         calendar: Calendar = .current
     ) -> DueDecision {
         guard task.isEnabled, let scheduledFor = task.nextRunAt else { return .notDue }
         guard now >= scheduledFor else { return .notDue }
 
-        let next = task.schedule.nextRun(after: now, isWorkday: isWorkday, calendar: calendar)
+        let next = task.schedule.nextRun(
+            after: now,
+            isWorkday: isWorkday,
+            workEndOnDay: workEndOnDay,
+            calendar: calendar
+        )
         let slotKey = task.schedule.slotKey(for: scheduledFor, calendar: calendar)
         if task.lastFiredSlot == slotKey {
             if let next { return .advanceOnly(nextRunAt: next) }
@@ -364,7 +533,7 @@ public final class TaskScheduler {
         if task.misfirePolicy == .runIfMissedToday,
            task.schedule.kind != .interval,
            calendar.isDate(now, inSameDayAs: scheduledFor) {
-            if task.schedule.kind == .workdays && !isWorkday(now) {
+            if (task.schedule.kind == .workdays || task.schedule.kind == .beforeWorkEnd) && !isWorkday(now) {
                 if let next { return .advanceOnly(nextRunAt: next) }
                 return .notDue
             }
@@ -383,7 +552,12 @@ public final class TaskScheduler {
 
         for task in currentTasks {
             guard !runningTaskIDs.contains(task.id) else { continue }
-            let decision = Self.evaluateDue(task: task, now: now, isWorkday: { workCalendar.isWorkday($0) })
+            let decision = Self.evaluateDue(
+                task: task,
+                now: now,
+                isWorkday: { self.workCalendar.isWorkday($0) },
+                workEndOnDay: { self.workCalendar.effectiveWorkEnd(on: $0) }
+            )
             switch decision {
             case .notDue:
                 continue

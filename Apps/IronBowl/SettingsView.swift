@@ -354,19 +354,29 @@ struct WorkTimeSettings: View {
                     }
                 }
             }
-            DSRow("上班时间") { TimeField(value: s.binding(WorkCalendar.startKey)) }
-            DSRow("下班时间") { TimeField(value: s.binding(WorkCalendar.endKey)) }
+            DSRow("上班时间") { TimeField(value: workTimeBinding(WorkCalendar.startKey)) }
+            DSRow("下班时间") { TimeField(value: workTimeBinding(WorkCalendar.endKey)) }
             DSRow("午休", description: "每天默认工时 = 下班 − 上班 − 午休，现在是 \(String(format: "%g", cal.defaultWorkHours)) 小时。") {
                 DSStepper(intValue: s.binding(WorkCalendar.lunchMinutesKey), in: 0...180, step: 15) { "\($0) 分钟" }
             }
             DSRow("弹性时间", description: "上班早到几分钟就早走几分钟，晚到几分钟就晚走几分钟，最多这么多。需要拿到当天的上班打卡时间才生效。") {
-                DSStepper(intValue: s.binding(WorkCalendar.flexMinutesKey), in: 0...120, step: 5) { $0 == 0 ? "不弹性" : "\($0) 分钟" }
+                DSStepper(intValue: workTimeBinding(WorkCalendar.flexMinutesKey), in: 0...120, step: 5) { $0 == 0 ? "不弹性" : "\($0) 分钟" }
             }
         }
 
         DingTalkAttendanceSettings(app: app)
 
         DSHolidaySettingsView(workCalendar: cal, settings: s)
+    }
+
+    private func workTimeBinding<Value>(_ key: SettingKey<Value>) -> Binding<Value> {
+        Binding(
+            get: { app.settings[key] },
+            set: { newValue in
+                app.settings[key] = newValue
+                app.scheduler.recomputeNextRuns()
+            }
+        )
     }
 }
 

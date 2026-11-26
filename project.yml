@@ -1,6 +1,7 @@
 name: IronBowl
 options:
   bundleIdPrefix: com.taopaox
+  developmentLanguage: zh-Hans
   deploymentTarget:
     macOS: "26.0"
   createIntermediateGroups: true
@@ -52,8 +53,9 @@ targets:
     info:
       path: Apps/IronBowl/Info.plist
       properties:
-        CFBundleDisplayName: 饭碗
+        CFBundleDisplayName: IronBowl
         CFBundleName: IronBowl
+        LSHasLocalizedDisplayName: true
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSUIElement: true
@@ -84,8 +86,9 @@ targets:
     info:
       path: Apps/Calendar/Info.plist
       properties:
-        CFBundleDisplayName: 饭碗万年历
+        CFBundleDisplayName: IronBowlCalendar
         CFBundleName: IronBowlCalendar
+        LSHasLocalizedDisplayName: true
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSUIElement: true

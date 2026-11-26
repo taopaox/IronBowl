@@ -149,8 +149,8 @@ def render_release_notes(
     lines.extend(
         [
             "### 安装包说明",
-            f"- `IronBowl-v{version}-macOS-arm64.dmg` 与 `IronBowl-v{version}-macOS-arm64.zip`：饭碗主工作台（`IronBowl.app`）",
-            f"- `IronBowlCalendar-v{version}-macOS-arm64.dmg` 与 `IronBowlCalendar-v{version}-macOS-arm64.zip`：独立版饭碗万年历（`IronBowlCalendar.app`）",
+            f"- `IronBowl-v{version}-macOS-arm64.dmg` 与 `IronBowl-v{version}-macOS-arm64.zip`：饭碗主工作台（`IronBowl.app`，访达显示为「饭碗」）",
+            f"- `IronBowlCalendar-v{version}-macOS-arm64.dmg` 与 `IronBowlCalendar-v{version}-macOS-arm64.zip`：独立版万年历（`IronBowlCalendar.app`，访达显示为「万年历」）",
             "- `SHA256SUMS.txt`：安装包 SHA-256 校验文件",
             "",
             "> **首次打开提示**：当前构建采用本地 Ad-Hoc 签名。若 macOS 提示无法验证开发者或文件已损坏，请将应用拖入 `/Applications` 后在终端执行：",

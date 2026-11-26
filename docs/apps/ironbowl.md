@@ -1,6 +1,6 @@
 # 饭碗主工作台应用（`Apps/IronBowl`）
 
-`IronBowl`（Bundle ID：`com.taopaox.ironbowl`，产品名 `IronBowl`，显示名「饭碗」）是集成所有功能插件的 macOS 菜单栏常驻工作台应用。
+`IronBowl`（Bundle ID：`com.taopaox.ironbowl`，包名 `IronBowl.app`，`Info.plist` 保留与包名一致的英文 `CFBundleName`/`CFBundleDisplayName` 以符合 macOS 本地化校验规则，并开启 `LSHasLocalizedDisplayName = true` 配合 `Apps/IronBowl/{zh-Hans,en}.lproj/InfoPlist.strings` 在访达、程序坞、系统菜单栏及登录项中统一显示为「饭碗」）是集成所有功能插件的 macOS 菜单栏常驻工作台应用。
 
 ## 源文件结构
 

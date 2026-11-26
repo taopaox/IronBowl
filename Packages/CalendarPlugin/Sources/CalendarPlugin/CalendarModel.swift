@@ -242,7 +242,7 @@ public final class CalendarModel {
     public private(set) var now = Date()
     /// macOS 真实的系统深浅外观，不受应用自身强制外观（`NSApp.appearance`）影响。
     public private(set) var systemColorScheme: ColorScheme
-    /// 独立版「饭碗万年历」是否正在运行（主工作台据此自动隐藏内置状态栏日历，避免重复显示）。
+    /// 独立版「万年历」是否正在运行（主工作台据此自动隐藏内置状态栏日历，避免重复显示）。
     public private(set) var isStandaloneCalendarRunning = false
     private enum ClockMode { case minute, second }
     @ObservationIgnored private var timer: Timer?
@@ -432,7 +432,7 @@ public final class CalendarModel {
         clockMode = nil
     }
 
-    /// 刷新独立版「饭碗万年历」的运行状态（融合系统运行列表、跨进程通知与 PID 存活核验）。
+    /// 刷新独立版「万年历」的运行状态（融合系统运行列表、跨进程通知与 PID 存活核验）。
     public func refreshStandaloneCalendarState(excludingPID: pid_t? = nil) {
         guard !isStandaloneHost else { return }
         if let excludingPID {
@@ -652,7 +652,7 @@ public final class CalendarModel {
         Self.popoverTimeParts(now, use24Hour: use24HourTime)
     }
 
-    /// 主工作台是否应显示内置状态栏日历（独立版「饭碗万年历」运行时自动避让隐藏）。
+    /// 主工作台是否应显示内置状态栏日历（独立版「万年历」运行时自动避让隐藏）。
     public var shouldShowEmbeddedMenuBar: Bool {
         CalendarMenuBarPolicy.shouldShowEmbeddedMenuBar(
             settingEnabled: menuBarEnabled,

@@ -72,13 +72,22 @@ jobs:
 
           for app in IronBowl.app IronBowlCalendar.app; do
             plist="$PRODUCTS_DIR/$app/Contents/Info.plist"
+            res_dir="$PRODUCTS_DIR/$app/Contents/Resources"
             actual_ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
             actual_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")"
+            display_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$plist")"
+            bundle_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$plist")"
+            has_localized="$(/usr/libexec/PlistBuddy -c 'Print :LSHasLocalizedDisplayName' "$plist")"
             feed_url="$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$plist")"
             pub_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$plist")"
-            echo "$app -> version=$actual_ver build=$actual_build feed=$feed_url"
+            echo "$app -> version=$actual_ver build=$actual_build display=$display_name name=$bundle_name localized=$has_localized feed=$feed_url"
             [[ "$actual_ver" == "$VER" ]]
             [[ "$actual_build" == "$EXPECTED_BUILD" ]]
+            [[ -n "$display_name" ]]
+            [[ -n "$bundle_name" ]]
+            [[ "$has_localized" == "true" ]]
+            [[ -f "$res_dir/zh-Hans.lproj/InfoPlist.strings" ]]
+            [[ -f "$res_dir/en.lproj/InfoPlist.strings" ]]
             [[ -n "$feed_url" ]]
             [[ -n "$pub_key" ]]
           done
@@ -104,8 +113,8 @@ jobs:
             rm -rf "$stage_dir"
           }
 
-          package_app "IronBowl.app" "IronBowl" "IronBowl v${VER}"
-          package_app "IronBowlCalendar.app" "IronBowlCalendar" "IronBowlCalendar v${VER}"
+          package_app "IronBowl.app" "IronBowl" "饭碗 v${VER}"
+          package_app "IronBowlCalendar.app" "IronBowlCalendar" "万年历 v${VER}"
 
           (cd dist && shasum -a 256 *.dmg *.zip > SHA256SUMS.txt)
           ls -lh dist/
@@ -138,7 +147,7 @@ jobs:
           CALENDAR_SIGN="$(printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$SPARKLE_TMP/bin/sign_update" --ed-key-file - "$CALENDAR_ZIP")"
 
           python3 scripts/release.py appcast \
-            --app-name "饭碗 IronBowl" \
+            --app-name "饭碗" \
             --feed-url "https://github.com/${REPO}/releases/latest/download/appcast-ironbowl.xml" \
             --release-url "https://github.com/${REPO}/releases/tag/${TAG}" \
             --download-url "https://github.com/${REPO}/releases/download/${TAG}/IronBowl-v${VER}-macOS-arm64.zip" \
@@ -150,7 +159,7 @@ jobs:
             --output dist/appcast-ironbowl.xml
 
           python3 scripts/release.py appcast \
-            --app-name "饭碗万年历 IronBowlCalendar" \
+            --app-name "万年历" \
             --feed-url "https://github.com/${REPO}/releases/latest/download/appcast-calendar.xml" \
             --release-url "https://github.com/${REPO}/releases/tag/${TAG}" \
             --download-url "https://github.com/${REPO}/releases/download/${TAG}/IronBowlCalendar-v${VER}-macOS-arm64.zip" \

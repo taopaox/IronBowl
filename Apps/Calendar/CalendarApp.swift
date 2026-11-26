@@ -68,6 +68,11 @@ final class CalendarAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         app?.applyAppearance()
+        CalendarMenuBarPolicy.postStandaloneLifecycle(.alive)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        CalendarMenuBarPolicy.postStandaloneLifecycle(.willTerminate)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

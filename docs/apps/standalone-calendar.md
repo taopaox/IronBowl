@@ -9,7 +9,7 @@
   - 打开同一个数据库 `~/Library/Application Support/IronBowl/ironbowl.sqlite`。
   - 共享外观主题（`app.appearance`）、字体缩放（`app.fontScale`）、法定节假日缓存、手动放假/补班标记（`holidayOverride`）、天气城市和源配置。
   - 通过 `DistributedNotificationCenter` 与主应用实时同步设置与节假日更新。
-  - 当独立版 `IronBowlCalendar` 与主工作台 `IronBowl` 同时运行时，主工作台通过 `CalendarMenuBarPolicy` 自动隐藏其内置状态栏日历，仅保留独立版这一份状态栏日历，避免顶部状态栏重复显示。
+  - 当独立版 `IronBowlCalendar` 与主工作台 `IronBowl` 同时运行时，`CalendarAppDelegate` 与 `CalendarModel` 会通过 `DistributedNotificationCenter` 广播启停生命周期与响应主工作台探针，配合主工作台的 `NSWorkspace.runningApplications` KVO 监听与 `StandaloneCalendarPresenceState`，确保无论先启动主工作台还是先启动独立版万年历，主工作台都会自动隐藏其内置状态栏日历，仅保留独立版这一份状态栏日历。
 - **三个 SwiftUI Scene**：
   1. `MenuBarExtra`（`.window`）：顶部菜单栏支持 20 套可选状态栏视觉风格，显示可选万年历 Logo / 天气 / AQI / 日期 / 星期 / 农历 / 休班角标 / 时间，点开展示紧凑月历面板 `CalendarPopover`（独立版底栏展示版本号与「退出万年历」按钮），并挂载 `.menuBarPopoverDismissable()` 以便点击跳转大窗口、设置或退出时立即收起弹层。
   2. `Window("饭碗万年历", id: "calendar")`：大窗口月历 `CalendarMainView`（顶部标题旁展示当前版本号与 `DSSloganView(style: .inline)`）。

@@ -9,6 +9,8 @@ struct IronBowlApp: App {
     @State private var app = AppModel()
 
     var body: some Scene {
+        let isCalendarMenuInserted = app.calendarMenuShown
+
         Window("饭碗", id: "main") {
             MainView(app: app)
         }
@@ -45,7 +47,7 @@ struct IronBowlApp: App {
         .menuBarExtraStyle(.window)
 
         // 菜单栏日历：天气 + 日期 + 星期 + 时间，点开是月历。
-        MenuBarExtra(isInserted: Binding(get: { app.calendarMenuShown }, set: { app.calendarMenuShown = $0 })) {
+        MenuBarExtra(isInserted: Binding(get: { isCalendarMenuInserted }, set: { _ in })) {
             if let model = app.calendarModel {
                 CalendarPopover(model: model)
                     .id(app.fontScale)
@@ -81,6 +83,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         app?.applyDockMode()
         app?.applyAppearance()
+        app?.calendarModel?.refreshStandaloneCalendarState()
+        CalendarMenuBarPolicy.postStandaloneProbe()
     }
 
     /// 点程序坞图标时打开主窗口。

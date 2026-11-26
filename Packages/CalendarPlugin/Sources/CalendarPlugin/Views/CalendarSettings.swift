@@ -225,6 +225,7 @@ struct CalendarStatusBarSettings: View {
                 }
             }
         }
+        .onAppear { model.refreshStandaloneCalendarState() }
         .onChange(of: model.needsSecondTick) { model.syncClockTimer() }
     }
 }

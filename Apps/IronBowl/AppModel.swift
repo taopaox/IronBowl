@@ -266,13 +266,7 @@ final class AppModel {
 
     /// 菜单栏单独的日历图标（独立版万年历运行时自动避让隐藏，且不覆盖用户持久化开关）。
     var calendarMenuShown: Bool {
-        get { calendarModel?.shouldShowEmbeddedMenuBar ?? false }
-        set {
-            guard let model = calendarModel, !model.isStandaloneCalendarRunning else { return }
-            if model.menuBarEnabled != newValue {
-                model.menuBarEnabled = newValue
-            }
-        }
+        calendarModel?.shouldShowEmbeddedMenuBar ?? false
     }
 
     /// 所有可选的菜单栏信息项（核心 + 已启用插件）。

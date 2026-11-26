@@ -458,6 +458,75 @@ func calendarMenuBarPolicySuppressesEmbeddedItemWhenStandaloneIsRunning() {
     #expect(CalendarMenuBarPolicy.shouldShowEmbeddedMenuBar(settingEnabled: false, isStandaloneRunning: true) == false)
 }
 
+@Test
+func standaloneLifecyclePayloadEncodingAndDecoding() {
+    let alivePayload = CalendarMenuBarPolicy.encodeLifecyclePayload(.alive, pid: 4321)
+    let decodedAlive = CalendarMenuBarPolicy.decodeLifecyclePayload(alivePayload)
+    #expect(decodedAlive?.event == .alive)
+    #expect(decodedAlive?.pid == 4321)
+
+    let terminatePayload = CalendarMenuBarPolicy.encodeLifecyclePayload(.willTerminate, pid: 9876)
+    let decodedTerminate = CalendarMenuBarPolicy.decodeLifecyclePayload(terminatePayload)
+    #expect(decodedTerminate?.event == .willTerminate)
+    #expect(decodedTerminate?.pid == 9876)
+
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload(nil) == nil)
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload("") == nil)
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload("alive") == nil)
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload("unknown|123") == nil)
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload("alive|abc") == nil)
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload("alive|0") == nil)
+    #expect(CalendarMenuBarPolicy.decodeLifecyclePayload("alive|-5") == nil)
+}
+
+@Test
+func standaloneCalendarPresenceStateHandlesLaunchOrderQuitCrashAndSelfPID() {
+    let currentPID: pid_t = 100
+    let standalonePID: pid_t = 200
+    let secondStandalonePID: pid_t = 201
+    var state = StandaloneCalendarPresenceState()
+
+    // 1. 初始无独立版运行
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { _ in false }) == false)
+
+    // 2. 先开饭碗、后开独立版万年历：runningPIDs 尚未刷新时收到 alive 广播即刻隐藏内置状态栏日历
+    state.handleLifecycleEvent(.alive, pid: standalonePID, currentPID: currentPID)
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { $0 == standalonePID }) == true)
+    #expect(state.reconcile(runningPIDs: [standalonePID], isProcessAlive: { $0 == standalonePID }) == true)
+
+    // 3. 独立版正常退出：收到 willTerminate 时即使系统列表尚未移除也立即恢复显示，进程退出后清理状态
+    state.handleLifecycleEvent(.willTerminate, pid: standalonePID, currentPID: currentPID)
+    #expect(state.reconcile(runningPIDs: [standalonePID], isProcessAlive: { $0 == standalonePID }) == false)
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { _ in false }) == false)
+    #expect(state.terminatingPIDs.isEmpty)
+    #expect(state.announcedAlivePIDs.isEmpty)
+
+    // 4. 独立版异常退出（SIGKILL，无 willTerminate）：进程不再存活时自动清理并恢复显示
+    state.handleLifecycleEvent(.alive, pid: standalonePID, currentPID: currentPID)
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { $0 == standalonePID }) == true)
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { _ in false }) == false)
+    #expect(state.announcedAlivePIDs.isEmpty)
+
+    // 5. 忽略自身 PID 的广播
+    state.handleLifecycleEvent(.alive, pid: currentPID, currentPID: currentPID)
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { $0 == currentPID }) == false)
+
+    // 6. 多实例同时存在时，仅退出其中之一仍保持避让，全部退出才恢复
+    state.handleLifecycleEvent(.alive, pid: standalonePID, currentPID: currentPID)
+    state.handleLifecycleEvent(.alive, pid: secondStandalonePID, currentPID: currentPID)
+    state.handleLifecycleEvent(.willTerminate, pid: standalonePID, currentPID: currentPID)
+    #expect(state.reconcile(runningPIDs: [secondStandalonePID], isProcessAlive: { $0 == secondStandalonePID }) == true)
+    state.handleLifecycleEvent(.willTerminate, pid: secondStandalonePID, currentPID: currentPID)
+    #expect(state.reconcile(runningPIDs: [], isProcessAlive: { _ in false }) == false)
+}
+
+@Test
+func processAliveCheckRecognizesCurrentProcessAndRejectsInvalidPIDs() {
+    #expect(CalendarMenuBarPolicy.isProcessAlive(ProcessInfo.processInfo.processIdentifier) == true)
+    #expect(CalendarMenuBarPolicy.isProcessAlive(0) == false)
+    #expect(CalendarMenuBarPolicy.isProcessAlive(-1) == false)
+}
+
 @MainActor @Test func menuBarStyleCatalogAndPersistence() throws {
     let styles = CalendarMenuBarStyle.allCases
     #expect(styles.count == 20)

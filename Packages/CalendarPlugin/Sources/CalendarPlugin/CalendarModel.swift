@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import IronBowlKit
 import Observation
@@ -7,9 +8,74 @@ import SwiftUI
 /// 主工作台与独立版万年历同时运行时的状态栏日历自动避让策略。
 public nonisolated enum CalendarMenuBarPolicy {
     public static let standaloneBundleID = "com.taopaox.ironbowl.calendar"
+    public static let standaloneLifecycleNotification = Notification.Name("com.taopaox.ironbowl.standaloneCalendar.lifecycle")
+    public static let standaloneProbeNotification = Notification.Name("com.taopaox.ironbowl.standaloneCalendar.probe")
+
+    public enum StandaloneLifecycleEvent: String, Sendable, Equatable {
+        case alive
+        case willTerminate
+    }
 
     public static func shouldShowEmbeddedMenuBar(settingEnabled: Bool, isStandaloneRunning: Bool) -> Bool {
         settingEnabled && !isStandaloneRunning
+    }
+
+    public static func encodeLifecyclePayload(_ event: StandaloneLifecycleEvent, pid: pid_t) -> String {
+        "\(event.rawValue)|\(pid)"
+    }
+
+    public static func decodeLifecyclePayload(_ payload: String?) -> (event: StandaloneLifecycleEvent, pid: pid_t)? {
+        guard let payload else { return nil }
+        let parts = payload.split(separator: "|", maxSplits: 1)
+        guard parts.count == 2,
+              let event = StandaloneLifecycleEvent(rawValue: String(parts[0])),
+              let pid = pid_t(parts[1]),
+              pid > 0 else { return nil }
+        return (event, pid)
+    }
+
+    public static func isProcessAlive(_ pid: pid_t) -> Bool {
+        guard pid > 0 else { return false }
+        if Darwin.kill(pid, 0) == 0 {
+            return true
+        }
+        return errno == EPERM
+    }
+
+    public static func postStandaloneLifecycle(
+        _ event: StandaloneLifecycleEvent,
+        pid: pid_t = ProcessInfo.processInfo.processIdentifier
+    ) {
+        DistributedNotificationCenter.default().postNotificationName(
+            standaloneLifecycleNotification,
+            object: encodeLifecyclePayload(event, pid: pid),
+            userInfo: nil,
+            deliverImmediately: true
+        )
+    }
+
+    public static func postStandaloneProbe() {
+        DistributedNotificationCenter.default().postNotificationName(
+            standaloneProbeNotification,
+            object: nil,
+            userInfo: nil,
+            deliverImmediately: true
+        )
+    }
+
+    @MainActor
+    public static func runningStandalonePIDs(
+        bundleID: String = standaloneBundleID,
+        currentPID: pid_t = ProcessInfo.processInfo.processIdentifier,
+        excludingPID: pid_t? = nil
+    ) -> Set<pid_t> {
+        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+        return Set(apps.compactMap { app in
+            guard !app.isTerminated,
+                  app.processIdentifier != currentPID,
+                  app.processIdentifier != excludingPID else { return nil }
+            return app.processIdentifier
+        })
     }
 
     @MainActor
@@ -18,11 +84,47 @@ public nonisolated enum CalendarMenuBarPolicy {
         currentPID: pid_t = ProcessInfo.processInfo.processIdentifier,
         excludingPID: pid_t? = nil
     ) -> Bool {
-        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).contains { app in
-            !app.isTerminated
-                && app.processIdentifier != currentPID
-                && app.processIdentifier != excludingPID
+        !runningStandalonePIDs(
+            bundleID: bundleID,
+            currentPID: currentPID,
+            excludingPID: excludingPID
+        ).isEmpty
+    }
+}
+
+/// 独立版万年历跨进程存活状态聚合器：融合 `NSRunningApplication` 快照、分布式生命周期广播与 PID 存活探针。
+public nonisolated struct StandaloneCalendarPresenceState: Sendable, Equatable {
+    public private(set) var announcedAlivePIDs: Set<pid_t> = []
+    public private(set) var terminatingPIDs: Set<pid_t> = []
+
+    public init() {}
+
+    public mutating func handleLifecycleEvent(
+        _ event: CalendarMenuBarPolicy.StandaloneLifecycleEvent,
+        pid: pid_t,
+        currentPID: pid_t
+    ) {
+        guard pid > 0, pid != currentPID else { return }
+        switch event {
+        case .alive:
+            terminatingPIDs.remove(pid)
+            announcedAlivePIDs.insert(pid)
+        case .willTerminate:
+            announcedAlivePIDs.remove(pid)
+            terminatingPIDs.insert(pid)
         }
+    }
+
+    public mutating func reconcile(
+        runningPIDs: Set<pid_t>,
+        isProcessAlive: (pid_t) -> Bool
+    ) -> Bool {
+        terminatingPIDs = terminatingPIDs.intersection(runningPIDs)
+        announcedAlivePIDs = announcedAlivePIDs.filter { pid in
+            !terminatingPIDs.contains(pid) && (runningPIDs.contains(pid) || isProcessAlive(pid))
+        }
+        let activeRunning = runningPIDs.subtracting(terminatingPIDs)
+        return !activeRunning.isEmpty || !announcedAlivePIDs.isEmpty
     }
 }
 
@@ -147,9 +249,19 @@ public final class CalendarModel {
     @ObservationIgnored private var clockTimer: Timer?
     @ObservationIgnored private var clockMode: ClockMode?
     @ObservationIgnored private var isRunning = false
+    @ObservationIgnored private var standalonePresence = StandaloneCalendarPresenceState()
+    @ObservationIgnored private var lastStandaloneReconcileAt: Date = .distantPast
+    @ObservationIgnored nonisolated(unsafe) private var runningAppsObservation: NSKeyValueObservation?
     @ObservationIgnored nonisolated(unsafe) private var systemThemeObserver: NSObjectProtocol?
     @ObservationIgnored nonisolated(unsafe) private var standaloneLaunchObserver: NSObjectProtocol?
     @ObservationIgnored nonisolated(unsafe) private var standaloneTerminateObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var standaloneLifecycleObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var standaloneProbeObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var wakeObserver: NSObjectProtocol?
+
+    private var isStandaloneHost: Bool {
+        Bundle.main.bundleIdentifier == CalendarMenuBarPolicy.standaloneBundleID
+    }
 
     nonisolated static var cal: Calendar { Lunar.gregorian }
 
@@ -169,9 +281,41 @@ public final class CalendarModel {
                 self?.refreshSystemColorScheme()
             }
         }
-        if Bundle.main.bundleIdentifier != CalendarMenuBarPolicy.standaloneBundleID {
-            isStandaloneCalendarRunning = CalendarMenuBarPolicy.isStandaloneRunning()
-            let wsCenter = NSWorkspace.shared.notificationCenter
+        if isStandaloneHost {
+            CalendarMenuBarPolicy.postStandaloneLifecycle(.alive)
+            standaloneProbeObserver = DistributedNotificationCenter.default().addObserver(
+                forName: CalendarMenuBarPolicy.standaloneProbeNotification,
+                object: nil,
+                queue: nil
+            ) { _ in
+                CalendarMenuBarPolicy.postStandaloneLifecycle(.alive)
+            }
+        } else {
+            refreshStandaloneCalendarState()
+            let ws = NSWorkspace.shared
+            runningAppsObservation = ws.observe(\.runningApplications, options: [.new]) { [weak self] _, _ in
+                Task { @MainActor [weak self] in
+                    self?.refreshStandaloneCalendarState()
+                }
+            }
+            standaloneLifecycleObserver = DistributedNotificationCenter.default().addObserver(
+                forName: CalendarMenuBarPolicy.standaloneLifecycleNotification,
+                object: nil,
+                queue: nil
+            ) { [weak self] note in
+                let payload = note.object as? String
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          let (event, pid) = CalendarMenuBarPolicy.decodeLifecyclePayload(payload) else { return }
+                    self.standalonePresence.handleLifecycleEvent(
+                        event,
+                        pid: pid,
+                        currentPID: ProcessInfo.processInfo.processIdentifier
+                    )
+                    self.refreshStandaloneCalendarState()
+                }
+            }
+            let wsCenter = ws.notificationCenter
             standaloneLaunchObserver = wsCenter.addObserver(
                 forName: NSWorkspace.didLaunchApplicationNotification,
                 object: nil,
@@ -180,7 +324,7 @@ public final class CalendarModel {
                 let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
                 guard app?.bundleIdentifier == CalendarMenuBarPolicy.standaloneBundleID else { return }
                 Task { @MainActor [weak self] in
-                    self?.isStandaloneCalendarRunning = CalendarMenuBarPolicy.isStandaloneRunning()
+                    self?.refreshStandaloneCalendarState()
                 }
             }
             standaloneTerminateObserver = wsCenter.addObserver(
@@ -192,15 +336,34 @@ public final class CalendarModel {
                 guard app?.bundleIdentifier == CalendarMenuBarPolicy.standaloneBundleID else { return }
                 let terminatedPID = app?.processIdentifier
                 Task { @MainActor [weak self] in
-                    self?.isStandaloneCalendarRunning = CalendarMenuBarPolicy.isStandaloneRunning(excludingPID: terminatedPID)
+                    self?.refreshStandaloneCalendarState(excludingPID: terminatedPID)
                 }
             }
+            wakeObserver = wsCenter.addObserver(
+                forName: NSWorkspace.didWakeNotification,
+                object: nil,
+                queue: nil
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.refreshStandaloneCalendarState()
+                    CalendarMenuBarPolicy.postStandaloneProbe()
+                }
+            }
+            CalendarMenuBarPolicy.postStandaloneProbe()
         }
     }
 
     deinit {
+        runningAppsObservation?.invalidate()
+        let distCenter = DistributedNotificationCenter.default()
         if let systemThemeObserver {
-            DistributedNotificationCenter.default().removeObserver(systemThemeObserver)
+            distCenter.removeObserver(systemThemeObserver)
+        }
+        if let standaloneLifecycleObserver {
+            distCenter.removeObserver(standaloneLifecycleObserver)
+        }
+        if let standaloneProbeObserver {
+            distCenter.removeObserver(standaloneProbeObserver)
         }
         let wsCenter = NSWorkspace.shared.notificationCenter
         if let standaloneLaunchObserver {
@@ -208,6 +371,9 @@ public final class CalendarModel {
         }
         if let standaloneTerminateObserver {
             wsCenter.removeObserver(standaloneTerminateObserver)
+        }
+        if let wakeObserver {
+            wsCenter.removeObserver(wakeObserver)
         }
     }
 
@@ -236,6 +402,12 @@ public final class CalendarModel {
 
     public func start() {
         isRunning = true
+        if isStandaloneHost {
+            CalendarMenuBarPolicy.postStandaloneLifecycle(.alive)
+        } else {
+            refreshStandaloneCalendarState()
+            CalendarMenuBarPolicy.postStandaloneProbe()
+        }
         Task { await refreshWeatherIfNeeded() }
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
@@ -250,11 +422,41 @@ public final class CalendarModel {
 
     public func stop() {
         isRunning = false
+        if isStandaloneHost {
+            CalendarMenuBarPolicy.postStandaloneLifecycle(.willTerminate)
+        }
         timer?.invalidate()
         timer = nil
         clockTimer?.invalidate()
         clockTimer = nil
         clockMode = nil
+    }
+
+    /// 刷新独立版「饭碗万年历」的运行状态（融合系统运行列表、跨进程通知与 PID 存活核验）。
+    public func refreshStandaloneCalendarState(excludingPID: pid_t? = nil) {
+        guard !isStandaloneHost else { return }
+        if let excludingPID {
+            standalonePresence.handleLifecycleEvent(
+                .willTerminate,
+                pid: excludingPID,
+                currentPID: ProcessInfo.processInfo.processIdentifier
+            )
+        }
+        let runningPIDs = CalendarMenuBarPolicy.runningStandalonePIDs(excludingPID: excludingPID)
+        let running = standalonePresence.reconcile(
+            runningPIDs: runningPIDs,
+            isProcessAlive: CalendarMenuBarPolicy.isProcessAlive
+        )
+        lastStandaloneReconcileAt = Date()
+        if isStandaloneCalendarRunning != running {
+            isStandaloneCalendarRunning = running
+        }
+    }
+
+    private func reconcileStandaloneCalendarIfDue(minInterval: TimeInterval) {
+        guard !isStandaloneHost else { return }
+        guard Date().timeIntervalSince(lastStandaloneReconcileAt) >= minInterval else { return }
+        refreshStandaloneCalendarState()
     }
 
     /// 跨进程设置变更后同步天气快照与时钟精度。
@@ -277,14 +479,20 @@ public final class CalendarModel {
         case .second:
             let next = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970) + 1)
             timer = Timer(fire: next, interval: 1, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.now = Date() }
+                MainActor.assumeIsolated {
+                    self?.now = Date()
+                    self?.reconcileStandaloneCalendarIfDue(minInterval: 15)
+                }
             }
             timer.tolerance = 0.05
         case .minute:
             let next = Self.cal.nextDate(after: Date(), matching: DateComponents(second: 0), matchingPolicy: .nextTime)
                 ?? Date().addingTimeInterval(60)
             timer = Timer(fire: next, interval: 60, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.now = Date() }
+                MainActor.assumeIsolated {
+                    self?.now = Date()
+                    self?.reconcileStandaloneCalendarIfDue(minInterval: 0)
+                }
             }
             timer.tolerance = 0.5
         }

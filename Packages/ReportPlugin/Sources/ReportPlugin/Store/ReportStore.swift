@@ -125,8 +125,8 @@ nonisolated struct MonthlyReportRecord: Sendable, Hashable, Codable, Identifiabl
 }
 
 /// 周报/月报插件数据库迁移。
-enum ReportMigrations {
-    static let weekly = DatabaseMigration("report.v1") { db in
+public nonisolated enum ReportMigrations {
+    public static let weekly = DatabaseMigration("report.v1") { db in
         try db.create(table: "weeklyReport") { t in
             t.primaryKey("weekStart", .text)
             t.column("weekEnd", .text).notNull()
@@ -142,7 +142,7 @@ enum ReportMigrations {
         try db.create(index: "idx_weeklyReport_updatedAt", on: "weeklyReport", columns: ["updatedAt"])
     }
 
-    static let monthly = DatabaseMigration("report.v2") { db in
+    public static let monthly = DatabaseMigration("report.v2") { db in
         try db.create(table: "monthlyReport") { t in
             t.primaryKey("monthKey", .text)
             t.column("periodStart", .text).notNull()
@@ -159,11 +159,11 @@ enum ReportMigrations {
         try db.create(index: "idx_monthlyReport_updatedAt", on: "monthlyReport", columns: ["updatedAt"])
     }
 
-    static let all: [DatabaseMigration] = [weekly, monthly]
+    public static let all: [DatabaseMigration] = [weekly, monthly]
 }
 
 /// 周报/月报数据库读写。
-struct ReportStore {
+nonisolated struct ReportStore {
     let db: AppDatabase
 
     func report(forWeekStart weekStart: String) -> WeeklyReportRecord? {
@@ -194,7 +194,7 @@ struct ReportStore {
         }
     }
 
-    func recentReports(limit: Int = 20) -> [WeeklyReportRecord] {
+    func recentReports(limit: Int = 100) -> [WeeklyReportRecord] {
         (try? db.pool.read { db in
             try WeeklyReportRecord
                 .order(Column("weekStart").desc)
@@ -221,7 +221,7 @@ struct ReportStore {
         }
     }
 
-    func recentMonthlyReports(limit: Int = 24) -> [MonthlyReportRecord] {
+    func recentMonthlyReports(limit: Int = 60) -> [MonthlyReportRecord] {
         (try? db.pool.read { db in
             try MonthlyReportRecord
                 .order(Column("monthKey").desc)

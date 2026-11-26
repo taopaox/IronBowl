@@ -729,3 +729,258 @@ import Testing
     #expect(richValues.count == 1)
     #expect(richValues[0].contains("完成开发"))
 }
+
+@Test func titaPeriodCodeReversesSummaryDatesAndParsesSubmitDates() {
+    let w3 = TitaPeriodCode.weekRange(fromSummaryDate: "2026-11-03")
+    #expect(w3?.startDateString == "2026-11-16")
+    #expect(w3?.endDateString == "2026-11-22")
+
+    // 2025年12月第5个周一（12/29 ~ 2026-01-04 跨年周）
+    let dec5 = TitaPeriodCode.weekRange(fromSummaryDate: "2025-12-05")
+    #expect(dec5?.startDateString == "2025-12-29")
+    #expect(dec5?.endDateString == "2026-01-04")
+
+    // 2026年11月第5个周一（11/30 ~ 12/06）
+    let nov5 = TitaPeriodCode.weekRange(fromSummaryDate: "2026-11-05")
+    #expect(nov5?.startDateString == "2026-11-30")
+    #expect(nov5?.endDateString == "2026-12-06")
+
+    // 越界周数应返回 nil
+    #expect(TitaPeriodCode.weekRange(fromSummaryDate: "2026-11-06") == nil)
+
+    // 月报反向解析
+    #expect(TitaPeriodCode.monthRange(fromSummaryDate: "2026-11-1")?.monthKey == "2026-11")
+    #expect(TitaPeriodCode.monthRange(fromSummaryDate: "2026/05/01")?.monthKey == "2026-05")
+
+    #expect(TitaPeriodCode.parseSubmitDate("2026/11/20 13:41:00") != nil)
+    #expect(TitaPeriodCode.parseSubmitDate("2026-11-02T17:17:00+08:00") != nil)
+}
+
+@Test func titaProseMirrorParserConvertsRichContentAndLegacyHTML() {
+    let docJSON = #"""
+    {
+      "type": "doc",
+      "content": [
+        {
+          "type": "heading",
+          "attrs": { "level": 3 },
+          "content": [{ "type": "text", "text": "饭碗工作台" }]
+        },
+        {
+          "type": "ordered_list",
+          "attrs": { "order": 1 },
+          "content": [
+            {
+              "type": "list_item",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    { "type": "text", "text": "完成 " },
+                    { "type": "text", "text": "Tita", "marks": [{ "type": "strong" }] },
+                    { "type": "text", "text": " 同步 " },
+                    { "type": "text", "text": "API", "marks": [{ "type": "code" }] }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "list_item",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [{ "type": "text", "text": "优化性能" }]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "bullet_list",
+          "content": [
+            {
+              "type": "list_item",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    { "type": "text", "text": "联系 " },
+                    { "type": "mention", "attrs": { "label": "张三" } },
+                    { "type": "hard_break" },
+                    { "type": "text", "text": "查看文档", "marks": [{ "type": "link", "attrs": { "href": "https://example.com" } }] }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+    """#
+
+    let feed = TitaSearchFeedItem(
+        feedID: "f1",
+        dailyDate: "2026-11-03",
+        reportType: .weekly,
+        name: "2026年11月第3周周报",
+        submitState: .onTime,
+        submitDate: "2026/11/20 13:41:00",
+        newSummary: true,
+        sections: [
+            TitaSearchFeedSection(contentType: 1, title: "心情", richContent: "", content: "{\"SelectedValues\":[1]}"),
+            TitaSearchFeedSection(contentType: 0, title: "工作总结（亮点与成功经验）", richContent: docJSON, content: ""),
+            TitaSearchFeedSection(contentType: 0, title: "工作总结（问题与不足）", richContent: "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\"}]}", content: ""),
+            TitaSearchFeedSection(contentType: 0, title: "下一步工作计划", richContent: "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"推进验收\"}]}]}", content: ""),
+        ]
+    )
+
+    let md = TitaProseMirrorParser.renderFeedMarkdown(feed)
+    #expect(md.contains("## 工作总结（亮点与成功经验）"))
+    #expect(md.contains("### 饭碗工作台"))
+    #expect(md.contains("1. 完成 **Tita** 同步 `API`"))
+    #expect(md.contains("2. 优化性能"))
+    #expect(md.contains("- 联系 @张三"))
+    #expect(md.contains("[查看文档](https://example.com)"))
+    #expect(!md.contains("## 工作总结（问题与不足）"))
+    #expect(md.contains("## 下一步工作计划\n\n推进验收"))
+
+    // 旧版 HTML 报告兜底
+    let legacy = TitaSearchFeedItem(
+        feedID: "f2",
+        dailyDate: "2025-05-01",
+        reportType: .monthly,
+        name: "旧月报",
+        submitState: .onTime,
+        submitDate: nil,
+        newSummary: false,
+        legacyContentHTML: "<p>完成旧版总结</p>",
+        legacyWorkPlanHTML: "<p>下月计划</p>"
+    )
+    let legacyMd = TitaProseMirrorParser.renderFeedMarkdown(legacy)
+    #expect(legacyMd.contains("## 工作总结\n\n完成旧版总结"))
+    #expect(legacyMd.contains("## 下一步工作计划\n\n下月计划"))
+
+    // 真实接口常见的 {"doc": ..., "selection": ...} 包装与 table 节点
+    let wrappedJSON = #"""
+    {
+      "doc": {
+        "type": "doc",
+        "content": [
+          { "type": "paragraph", "content": [{ "type": "text", "text": "外层包装文本" }] },
+          {
+            "type": "table",
+            "content": [
+              {
+                "type": "tableRow",
+                "content": [
+                  { "type": "tableCell", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "事项" }] }] },
+                  { "type": "tableCell", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "已完成" }] }] }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "selection": { "type": "text", "anchor": 1, "head": 1 }
+    }
+    """#
+    let wrappedMd = TitaProseMirrorParser.toMarkdown(richContent: wrappedJSON)
+    #expect(wrappedMd.contains("外层包装文本"))
+    #expect(wrappedMd.contains("事项 | 已完成"))
+}
+
+@MainActor @Test func titaHistorySyncMergesAndProtectsLocalEdits() throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "tita-history-sync-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let db = try AppDatabase(url: url, migrations: ReportMigrations.all)
+    let store = ReportStore(db: db)
+
+    // 预置两条本地周报：一条为手工编辑（应受保护），一条为旧的 Tita 同步（应允许更新）
+    store.save(WeeklyReportRecord(
+        weekStart: "2026-11-16",
+        weekEnd: "2026-11-22",
+        title: "本地手工周报",
+        content: "## 本周完成工作\n\n1. 本地手工内容",
+        extraNotes: "本地备注",
+        style: WeeklyReportStyle.standard.rawValue,
+        providerName: "手动编辑",
+        totalHours: 40,
+        generatedAt: Date(),
+        updatedAt: Date()
+    ))
+    store.save(WeeklyReportRecord(
+        weekStart: "2026-11-09",
+        weekEnd: "2026-11-15",
+        title: "旧 Tita 标题",
+        content: "旧内容",
+        extraNotes: "",
+        style: WeeklyReportStyle.tita.rawValue,
+        providerName: TitaHistorySyncService.providerName,
+        totalHours: 38,
+        generatedAt: Date(),
+        updatedAt: Date()
+    ))
+
+    func doc(_ text: String) -> String {
+        "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"\(text)\"}]}]}"
+    }
+
+    let weeklyFeeds = [
+        // 1. 应跳过本地手工周报
+        TitaSearchFeedItem(
+            feedID: "w3", dailyDate: "2026-11-03", reportType: .weekly,
+            name: "Tita第3周", submitState: .onTime, submitDate: "2026/11/20 13:41:00",
+            sections: [TitaSearchFeedSection(contentType: 0, title: "亮点", richContent: doc("远端内容W3"), content: "")]
+        ),
+        // 2. 应更新之前的 Tita 同步记录并保留 totalHours
+        TitaSearchFeedItem(
+            feedID: "w2", dailyDate: "2026-11-02", reportType: .weekly,
+            name: "新 Tita 标题", submitState: .onTime, submitDate: "2026/11/13 18:00:00",
+            sections: [TitaSearchFeedSection(contentType: 0, title: "亮点", richContent: doc("更新内容W2"), content: "")]
+        ),
+        // 3. 应新增缺失的历史周报
+        TitaSearchFeedItem(
+            feedID: "w1", dailyDate: "2026-11-01", reportType: .weekly,
+            name: "11月第1周周报", submitState: .delay, submitDate: "2026/11/09 10:00:00",
+            sections: [TitaSearchFeedSection(contentType: 0, title: "亮点", richContent: doc("新增内容W1"), content: "")]
+        ),
+        // 4. 空草稿占位应忽略
+        TitaSearchFeedItem(
+            feedID: "w4", dailyDate: "2026-11-04", reportType: .weekly,
+            name: "空占位", submitState: .unSubmit, submitDate: nil,
+            sections: [TitaSearchFeedSection(contentType: 0, title: "亮点", richContent: "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\"}]}", content: "")]
+        ),
+    ]
+
+    let statsNoOverwrite = TitaHistorySyncService.mergeWeeklyFeeds(weeklyFeeds, store: store, overwriteLocalEdits: false)
+    #expect(statsNoOverwrite.inserted == 1)
+    #expect(statsNoOverwrite.updated == 1)
+    #expect(statsNoOverwrite.skipped == 1)
+    #expect(statsNoOverwrite.ignoredEmpty == 1)
+    #expect(store.report(forWeekStart: "2026-11-16")?.content.contains("本地手工内容") == true)
+    #expect(store.report(forWeekStart: "2026-11-09")?.title == "新 Tita 标题")
+    #expect(store.report(forWeekStart: "2026-11-09")?.totalHours == 38)
+    #expect(store.report(forWeekStart: "2026-11-02")?.content.contains("新增内容W1") == true)
+
+    // 开启 overwriteLocalEdits 后可覆盖本地手工记录并保留 extraNotes/totalHours
+    let statsOverwrite = TitaHistorySyncService.mergeWeeklyFeeds(weeklyFeeds, store: store, overwriteLocalEdits: true)
+    #expect(statsOverwrite.updated == 3)
+    #expect(statsOverwrite.skipped == 0)
+    let overwritten = store.report(forWeekStart: "2026-11-16")
+    #expect(overwritten?.content.contains("远端内容W3") == true)
+    #expect(overwritten?.extraNotes == "本地备注")
+    #expect(overwritten?.totalHours == 40)
+
+    // 月报同步验证
+    let monthlyFeeds = [
+        TitaSearchFeedItem(
+            feedID: "m10", dailyDate: "2026-10-01", reportType: .monthly,
+            name: "2026年10月月报", submitState: .onTime, submitDate: "2026/11/02 17:18:00",
+            sections: [TitaSearchFeedSection(contentType: 0, title: "重点成果", richContent: doc("十月成果"), content: "")]
+        ),
+    ]
+    let mStats = TitaHistorySyncService.mergeMonthlyFeeds(monthlyFeeds, store: store, overwriteLocalEdits: false)
+    #expect(mStats.inserted == 1)
+    #expect(store.monthlyReport(forMonthKey: "2026-10")?.content.contains("十月成果") == true)
+}

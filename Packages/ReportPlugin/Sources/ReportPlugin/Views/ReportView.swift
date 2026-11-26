@@ -1097,19 +1097,23 @@ private struct ReportHistoryPopover: View {
     let model: WeeklyReportModel
     @Binding var isPresented: Bool
     @State private var tab: ReportPeriodKind = .weekly
+    @State private var syncFeedback: (isError: Bool, text: String)?
 
     var body: some View {
         let activeTab = model.lockedPeriodKind ?? tab
         return VStack(alignment: .leading, spacing: 0) {
             if let locked = model.lockedPeriodKind {
                 let count = locked == .weekly ? model.recentReports.count : model.recentMonthlyReports.count
-                HStack {
+                HStack(spacing: 8) {
                     Text(locked == .weekly ? "历史周报" : "历史月报")
                         .font(DS.font(14, .semibold))
-                    Spacer()
                     Text("共 \(count) 份")
                         .font(DS.caption)
                         .foregroundStyle(DS.textTertiary)
+                    Spacer()
+                    if model.isTitaConfigured {
+                        syncHistoryButton(scope: locked == .weekly ? .weekly : .monthly)
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -1120,12 +1124,22 @@ private struct ReportHistoryPopover: View {
                         (.monthly, "月报 (\(model.recentMonthlyReports.count))"),
                     ])
                     Spacer()
+                    if model.isTitaConfigured {
+                        syncHistoryButton(scope: activeTab == .weekly ? .weekly : .monthly)
+                    }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             }
 
             Divider().overlay(DS.border)
+
+            if let syncFeedback {
+                DSBanner(syncFeedback.isError ? .danger : .success, syncFeedback.text)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                Divider().overlay(DS.border)
+            }
 
             if activeTab == .weekly {
                 weeklyList
@@ -1137,7 +1151,32 @@ private struct ReportHistoryPopover: View {
         .background(DS.canvas)
         .onAppear {
             tab = model.periodKind
+            model.reloadSavedReportsFromStore()
         }
+    }
+
+    private func syncHistoryButton(scope: TitaSyncScope) -> some View {
+        Button {
+            Task {
+                syncFeedback = nil
+                do {
+                    let result = try await model.syncTitaHistory(scope: scope, overwriteLocalEdits: false)
+                    syncFeedback = (false, result.summaryText)
+                } catch {
+                    syncFeedback = (true, error.localizedDescription)
+                }
+            }
+        } label: {
+            if model.isSyncingTitaHistory {
+                ProgressView().controlSize(.small)
+            } else {
+                Label("同步 Tita", systemImage: "arrow.triangle.2.circlepath")
+                    .font(DS.caption)
+            }
+        }
+        .buttonStyle(.dsGhost)
+        .disabled(model.isSyncingTitaHistory)
+        .help("从 Tita 拉取历史记录同步到本地数据库")
     }
 
     @ViewBuilder

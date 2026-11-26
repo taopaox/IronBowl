@@ -294,7 +294,105 @@ public nonisolated actor TitaClient {
             jsonBody: submitBody
         )
 
-        return try await fetchStatus(summaryType: summaryType, statusDate: statusDate, summaryDate: summaryDate)
+        let status = try await fetchStatus(summaryType: summaryType, statusDate: statusDate, summaryDate: summaryDate)
+        return status
+    }
+
+    // MARK: - 历史列表分页查询
+
+    /// 分页拉取 Tita 个人历史周报 / 月报列表（`summary/search` 已直接包含完整 `dailyContent[]`）。
+    public func searchSummaries(
+        summaryType: TitaSummaryType,
+        pageNum: Int,
+        pageSize: Int = 10
+    ) async throws -> TitaSearchPage {
+        let body: [String: Any] = [
+            "pageNum": pageNum,
+            "pageSize": pageSize,
+            "relation": 1,
+            "startTime": "",
+            "endTime": "",
+            "searchDepartmentIds": [""],
+            "searchUserIds": [""],
+            "searchGroupIds": [""],
+            "summaryType": summaryType.rawValue,
+        ]
+        let obj = try await apiRequest(method: "POST", endpoint: "summary/search", jsonBody: body)
+        guard let dataObj = obj["Data"] as? [String: Any] else {
+            return TitaSearchPage(feeds: [], isEnd: true, lastID: nil)
+        }
+
+        let isEnd = (dataObj["isEnd"] as? Bool) ?? true
+        let lastID = dataObj["lastId"] as? String
+        let rawFeeds = (dataObj["feeds"] as? [[String: Any]]) ?? []
+
+        let feeds: [TitaSearchFeedItem] = rawFeeds.compactMap { item in
+            let feedID = ((item["feedId"] as? String) ?? (item["dailyId"] as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let dailyDate = ((item["dailyDate"] as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !feedID.isEmpty || !dailyDate.isEmpty else { return nil }
+
+            let typeInt = Self.int(item["reportType"] ?? item["summaryType"]) ?? summaryType.rawValue
+            let reportType = TitaSummaryType(rawValue: typeInt) ?? summaryType
+            let name = ((item["name"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let submitState = TitaSubmitState(rawInt: Self.int(item["submitState"]))
+            let submitDate = item["submitDate"] as? String
+            let createDate = item["createDate"] as? String
+            let newSummary = (item["newSummary"] as? Bool) ?? true
+
+            let rawSections = (item["dailyContent"] as? [[String: Any]]) ?? []
+            let sections: [TitaSearchFeedSection] = rawSections.map { sec in
+                TitaSearchFeedSection(
+                    contentType: Self.int(sec["contentType"]) ?? 0,
+                    title: ((sec["title"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+                    richContent: (sec["richContent"] as? String) ?? "",
+                    content: (sec["content"] as? String) ?? ""
+                )
+            }
+
+            let legacyContentHTML = (item["contentRichText"] as? String) ?? ""
+            let legacyWorkPlanHTML = (item["workPlanRichText"] as? String) ?? ""
+
+            return TitaSearchFeedItem(
+                feedID: feedID,
+                dailyDate: dailyDate,
+                reportType: reportType,
+                name: name,
+                submitState: submitState,
+                submitDate: submitDate,
+                createDate: createDate,
+                newSummary: newSummary,
+                sections: sections,
+                legacyContentHTML: legacyContentHTML,
+                legacyWorkPlanHTML: legacyWorkPlanHTML
+            )
+        }
+
+        return TitaSearchPage(feeds: feeds, isEnd: isEnd, lastID: lastID)
+    }
+
+    /// 自动翻页拉取全部历史周报或月报并按 `feedId` 去重。
+    public func fetchAllSummaries(
+        summaryType: TitaSummaryType,
+        pageSize: Int = 10,
+        maxPages: Int = 100
+    ) async throws -> [TitaSearchFeedItem] {
+        var seen = Set<String>()
+        var all: [TitaSearchFeedItem] = []
+
+        for pageNum in 1...maxPages {
+            let page = try await searchSummaries(summaryType: summaryType, pageNum: pageNum, pageSize: pageSize)
+            if page.feeds.isEmpty { break }
+            for item in page.feeds {
+                let key = item.feedID.isEmpty ? "\(item.reportType.rawValue)-\(item.dailyDate)" : item.feedID
+                if seen.insert(key).inserted {
+                    all.append(item)
+                }
+            }
+            if page.isEnd { break }
+        }
+        return all
     }
 
     // MARK: - 内部实现

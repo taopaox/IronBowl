@@ -43,6 +43,7 @@ final class WeeklyReportModel {
     var isLoadingTitaStatus = false
     var titaStatusError: String?
     var isSyncingTita = false
+    var isSyncingTitaHistory = false
 
     @ObservationIgnored private var rawItemsByDate: [String: [DailyLogItem]] = [:]
     @ObservationIgnored private var autoSaveTask: Task<Void, Never>?
@@ -1043,5 +1044,37 @@ final class WeeklyReportModel {
         ) {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    func reloadSavedReportsFromStore() {
+        recentReports = store.recentReports()
+        recentMonthlyReports = store.recentMonthlyReports()
+        loadSavedReportForActivePeriod()
+        if periodKind == .monthly {
+            monthWeeklySummaries = store.weeklyReports(matchingWeekStarts: month.weeks.map(\.id))
+        }
+    }
+
+    @discardableResult
+    func syncTitaHistory(
+        scope: TitaSyncScope,
+        overwriteLocalEdits: Bool = false
+    ) async throws -> TitaHistorySyncResult {
+        guard !isSyncingTitaHistory else {
+            return TitaHistorySyncResult(scope: scope)
+        }
+        isSyncingTitaHistory = true
+        defer { isSyncingTitaHistory = false }
+
+        let result = try await TitaHistorySyncService.syncUsingSavedSettings(
+            database: context.database,
+            settings: settings,
+            scope: scope,
+            overwriteLocalEdits: overwriteLocalEdits
+        )
+        reloadSavedReportsFromStore()
+        errorMessage = nil
+        message = "Tita 历史同步完成：\(result.summaryText)"
+        return result
     }
 }

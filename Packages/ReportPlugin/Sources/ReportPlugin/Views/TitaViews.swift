@@ -12,6 +12,9 @@ struct TitaAccountSettings: View {
     @State private var testing = false
     @State private var testResult: String?
     @State private var isSuccess = false
+    @State private var overwriteLocalEdits = false
+    @State private var historySyncResult: String?
+    @State private var historySyncSuccess = false
 
     private var connectionSummary: String {
         guard model.isTitaConfigured else { return "尚未配置 Tita 登录凭证" }
@@ -151,6 +154,30 @@ struct TitaAccountSettings: View {
                 }
             }
         }
+
+        DSSection("历史报告同步", footer: "从 Tita 拉取已写的全部历史周报和月报写入本地数据库；默认跳过你本地已手工/AI 编辑过的周期。") {
+            DSRow("覆盖本地已编辑的报告", description: "开启后将用 Tita 历史内容替换本地同周/同月已有记录。") {
+                DSToggle(isOn: $overwriteLocalEdits)
+            }
+            DSRow("同步历史周报与月报", description: historySyncResult ?? "同步后可在周报/月报页面的历史弹层和月报周报参考中直接查看。") {
+                Button {
+                    Task { await syncAllHistory() }
+                } label: {
+                    if model.isSyncingTitaHistory {
+                        ProgressView().controlSize(.small).tint(DS.onPrimary)
+                    } else {
+                        Text("一键同步全部历史")
+                    }
+                }
+                .buttonStyle(.dsPrimary)
+                .disabled(model.isSyncingTitaHistory || !model.isTitaConfigured)
+            }
+            if let historySyncResult {
+                DSBlockRow {
+                    DSBanner(historySyncSuccess ? .success : .danger, historySyncResult)
+                }
+            }
+        }
         .sheet(isPresented: $showWebLogin) {
             TitaWebLoginSheet(model: model) { info in
                 isSuccess = true
@@ -196,6 +223,17 @@ struct TitaAccountSettings: View {
         }
         isSuccess = true
         testResult = "已清空本地 Tita 登录态与 Cookie。"
+    }
+
+    private func syncAllHistory() async {
+        do {
+            let result = try await model.syncTitaHistory(scope: .all, overwriteLocalEdits: overwriteLocalEdits)
+            historySyncSuccess = true
+            historySyncResult = result.summaryText
+        } catch {
+            historySyncSuccess = false
+            historySyncResult = error.localizedDescription
+        }
     }
 }
 

@@ -12,12 +12,13 @@
 | `Model/MonthRange.swift` | `MonthRange`, `MonthWeekSlice` | 按自然月（1 日至月末）计算起止日期、周分片（`weeks`）、上下月偏移及「本月 / 上月」标签 |
 | `Store/ReportStore.swift` | `ReportPeriodKind`, `WeeklyReportStyle`, `ReportKeys`, `WeeklyReportRecord`, `MonthlyReportRecord`, `ReportMigrations`, `ReportStore` | 设置键（含 Tita 配置）、拆分迁移 `ReportMigrations.weekly`（`report.v1` / `weeklyReport`）与 `ReportMigrations.monthly`（`report.v2` / `monthlyReport`）及读写操作 |
 | `Generator/WeeklyReportGenerator.swift` | `DailyReportDay`, `WeeklyReportInput`, `MonthlyReportInput`, `WeeklyReportOutput`, `WeeklyReportGenerator` | 周报/月报提示词模板渲染、只读 JSON Schema AI 生成与 4 种风格的规则兜底汇总（含 `tita` 模板风格） |
-| `Tita/TitaModels.swift` | `TitaSummaryType`, `TitaSubmitState`, `TitaMood`, `TitaAccountInfo`, `TitaPeriodStatus`, `TitaTemplateSummary`, `TitaReportDetail`, `TitaEditableModule`, `TitaError` | Tita 周报（`26`）/月报（`27`）接口数据模型与状态枚举 |
-| `Tita/TitaHelpers.swift` | `TitaPeriodCode`, `TitaCredentialParser`, `TitaBSGlobalParser`, `TitaRichTextConverter`, `TitaContentMapper`, `TitaSubmitPayloadBuilder` | Tita 周期编码（`YYYY-MM-WW` / `YYYY-MM-01`）、cURL/Cookie 解析、`BSGlobal` 识别、ProseMirror HTML 转换、4 模块内容映射与提交请求体拼装 |
-| `Tita/TitaClient.swift` | `TitaClient`, `TitaLog` | Tita 直连 HTTP 客户端（Cookie 鉴权、会话与身份探测、模板拉取、草稿更新、正式提交与回查）及脱敏接口日志 `tita.log` |
-| `Views/ReportView.swift` | `ReportView` | 响应式双栏工作区：顶栏在独立菜单中固定展示「周报」或「月报」与对应历史弹层，左栏展示周期汇总、7 天/按周分片筛选条与每日日报明细，右栏常驻展示补充说明、Tita 提交状态标签与文档纸张式预览/编辑区 |
+| `Tita/TitaModels.swift` | `TitaSummaryType`, `TitaSubmitState`, `TitaMood`, `TitaAccountInfo`, `TitaPeriodStatus`, `TitaTemplateSummary`, `TitaReportDetail`, `TitaEditableModule`, `TitaSearchFeedItem`, `TitaHistorySyncResult`, `TitaError` | Tita 周报（`26`）/月报（`27`）接口数据模型、历史列表模型与状态枚举 |
+| `Tita/TitaHelpers.swift` | `TitaPeriodCode`, `TitaCredentialParser`, `TitaBSGlobalParser`, `TitaRichTextConverter`, `TitaContentMapper`, `TitaSubmitPayloadBuilder`, `TitaProseMirrorParser` | Tita 周期正反向编码（`YYYY-MM-WW` / `YYYY-MM-01` ↔ `WeekRange` / `MonthRange`）、cURL/Cookie 解析、`BSGlobal` 识别、ProseMirror HTML/JSON 与 Markdown 互转、4 模块内容映射与提交请求体拼装 |
+| `Tita/TitaClient.swift` | `TitaClient`, `TitaLog` | Tita 直连 HTTP 客户端（Cookie 鉴权、会话与身份探测、模板拉取、历史分页拉取 `summary/search`、草稿更新、正式提交与回查）及脱敏接口日志 `tita.log` |
+| `Tita/TitaHistorySyncService.swift` | `TitaHistorySyncService` | 自动分页拉取 Tita 个人全部历史周报/月报并安全合并写入本地 `weeklyReport` / `monthlyReport`（默认保护本地已编辑内容） |
+| `Views/ReportView.swift` | `ReportView` | 响应式双栏工作区：顶栏在独立菜单中固定展示「周报」或「月报」与对应历史弹层（支持弹层内直接「同步 Tita」），左栏展示周期汇总、7 天/按周分片筛选条与每日日报明细，右栏常驻展示补充说明、Tita 提交状态标签与文档纸张式预览/编辑区 |
 | `Views/ReportSettingsView.swift` | `ReportSettingsView` | 按 `periodKind` 分别呈现「周报 → 周报生成」与「月报 → 月报生成」设置页：默认风格、草稿/工时开关、提示词编辑与「Tita 对接」跳转入口 |
-| `Views/TitaViews.swift` | `TitaAccountSettings`, `TitaWebLoginSheet`, `TitaSubmitSheet` | Tita 对接设置页（内置 `WKWebView` 登录提取 Cookie / 导入 cURL 与请求头 / 模板配置）与推送预览/存草稿/确认提交弹窗 |
+| `Views/TitaViews.swift` | `TitaAccountSettings`, `TitaWebLoginSheet`, `TitaSubmitSheet` | Tita 对接设置页（内置 `WKWebView` 登录提取 Cookie / 导入 cURL 与请求头 / 模板配置 / 一键同步全部历史周报与月报）与推送预览/存草稿/确认提交弹窗 |
 
 ## 周期日报查询机制
 
@@ -73,3 +74,7 @@
    - 查询接口：`GET summary/status`、`GET summary/selectTemplates`、`POST summary/detail`；
    - 初始化与保存草稿：`POST summary/create/{dailyDate}/{reportType}/{templateId}`、`POST summary/mood/update/{feedId}/{moduleId}/{mood}`、`POST summary/richtext/update`；
    - 正式提交/更新：提交前重新拉取详情保留既有 OKR/附件/`@ta查看` 等模块数据，调用 `POST summary/checkchange/{feedId}` 与 `POST summary/submit/{feedId}/1`（需经二次确认弹窗），所有脱敏请求摘要写入 `~/Library/Application Support/IronBowl/logs/tita.log`。
+4. **历史周报与月报同步**：
+   - 在「设置 → 周报 → Tita 对接」点击「一键同步全部历史」，或在周报/月报页面历史弹层点击「同步 Tita」。
+   - `TitaHistorySyncService` 调用 `POST summary/search`（`relation = 1`、`startTime/endTime = ""`）自动翻页拉取全部历史周报与月报，`TitaProseMirrorParser` 将 `dailyContent[].richContent` 的 ProseMirror JSON（兼容旧版 HTML）转换为 Markdown，`TitaPeriodCode.weekRange(fromSummaryDate:)` / `monthRange(fromSummaryDate:)` 反向映射为 `WeekRange` / `MonthRange`，合并写入 `weeklyReport` / `monthlyReport`（`providerName = "Tita 同步"`）。
+   - 冲突保护：默认跳过已有非空且非 `"Tita 同步"` 来源的本地报告，仅补齐缺失周期或刷新先前由 Tita 同步的记录；设置页可选开启「覆盖本地已编辑的报告」。

@@ -78,6 +78,87 @@ public nonisolated enum TitaPeriodCode {
         query += "&templateId=\(templateID)&activeKey=\(summaryType.activeKey)"
         return URL(string: "\(root)/u/\(uid)/Home/#/summary/template?\(query)")
     }
+
+    /// 将 Tita 周报 `dailyDate`（如 `"2026-11-03"` 或 `"2025-12-05"`）反向解析为对应的 `WeekRange`（周一至周日）。
+    public static func weekRange(fromSummaryDate summaryDate: String) -> WeekRange? {
+        guard let parts = parseYMDParts(summaryDate) else { return nil }
+        let (year, month, weekIndex) = parts
+        guard (1...12).contains(month), weekIndex >= 1 else { return nil }
+
+        let cal = gregorianCalendar
+        guard let firstDay = cal.date(from: DateComponents(year: year, month: month, day: 1)),
+              let dayCount = cal.range(of: .day, in: .month, for: firstDay)?.count else {
+            return nil
+        }
+        var mondays: [Date] = []
+        for day in 1...dayCount {
+            if let date = cal.date(from: DateComponents(year: year, month: month, day: day)),
+               cal.component(.weekday, from: date) == 2 {
+                mondays.append(date)
+            }
+        }
+        guard weekIndex <= mondays.count else { return nil }
+        return WeekRange.containing(mondays[weekIndex - 1])
+    }
+
+    /// 将 Tita 月报 `dailyDate`（如 `"2026-11-01"` 或 `"2026-11-1"`）反向解析为 `MonthRange`。
+    public static func monthRange(fromSummaryDate summaryDate: String) -> MonthRange? {
+        guard let parts = parseYMDParts(summaryDate) else { return nil }
+        let (year, month, _) = parts
+        guard (1...12).contains(month) else { return nil }
+        return MonthRange.fromMonthKey(String(format: "%04d-%02d", year, month))
+    }
+
+    /// 解析 Tita 返回的提交时间字符串。
+    public static func parseSubmitDate(_ raw: String?) -> Date? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = iso.date(from: trimmed) { return d }
+        iso.formatOptions = [.withInternetDateTime]
+        if let d = iso.date(from: trimmed) { return d }
+
+        let formats = [
+            "yyyy/MM/dd HH:mm:ss",
+            "yyyy/MM/dd HH:mm",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd HH:mm",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy/MM/dd",
+            "yyyy-MM-dd",
+        ]
+        let formatter = DateFormatter()
+        formatter.calendar = gregorianCalendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        for fmt in formats {
+            formatter.dateFormat = fmt
+            if let d = formatter.date(from: trimmed) {
+                return d
+            }
+        }
+        return nil
+    }
+
+    private static func parseYMDParts(_ raw: String) -> (Int, Int, Int)? {
+        let datePart = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: { $0 == "T" || $0 == " " })
+            .first
+            .map(String.init) ?? ""
+        let normalized = datePart.replacingOccurrences(of: "/", with: "-")
+        let parts = normalized.split(separator: "-")
+        guard parts.count >= 2,
+              let year = Int(parts[0]),
+              let month = Int(parts[1]) else {
+            return nil
+        }
+        let third = parts.count >= 3 ? (Int(parts[2]) ?? 1) : 1
+        return (year, month, third)
+    }
 }
 
 // MARK: - 凭证解析（Cookie / 请求头 / cURL）
@@ -625,5 +706,251 @@ public nonisolated enum TitaSubmitPayloadBuilder {
             "AtModuleValue": atModuleValue,
             "ModuleRichValues": moduleRichValues,
         ]
+    }
+}
+
+// MARK: - ProseMirror 文档转 Markdown
+
+/// 将 `summary/search` 返回的 ProseMirror `richContent` JSON（或旧版 HTML）还原为干净的 Markdown。
+public nonisolated enum TitaProseMirrorParser {
+    public static func renderFeedMarkdown(_ item: TitaSearchFeedItem) -> String {
+        if item.newSummary {
+            var blocks: [String] = []
+            for section in item.sections where section.contentType == 0 {
+                let raw = section.richContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? section.content
+                    : section.richContent
+                let body = toMarkdown(richContent: raw).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !body.isEmpty else { continue }
+                let cleanTitle = section.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                if cleanTitle.isEmpty {
+                    blocks.append(body)
+                } else {
+                    blocks.append("## \(cleanTitle)\n\n\(body)")
+                }
+            }
+            return blocks.joined(separator: "\n\n")
+        }
+
+        var legacyBlocks: [String] = []
+        let summaryBody = TitaRichTextConverter.plainTextFromHTML(item.legacyContentHTML)
+        if !summaryBody.isEmpty {
+            legacyBlocks.append("## 工作总结\n\n\(summaryBody)")
+        }
+        let planBody = TitaRichTextConverter.plainTextFromHTML(item.legacyWorkPlanHTML)
+        if !planBody.isEmpty {
+            legacyBlocks.append("## 下一步工作计划\n\n\(planBody)")
+        }
+        return legacyBlocks.joined(separator: "\n\n")
+    }
+
+    public static func toMarkdown(richContent: String) -> String {
+        let trimmed = richContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        if let data = trimmed.data(using: .utf8),
+           let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            let doc = (json["doc"] as? [String: Any]) ?? json
+            return renderBlock(doc, listIndent: 0).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if trimmed.contains("<") && trimmed.contains(">") {
+            return TitaRichTextConverter.plainTextFromHTML(trimmed)
+        }
+        return trimmed
+    }
+
+    private static func renderBlock(_ node: [String: Any], listIndent: Int) -> String {
+        let type = (node["type"] as? String) ?? ""
+        let children = (node["content"] as? [[String: Any]]) ?? []
+        let attrs = (node["attrs"] as? [String: Any]) ?? [:]
+
+        switch type {
+        case "doc":
+            let parts = children
+                .map { renderBlock($0, listIndent: listIndent).trimmingCharacters(in: .newlines) }
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            return parts.joined(separator: "\n\n")
+
+        case "paragraph":
+            return renderInlineChildren(children)
+                .trimmingCharacters(in: .whitespaces)
+
+        case "heading":
+            let text = renderInlineChildren(children).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return "" }
+            return "### \(text)"
+
+        case "ordered_list", "orderedList":
+            var index = (attrs["order"] as? Int) ?? (attrs["start"] as? Int) ?? 1
+            var lines: [String] = []
+            for child in children {
+                let itemText = renderListItem(child, prefix: "\(index). ", indent: listIndent)
+                if !itemText.isEmpty {
+                    lines.append(itemText)
+                }
+                index += 1
+            }
+            return lines.joined(separator: "\n")
+
+        case "bullet_list", "bulletList":
+            var lines: [String] = []
+            for child in children {
+                let itemText = renderListItem(child, prefix: "- ", indent: listIndent)
+                if !itemText.isEmpty {
+                    lines.append(itemText)
+                }
+            }
+            return lines.joined(separator: "\n")
+
+        case "blockquote":
+            let inner = children
+                .map { renderBlock($0, listIndent: listIndent) }
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .joined(separator: "\n")
+            return inner
+                .components(separatedBy: .newlines)
+                .map { "> \($0)" }
+                .joined(separator: "\n")
+
+        case "code_block", "codeBlock":
+            let code = renderInlineChildren(children).trimmingCharacters(in: .newlines)
+            guard !code.isEmpty else { return "" }
+            let lang = (attrs["language"] as? String) ?? ""
+            return "```\(lang)\n\(code)\n```"
+
+        case "horizontal_rule", "horizontalRule":
+            return "---"
+
+        case "table":
+            var rowsText: [String] = []
+            for row in children {
+                let cells = ((row["content"] as? [[String: Any]]) ?? []).map { cell -> String in
+                    let cellBlocks = ((cell["content"] as? [[String: Any]]) ?? [])
+                        .map { renderBlock($0, listIndent: 0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                    return cellBlocks.joined(separator: " / ")
+                        .replacingOccurrences(of: "\n", with: " ")
+                }
+                let nonEmpty = cells.contains { !$0.isEmpty }
+                if nonEmpty {
+                    rowsText.append("- " + cells.filter { !$0.isEmpty }.joined(separator: " | "))
+                }
+            }
+            return rowsText.joined(separator: "\n")
+
+        default:
+            if !children.isEmpty {
+                let rendered = children
+                    .map { renderBlock($0, listIndent: listIndent) }
+                    .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                if !rendered.isEmpty {
+                    return rendered.joined(separator: "\n")
+                }
+            }
+            return renderInline(node)
+        }
+    }
+
+    private static func renderListItem(_ node: [String: Any], prefix: String, indent: Int) -> String {
+        let children = (node["content"] as? [[String: Any]]) ?? []
+        guard !children.isEmpty else {
+            let inline = renderInline(node).trimmingCharacters(in: .whitespacesAndNewlines)
+            return inline.isEmpty ? "" : "\(String(repeating: "  ", count: indent))\(prefix)\(inline)"
+        }
+
+        let indentPad = String(repeating: "  ", count: indent)
+        let continuationPad = String(repeating: "  ", count: indent + 1)
+        var lines: [String] = []
+
+        for child in children {
+            let childType = (child["type"] as? String) ?? ""
+            if childType == "ordered_list" || childType == "orderedList" || childType == "bullet_list" || childType == "bulletList" {
+                let nested = renderBlock(child, listIndent: indent + 1)
+                if !nested.isEmpty {
+                    lines.append(nested)
+                }
+            } else {
+                let text = renderBlock(child, listIndent: indent).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty {
+                    if lines.isEmpty {
+                        let split = text.components(separatedBy: .newlines)
+                        lines.append("\(indentPad)\(prefix)\(split[0])")
+                        for extra in split.dropFirst() {
+                            lines.append("\(continuationPad)\(extra)")
+                        }
+                    } else {
+                        for extra in text.components(separatedBy: .newlines) {
+                            lines.append("\(continuationPad)\(extra)")
+                        }
+                    }
+                }
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func renderInlineChildren(_ children: [[String: Any]]) -> String {
+        children.map(renderInline).joined()
+    }
+
+    private static func renderInline(_ node: [String: Any]) -> String {
+        let type = (node["type"] as? String) ?? ""
+        switch type {
+        case "text":
+            let rawText = (node["text"] as? String) ?? ""
+            let marks = (node["marks"] as? [[String: Any]]) ?? []
+            return applyMarks(rawText, marks: marks)
+        case "hard_break", "hardBreak":
+            return "\n"
+        case "mention", "at":
+            let attrs = (node["attrs"] as? [String: Any]) ?? [:]
+            let name = (attrs["label"] as? String)
+                ?? (attrs["name"] as? String)
+                ?? (attrs["text"] as? String)
+                ?? ""
+            let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !clean.isEmpty else { return "" }
+            return clean.hasPrefix("@") ? clean : "@\(clean)"
+        default:
+            if let children = node["content"] as? [[String: Any]] {
+                return renderInlineChildren(children)
+            }
+            return (node["text"] as? String) ?? ""
+        }
+    }
+
+    private static func applyMarks(_ text: String, marks: [[String: Any]]) -> String {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return text
+        }
+        let leading = String(text.prefix { $0.isWhitespace })
+        let trailing = String(text.reversed().prefix { $0.isWhitespace }.reversed())
+        let coreStart = text.index(text.startIndex, offsetBy: leading.count)
+        let coreEnd = text.index(text.endIndex, offsetBy: -trailing.count)
+        var core = String(text[coreStart..<coreEnd])
+
+        for mark in marks {
+            let markType = (mark["type"] as? String) ?? ""
+            let attrs = (mark["attrs"] as? [String: Any]) ?? [:]
+            switch markType {
+            case "code":
+                core = "`\(core)`"
+            case "strong", "bold":
+                core = "**\(core)**"
+            case "em", "italic":
+                core = "*\(core)*"
+            case "strike":
+                core = "~~\(core)~~"
+            case "link":
+                if let href = (attrs["href"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !href.isEmpty {
+                    core = "[\(core)](\(href))"
+                }
+            default:
+                break
+            }
+        }
+        return leading + core + trailing
     }
 }

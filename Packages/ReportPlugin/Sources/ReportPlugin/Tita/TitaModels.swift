@@ -264,3 +264,132 @@ public nonisolated enum TitaError: LocalizedError, Sendable, Equatable {
         }
     }
 }
+
+// MARK: - 历史列表查询与同步模型
+
+/// `summary/search` 返回的单条报告中的模块内容（对应 `dailyContent[]`）。
+public nonisolated struct TitaSearchFeedSection: Sendable, Equatable {
+    public let contentType: Int
+    public let title: String
+    public let richContent: String
+    public let content: String
+
+    public init(contentType: Int, title: String, richContent: String, content: String) {
+        self.contentType = contentType
+        self.title = title
+        self.richContent = richContent
+        self.content = content
+    }
+}
+
+/// `summary/search` 返回的单条周报 / 月报记录。
+public nonisolated struct TitaSearchFeedItem: Sendable, Equatable {
+    public let feedID: String
+    public let dailyDate: String
+    public let reportType: TitaSummaryType
+    public let name: String
+    public let submitState: TitaSubmitState
+    public let submitDate: String?
+    public let createDate: String?
+    public let newSummary: Bool
+    public let sections: [TitaSearchFeedSection]
+    public let legacyContentHTML: String
+    public let legacyWorkPlanHTML: String
+
+    public init(
+        feedID: String,
+        dailyDate: String,
+        reportType: TitaSummaryType,
+        name: String,
+        submitState: TitaSubmitState,
+        submitDate: String?,
+        createDate: String? = nil,
+        newSummary: Bool = true,
+        sections: [TitaSearchFeedSection] = [],
+        legacyContentHTML: String = "",
+        legacyWorkPlanHTML: String = ""
+    ) {
+        self.feedID = feedID
+        self.dailyDate = dailyDate
+        self.reportType = reportType
+        self.name = name
+        self.submitState = submitState
+        self.submitDate = submitDate
+        self.createDate = createDate
+        self.newSummary = newSummary
+        self.sections = sections
+        self.legacyContentHTML = legacyContentHTML
+        self.legacyWorkPlanHTML = legacyWorkPlanHTML
+    }
+}
+
+/// `summary/search` 单页响应。
+public nonisolated struct TitaSearchPage: Sendable, Equatable {
+    public let feeds: [TitaSearchFeedItem]
+    public let isEnd: Bool
+    public let lastID: String?
+
+    public init(feeds: [TitaSearchFeedItem], isEnd: Bool, lastID: String?) {
+        self.feeds = feeds
+        self.isEnd = isEnd
+        self.lastID = lastID
+    }
+}
+
+/// 历史同步范围。
+public nonisolated enum TitaSyncScope: Sendable, Equatable {
+    case weekly
+    case monthly
+    case all
+}
+
+/// 单个周期类型（周报或月报）的同步计数统计。
+public nonisolated struct TitaPeriodSyncStats: Sendable, Equatable {
+    public var fetched: Int
+    public var inserted: Int
+    public var updated: Int
+    public var skipped: Int
+    public var ignoredEmpty: Int
+
+    public init(fetched: Int = 0, inserted: Int = 0, updated: Int = 0, skipped: Int = 0, ignoredEmpty: Int = 0) {
+        self.fetched = fetched
+        self.inserted = inserted
+        self.updated = updated
+        self.skipped = skipped
+        self.ignoredEmpty = ignoredEmpty
+    }
+}
+
+/// 历史周报/月报同步汇总结果。
+public nonisolated struct TitaHistorySyncResult: Sendable, Equatable {
+    public let scope: TitaSyncScope
+    public let weekly: TitaPeriodSyncStats
+    public let monthly: TitaPeriodSyncStats
+
+    public init(scope: TitaSyncScope, weekly: TitaPeriodSyncStats = .init(), monthly: TitaPeriodSyncStats = .init()) {
+        self.scope = scope
+        self.weekly = weekly
+        self.monthly = monthly
+    }
+
+    public var summaryText: String {
+        switch scope {
+        case .weekly:
+            return Self.formatPart("周报", stats: weekly)
+        case .monthly:
+            return Self.formatPart("月报", stats: monthly)
+        case .all:
+            return "\(Self.formatPart("周报", stats: weekly))；\(Self.formatPart("月报", stats: monthly))"
+        }
+    }
+
+    private static func formatPart(_ label: String, stats: TitaPeriodSyncStats) -> String {
+        var parts = ["新增 \(stats.inserted) 份"]
+        if stats.updated > 0 { parts.append("更新 \(stats.updated) 份") }
+        if stats.skipped > 0 { parts.append("保留本地 \(stats.skipped) 份") }
+        if stats.inserted == 0 && stats.updated == 0 && stats.skipped == 0 {
+            return "\(label)暂无可导入内容（远端 \(stats.fetched) 条）"
+        }
+        return "\(label)（远端 \(stats.fetched) 条）：\(parts.joined(separator: "，"))"
+    }
+}

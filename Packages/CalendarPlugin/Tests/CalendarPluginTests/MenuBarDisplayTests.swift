@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import IronBowlKit
 import Testing
@@ -287,4 +288,51 @@ private func makeDate(year: Int = 2026, month: Int = 11, day: Int = 25, hour: In
 
     plugin.stop()
     #expect(plugin.settingsPages.isEmpty)
+}
+
+@MainActor @Test func menuBarImageRendererProducesValidTemplateImages() throws {
+    func hasVisiblePixels(_ image: NSImage) -> Bool {
+        guard let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first,
+              let data = rep.bitmapData else { return false }
+        let totalBytes = rep.bytesPerRow * rep.pixelsHigh
+        for offset in stride(from: 3, to: totalBytes, by: 4) where data[offset] > 0 {
+            return true
+        }
+        return false
+    }
+
+    // 空分段回退到日历图标
+    let fallback = CalendarMenuBarRenderer.renderImage(segments: [], scale: 2.0)
+    #expect(fallback.isTemplate == true)
+    #expect(fallback.size.height == CalendarMenuBarRenderer.barHeight)
+    #expect(fallback.size.width >= 18)
+    let fallbackRep = try #require(fallback.representations.compactMap { $0 as? NSBitmapImageRep }.first)
+    #expect(fallbackRep.pixelsWide == Int(ceil(fallback.size.width * 2)))
+    #expect(fallbackRep.pixelsHigh == 44)
+    #expect(hasVisiblePixels(fallback))
+
+    // 仅时间
+    let timeOnly = CalendarMenuBarRenderer.renderImage(segments: [.text("09:05")], scale: 2.0)
+    #expect(timeOnly.isTemplate == true)
+    #expect(timeOnly.size.height == CalendarMenuBarRenderer.barHeight)
+    #expect(hasVisiblePixels(timeOnly))
+
+    // 日期 + 星期 + 时间
+    let dateTime = CalendarMenuBarRenderer.renderImage(
+        segments: [.text("11月26日"), .text("周四"), .text("09:05")],
+        scale: 2.0
+    )
+    #expect(dateTime.isTemplate == true)
+    #expect(dateTime.size.width > timeOnly.size.width)
+    #expect(hasVisiblePixels(dateTime))
+
+    // 全开（含两个 SF Symbol 与多段文字）宽度明显大于仅日期+时间，不会丢失任何段
+    let full = CalendarMenuBarRenderer.renderImage(
+        segments: [.symbol("sun.max"), .text("10°"), .text("11月26日"), .text("周四"), .symbol("clock"), .text("09:05")],
+        scale: 2.0
+    )
+    #expect(full.isTemplate == true)
+    #expect(full.size.height == CalendarMenuBarRenderer.barHeight)
+    #expect(full.size.width > dateTime.size.width)
+    #expect(hasVisiblePixels(full))
 }

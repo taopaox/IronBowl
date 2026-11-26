@@ -9,7 +9,8 @@ struct MenuBarLabel: View {
     var body: some View {
         // 注意：这里不能用 TimelineView，会让状态栏按钮不停重绘。时间刷新靠 AppModel.now 的定时器。
         let text = app.menuBarText
-        Text(text.isEmpty ? "🍚" : "🍚 \(text)")
+        Text(verbatim: text.isEmpty ? "🍚" : "🍚 \(text)")
+            .monospacedDigit()
             .onAppear {
                 // 菜单栏标签启动时就会渲染，这里拿到 openWindow 给全局用，并确保 NSApp 就绪后应用外观和 Dock 策略。
                 app.openMainWindow = { openWindow(id: "main") }

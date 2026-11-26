@@ -154,15 +154,17 @@ struct MenuBarItemsEditor: View {
         let s = app.settings
         let selected = s[AppKeys.menuBarItems]
         let all = app.availableMenuBarItems
-        let ordered = selected.compactMap { id in all.first { $0.id == id } } + all.filter { !selected.contains($0.id) }
+        let availableIDs = Set(all.map(\.id))
+        let activeSelected = selected.filter { availableIDs.contains($0) }
+        let ordered = activeSelected.compactMap { id in all.first { $0.id == id } } + all.filter { !activeSelected.contains($0.id) }
         ForEach(ordered) { item in
-            DSRow(item.title, description: selected.contains(item.id) ? "当前显示：\(item.text() ?? "—")" : nil) {
+            DSRow(item.title, description: activeSelected.contains(item.id) ? "当前显示：\(item.text() ?? "—")" : nil) {
                 HStack(spacing: 4) {
-                    if let i = selected.firstIndex(of: item.id) {
-                        Button { move(i, -1) } label: { Image(systemName: "chevron.up") }
+                    if let i = activeSelected.firstIndex(of: item.id) {
+                        Button { move(item.id, -1, in: activeSelected) } label: { Image(systemName: "chevron.up") }
                             .buttonStyle(.dsGhost).disabled(i == 0)
-                        Button { move(i, 1) } label: { Image(systemName: "chevron.down") }
-                            .buttonStyle(.dsGhost).disabled(i == selected.count - 1)
+                        Button { move(item.id, 1, in: activeSelected) } label: { Image(systemName: "chevron.down") }
+                            .buttonStyle(.dsGhost).disabled(i == activeSelected.count - 1)
                     }
                     DSToggle(isOn: Binding(
                         get: { s[AppKeys.menuBarItems].contains(item.id) },
@@ -177,10 +179,13 @@ struct MenuBarItemsEditor: View {
         }
     }
 
-    func move(_ i: Int, _ delta: Int) {
+    func move(_ id: String, _ delta: Int, in activeSelected: [String]) {
+        guard let activeIndex = activeSelected.firstIndex(of: id) else { return }
+        let targetActiveIndex = activeIndex + delta
+        guard activeSelected.indices.contains(targetActiveIndex) else { return }
+        let neighborID = activeSelected[targetActiveIndex]
         var list = app.settings[AppKeys.menuBarItems]
-        let j = i + delta
-        guard list.indices.contains(j) else { return }
+        guard let i = list.firstIndex(of: id), let j = list.firstIndex(of: neighborID) else { return }
         list.swapAt(i, j)
         app.settings[AppKeys.menuBarItems] = list
     }

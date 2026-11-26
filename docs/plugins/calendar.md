@@ -12,12 +12,13 @@
 | `Weather/Weather.swift` | `WeatherService`, `WeatherSource`, `WeatherSnapshot` | Open-Meteo（地理编码搜索城市 + 预报 + US AQI）与和风天气（预报 + AQI）数据抓取 |
 | `Views/CalendarViews.swift` | `CalendarMainView` | 完整窗口月历界面 |
 | `Views/CalendarSettings.swift` | `CalendarDisplaySettings`, `CalendarStatusBarSettings`, `CalendarAppearanceSettings`, `CalendarHolidaySettings`, `WeatherSettings` | 月历、状态栏日历（时间/日期/天气开关与预览）、外观（弹出面板样式）、节假日（复用 `DSHolidaySettingsView`）与天气设置页 |
-| `Views/CalendarPopover.swift` | `CalendarPopover`, `CalendarMenuBarLabel` | 菜单栏多图标组合标签与紧凑双栏弹出面板 |
+| `Views/CalendarPopover.swift` | `CalendarPopover`, `CalendarMenuBarLabel`, `CalendarMenuBarRenderer`, `CalendarMenuBarPreview` | 菜单栏模板图像渲染器、设置预览标签与紧凑双栏弹出面板 |
 | `Views/CalendarPopoverStyle.swift` | `CalendarPopoverStyle`, `CalendarPopoverPalette` | 6 套弹出面板主题（跟随系统、跟随外观、简约白、深邃黑、经典红、经典蓝） |
 
 ## 历法与天气能力
 
 - **农历与节气**：农历基于系统 `Calendar(identifier: .chinese)`（按北京时间正午防跨日）；24 节气通过 Meeus 太阳视黄经迭代求解，完全离线可用。
+- **状态栏渲染**：`CalendarMenuBarLabel` 使用 `CalendarMenuBarRenderer` 将天气图标/温度/AQI、公历/星期/农历、时钟图标/时间离线绘制为高度 `22pt` 的模板 `NSImage`，避免 macOS `MenuBarExtra` 动态文本插值在切换显示项时截断或消失；设置页实时预览使用 SwiftUI `CalendarMenuBarPreview`。
 - **休/班标识与倒计时**：直接读取共享 `WorkCalendar` 数据，显示「休」「班」角标，并支持百度风格倒计时（今天显示距下一个法定节假日天数）。
 - **弹出面板交互与主题**：
   - 在 `CalendarPopover` 中点击会离开弹层的操作（城市/天气设置、打开大窗口、日历设置、退出万年历）时，会通过 `\.dismissMenuBarPopover` 立即收起弹出面板；面板内月历浏览（年/月下拉切换、前后翻月、返回今天、选日期）与弹出样式实时预览（`PopoverStyleDropdown`）则保留弹层打开。

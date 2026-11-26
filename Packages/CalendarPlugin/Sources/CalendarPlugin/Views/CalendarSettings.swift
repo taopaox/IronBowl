@@ -167,8 +167,9 @@ private struct MenuBarPreviewPill: View {
     let model: CalendarModel
 
     var body: some View {
-        CalendarMenuBarLabel(model: model)
+        CalendarMenuBarPreview(segments: model.menuBarSegments)
             .font(DS.font(13, .medium))
+            .monospacedDigit()
             .foregroundStyle(DS.text)
             .padding(.horizontal, 10)
             .frame(height: DS.s(26))

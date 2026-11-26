@@ -26,6 +26,7 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
 
     var model: LogModel?
     var scheduler: LogReminderScheduler?
+    private var quickCapture: QuickLogCapture?
     private var pluginContext: PluginContext?
 
     public init() {}
@@ -34,6 +35,9 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
         self.pluginContext = context
         let model = LogModel(context: context)
         self.model = model
+        let capture = QuickLogCapture(model: model)
+        quickCapture = capture
+        capture.syncShortcut()
         let scheduler = LogReminderScheduler(model: model)
         self.scheduler = scheduler
         scheduler.start()
@@ -42,6 +46,8 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
 
     public func stop() {
         pluginContext?.scheduler.unregister(actionID: Self.autoSubmitActionID)
+        quickCapture?.stop()
+        quickCapture = nil
         pluginContext = nil
         scheduler?.stop()
         scheduler = nil
@@ -124,11 +130,11 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
     public static let settingsReposID = "zentao.repos"
 
     public var settingsPages: [SettingsPage] {
-        guard let model, let scheduler else { return [] }
+        guard let model, let scheduler, let quickCapture else { return [] }
         return [
             SettingsPage(id: Self.settingsAccountID, title: "禅道账号", systemImage: "person.crop.circle") { AnyView(ZentaoAccountSettings(model: model)) },
             SettingsPage(id: Self.settingsReposID, title: "仓库与映射", systemImage: "folder") { AnyView(RepoSettings(model: model)) },
-            SettingsPage(id: "zentao.generate", title: "日志生成", systemImage: "sparkles") { AnyView(GenerateSettings(model: model)) },
+            SettingsPage(id: "zentao.generate", title: "日志生成", systemImage: "sparkles") { AnyView(GenerateSettings(model: model, capture: quickCapture)) },
             SettingsPage(id: "zentao.reminder", title: "日志提醒", systemImage: "bell") { AnyView(ReminderSettings(model: model, scheduler: scheduler)) },
         ]
     }

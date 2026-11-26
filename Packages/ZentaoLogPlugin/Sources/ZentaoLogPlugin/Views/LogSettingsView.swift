@@ -292,9 +292,21 @@ extension ScanMode {
 
 struct GenerateSettings: View {
     let model: LogModel
+    let capture: QuickLogCapture
 
     var body: some View {
         let s = model.settings
+        DSSection("快速记日志") {
+            DSRow("全局快捷键", description: capture.shortcutError ?? "按 ⌃⌥⌘L 打开输入框，回车保存到今日日报草稿。") {
+                DSToggle(isOn: Binding(
+                    get: { s[LogKeys.quickLogShortcut] },
+                    set: { s[LogKeys.quickLogShortcut] = $0; capture.syncShortcut() }
+                ))
+            }
+            DSRow("一句话记日志") {
+                Button("立即打开") { capture.show() }.buttonStyle(.dsSecondary)
+            }
+        }
         DSSection("提示词", footer: "占位符：{{date}} 日期，{{activity}} 提交明细，{{tasks}} 可选任务和兜底任务。") {
             DSBlockRow {
                 TextEditor(text: s.binding(LogKeys.prompt))

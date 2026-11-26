@@ -14,6 +14,20 @@ public final class ReportPlugin: IronBowlPlugin {
     public let systemImage = "doc.text"
     public var migrations: [DatabaseMigration] { [ReportMigrations.weekly] }
 
+    public var sidebarBadge: SidebarBadge? {
+        guard let model else { return nil }
+        if !model.hasCurrentWeekReport {
+            return SidebarBadge("本周未写", color: DS.danger)
+        }
+        if model.isTitaConfigured,
+           model.periodKind == .weekly,
+           model.isCurrentPeriod,
+           model.titaStatus?.state.isSubmitted == false {
+            return SidebarBadge("待推Tita", color: DS.warning)
+        }
+        return nil
+    }
+
     var model: WeeklyReportModel?
     private var context: PluginContext?
 
@@ -93,6 +107,20 @@ public final class MonthlyReportPlugin: IronBowlPlugin {
     public let sidebarSection: String? = "汇报"
     public let systemImage = "doc.richtext"
     public var migrations: [DatabaseMigration] { [ReportMigrations.monthly] }
+
+    public var sidebarBadge: SidebarBadge? {
+        guard let model else { return nil }
+        if !model.hasCurrentMonthReport {
+            return SidebarBadge("本月未写", color: DS.danger)
+        }
+        if model.isTitaConfigured,
+           model.periodKind == .monthly,
+           model.isCurrentPeriod,
+           model.titaStatus?.state.isSubmitted == false {
+            return SidebarBadge("待推Tita", color: DS.warning)
+        }
+        return nil
+    }
 
     var model: WeeklyReportModel?
     private var context: PluginContext?

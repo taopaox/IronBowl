@@ -1,6 +1,25 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import IronBowlKit
+
+@MainActor @Test func journalStatusStateAndSidebarBadgeSmoke() {
+    let color = DS.danger
+    let badge = SidebarBadge("今日未写", color: color)
+    #expect(badge.text == "今日未写")
+    #expect(badge == SidebarBadge("今日未写", color: color))
+
+    func srgb(_ c: Color) -> NSColor? {
+        NSColor(c).usingColorSpace(.sRGB)
+    }
+
+    let palette = JournalPalette(preset: .warm)
+    #expect(srgb(JournalStatusState.unwritten.color(in: palette)) == srgb(palette.stampRed))
+    #expect(srgb(JournalStatusState.draft.color(in: palette)) == srgb(palette.stampAmber))
+    #expect(srgb(JournalStatusState.completed.color(in: palette)) == srgb(palette.stampGreen))
+    #expect(srgb(JournalStatusState.offDay.color(in: palette)) == srgb(palette.inkTertiary))
+}
 
 @Test func journalHighlightKeyNormalizesWhitespace() {
     let k1 = JournalHighlight.key(date: "2026-11-26", work: "  完成导出重构\n  与单测  ")

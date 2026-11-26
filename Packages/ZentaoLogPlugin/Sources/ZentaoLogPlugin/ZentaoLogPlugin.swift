@@ -14,6 +14,16 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
     public let systemImage = "square.and.pencil"
     public var migrations: [DatabaseMigration] { LogMigrations.all }
 
+    public var sidebarBadge: SidebarBadge? {
+        guard let model, model.isConfigured else { return nil }
+        let today = Date()
+        guard model.context.workCalendar.isWorkday(today), !model.todaySubmitted else { return nil }
+        if model.pendingHours(on: today) > 0 {
+            return SidebarBadge("草稿", color: DS.warning)
+        }
+        return SidebarBadge("今日未写", color: DS.danger)
+    }
+
     var model: LogModel?
     var scheduler: LogReminderScheduler?
     private var pluginContext: PluginContext?

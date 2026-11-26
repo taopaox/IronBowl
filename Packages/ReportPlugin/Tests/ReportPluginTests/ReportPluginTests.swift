@@ -1055,3 +1055,37 @@ import Testing
     #expect(mStats.inserted == 1)
     #expect(store.monthlyReport(forMonthKey: "2026-10")?.content.contains("十月成果") == true)
 }
+
+@MainActor @Test func reportPluginsReportUnwrittenAndWrittenSidebarBadges() async throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "report-badge-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let db = try AppDatabase(url: url, migrations: LogMigrations.all + ReportMigrations.all)
+    let settings = SettingsStore(database: db)
+    let ctx = PluginContext(
+        database: db,
+        settings: settings,
+        reminders: ReminderCenter(),
+        workCalendar: WorkCalendar(database: db, settings: settings),
+        providers: AIProviderStore(settings: settings),
+        webSessions: WebSessionManager(settings: settings),
+        openPlugin: { _ in },
+        openSettings: { _ in }
+    )
+
+    let weeklyPlugin = ReportPlugin()
+    let monthlyPlugin = MonthlyReportPlugin()
+    weeklyPlugin.start(context: ctx)
+    monthlyPlugin.start(context: ctx)
+
+    #expect(weeklyPlugin.sidebarBadge?.text == "本周未写")
+    #expect(monthlyPlugin.sidebarBadge?.text == "本月未写")
+
+    weeklyPlugin.model?.extraNotes = "本周重点"
+    await weeklyPlugin.model?.generate()
+    #expect(weeklyPlugin.sidebarBadge == nil)
+
+    monthlyPlugin.model?.extraNotes = "本月重点"
+    await monthlyPlugin.model?.generate()
+    #expect(monthlyPlugin.sidebarBadge == nil)
+}

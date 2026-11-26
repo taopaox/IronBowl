@@ -11,12 +11,45 @@ struct LogView: View {
         JournalPalette(preset: model.settings[JournalKeys.paperPreset])
     }
 
+    private var dailyStatusState: JournalStatusState {
+        let dayInfo = model.context.workCalendar.dayInfo(model.date)
+        if !dayInfo.isWorkday && model.targetHours <= 0 && model.drafts.isEmpty {
+            return .offDay
+        }
+        if model.recordedHours == 0 && model.pendingDrafts.isEmpty {
+            return .unwritten
+        }
+        if !model.pendingDrafts.isEmpty || model.remainingTargetHours > 0 {
+            return .draft
+        }
+        return .completed
+    }
+
+    private var dailyStatusBadgeText: String {
+        let isToday = Calendar.current.isDateInToday(model.date)
+        switch dailyStatusState {
+        case .offDay:
+            return "休息日"
+        case .unwritten:
+            return isToday ? "今日未写" : "\(CN.monthDay(model.date))未写"
+        case .draft:
+            if !model.pendingDrafts.isEmpty {
+                return "草稿待交"
+            }
+            return "还差 \(hoursText(model.remainingTargetHours))h"
+        case .completed:
+            return isToday ? "今日已写" : "已写满"
+        }
+    }
+
     var body: some View {
         Group {
             if model.isConfigured {
                 JournalSpreadShell(
                     chapter: .daily,
                     settings: model.settings,
+                    statusState: dailyStatusState,
+                    statusBadgeText: dailyStatusBadgeText,
                     showHistoryTab: false,
                     onSelectChapter: { chapter in
                         switch chapter {
@@ -303,26 +336,42 @@ struct LogView: View {
         if let error = model.errorMessage { DSBanner(.danger, error) }
         if let message = model.message { DSBanner(.success, message) }
 
+        dailyStatusBanner(palette: p, pendingHours: pendingHours)
+
         if model.drafts.isEmpty {
-            JournalPaperCard(palette: p) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(model.isLoadingRecorded ? "正在同步禅道工时记录…" : "今天的手账页还是空的")
-                        .font(DS.font(14.5, .semibold))
-                        .foregroundStyle(p.ink)
-                    Text(model.plannedOvertimeHours > 0 && model.baseWorkHours > 0
-                        ? "点击「生成草稿」将按正常 \(hoursText(model.baseWorkHours))h 与加班 \(hoursText(model.plannedOvertimeHours))h 分别拆条生成。"
-                        : "可以点击上方「生成草稿」、从左侧 Git 小票摘录，或「手写一条」直接记录。")
-                        .font(DS.font(12.5))
-                        .foregroundStyle(p.inkSecondary)
-                    HStack(spacing: 8) {
-                        Button("✨ 生成草稿") { Task { await model.generate() } }
-                            .buttonStyle(.journalSecondary(p))
-                            .disabled(model.isGenerating)
-                        Button("+ 手写一条") { model.addManual() }
-                            .buttonStyle(.journalSecondary(p))
-                    }
-                    .padding(.top, 2)
+            let isUnwritten = dailyStatusState == .unwritten
+            let emptyAccent = isUnwritten ? p.stampRed : p.borderStrong
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: isUnwritten ? "square.and.pencil" : "cup.and.saucer")
+                        .font(DS.font(18, .semibold))
+                        .foregroundStyle(isUnwritten ? p.stampRed : p.inkSecondary)
+                    Text(model.isLoadingRecorded
+                        ? "正在同步禅道工时记录…"
+                        : (isUnwritten ? "\(dailyStatusBadgeText)，先生成或手写一条吧" : "今天是休息日，暂无需填报"))
+                        .font(JournalPalette.serif(16, .bold))
+                        .foregroundStyle(isUnwritten ? p.stampRed : p.ink)
                 }
+                Text(model.plannedOvertimeHours > 0 && model.baseWorkHours > 0
+                    ? "点击「生成草稿」将按正常 \(hoursText(model.baseWorkHours))h 与加班 \(hoursText(model.plannedOvertimeHours))h 分别拆条生成。"
+                    : "可以点击「生成草稿」、从左侧 Git 小票摘录，或「手写一条」直接记录。")
+                    .font(DS.font(12.5))
+                    .foregroundStyle(p.inkSecondary)
+                HStack(spacing: 8) {
+                    Button("✨ 生成草稿") { Task { await model.generate() } }
+                        .buttonStyle(.journalPrimary(tint: isUnwritten ? p.stampRed : p.inkSecondary))
+                        .disabled(model.isGenerating)
+                    Button("+ 手写一条") { model.addManual() }
+                        .buttonStyle(.journalSecondary(p))
+                }
+                .padding(.top, 2)
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isUnwritten ? p.stampRed.opacity(0.04) : p.paperCard, in: .rect(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(emptyAccent.opacity(isUnwritten ? 0.55 : 1), style: StrokeStyle(lineWidth: 1.4, dash: [6, 4]))
             }
         } else {
             if !model.pendingDrafts.isEmpty {
@@ -364,6 +413,65 @@ struct LogView: View {
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func dailyStatusBanner(palette p: JournalPalette, pendingHours: Double) -> some View {
+        let isToday = Calendar.current.isDateInToday(model.date)
+        let commitCount = model.activities.reduce(0) { $0 + $1.commits.count }
+        let dayLabel = isToday ? "今日" : CN.monthDay(model.date)
+
+        switch dailyStatusState {
+        case .unwritten:
+            JournalStatusBanner(
+                state: .unwritten,
+                title: "\(dayLabel)未写 · 需填 \(hoursText(model.targetHours))h",
+                detail: commitCount > 0 ? "已扫描到 \(commitCount) 次 Git 提交，点右侧一键生成草稿。" : "暂未扫描到提交，可点左侧或上方手写记录。",
+                palette: p,
+                actionTitle: "✨ 立即生成草稿",
+                actionDisabled: model.isGenerating
+            ) {
+                Task { await model.generate() }
+            }
+        case .draft:
+            if !model.pendingDrafts.isEmpty {
+                JournalStatusBanner(
+                    state: .draft,
+                    title: "\(dayLabel)有 \(model.pendingDrafts.count) 条草稿待提交（\(hoursText(pendingHours))h）",
+                    detail: model.recordedHours > 0 ? "已写 \(hoursText(model.recordedHours))h，提交后即可完成目标 \(hoursText(model.targetHours))h。" : "核对工作内容后即可盖章写入禅道。",
+                    palette: p,
+                    actionTitle: "盖章提交禅道",
+                    actionDisabled: model.isSubmitting
+                ) {
+                    confirmSubmit = true
+                }
+            } else {
+                JournalStatusBanner(
+                    state: .draft,
+                    title: "\(dayLabel)已写 \(hoursText(model.recordedHours))h · 还差 \(hoursText(model.remainingTargetHours))h",
+                    detail: "未达到当日目标 \(hoursText(model.targetHours))h，可继续补全草稿或记加班。",
+                    palette: p,
+                    actionTitle: "✨ 补全草稿",
+                    actionDisabled: model.isGenerating
+                ) {
+                    Task { await model.generate() }
+                }
+            }
+        case .completed:
+            JournalStatusBanner(
+                state: .completed,
+                title: "\(dayLabel)已写满 \(hoursText(model.recordedHours))h",
+                detail: "全部工时已入账禅道",
+                palette: p
+            )
+        case .offDay:
+            JournalStatusBanner(
+                state: .offDay,
+                title: "休息日 · 默认无需填报",
+                detail: "如需记录加班，请在左页点击 +1h ~ +4h",
+                palette: p
+            )
         }
     }
 }

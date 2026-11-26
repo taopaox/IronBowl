@@ -218,9 +218,14 @@ struct Sidebar: View {
                 }
             }
         } else {
-            DSSidebarItem(plugin.sidebarTitle, systemImage: plugin.systemImage,
-                          selected: app.selection == plugin.id && !hasSelectedChild,
-                          badge: plugin.isComingSoon ? "即将推出" : nil) {
+            let badge = plugin.sidebarBadge
+            DSSidebarItem(
+                plugin.sidebarTitle,
+                systemImage: plugin.systemImage,
+                selected: app.selection == plugin.id && !hasSelectedChild,
+                badge: plugin.isComingSoon ? "即将推出" : badge?.text,
+                badgeColor: plugin.isComingSoon ? nil : badge?.color
+            ) {
                 plugin.onSidebarSelect()
                 app.select(plugin.id)
             }

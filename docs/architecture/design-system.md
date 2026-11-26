@@ -39,7 +39,7 @@ IronBowl 的 UI 规范集中在 [`DesignSystem.swift`](../../Packages/IronBowlKi
 | `DSBanner` | 提示横幅，支持 `.info` / `.success` / `.warning` / `.danger` 与文本可选中 |
 | `DSSection` / `DSRow` / `DSBlockRow` | 设置页分组容器，自动在相邻行间绘制内缩 `Divider` |
 | `DSToggle` / `DSPicker` / `DSStepper` / `DSTabs` | 绿色开关、浮层卡片下拉选择器（[`DSPicker.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/UI/DSPicker.swift)，支持 `DSPickerOption` 副标题与绿色选中对勾）、数字步进器、分段标签 |
-| `DSSidebarItem` / `DSSidebarSection` | 侧边栏条目与分区小标题 |
+| `DSSidebarItem` / `DSSidebarSection` | 侧边栏条目（支持 `badgeColor` 语义状态角标）与分区小标题 |
 | `DSPrimaryButtonStyle` 等 | `.dsPrimary`、`.dsSecondary`、`.dsGhost`、`.dsChip`、`.textFieldStyle(.ds)` |
 | `Tag`（`Format.swift`） | 圆角胶囊语义标签 |
 | `DSAppearanceSettingsView` / `DSHolidaySettingsView` | 主应用与独立版万年历复用的外观与节假日设置视图 |
@@ -65,5 +65,5 @@ IronBowl 的 UI 规范集中在 [`DesignSystem.swift`](../../Packages/IronBowlKi
   - `journal.highlightedItems`（`[String]`，通过 `JournalHighlight.toggle(date:work:in:)` 持久化荧光笔重点，上限 200 条）
 - **核心组件**：
   - `JournalPalette`：提供桌垫、皮革封边、书写纸/格纹纸、横线/网格、朱红/松绿/琥珀/紫色/靛蓝印章与便利贴语义色及衬线标题字体 `JournalPalette.serif(_:_:)`。
-  - `JournalSpreadShell`：双页活页容器（左页格纹素材区 + 中央 6 环书脊 `JournalBinderSpine` + 右页横线书写区 + 右缘彩色索引签 `JournalIndexTabs`，宽度低于 `860pt` 时自动折叠为单页纵向布局），内置纸感预设切换胶囊。
-  - `JournalStampBadge` / `JournalPaperCard` / `JournalStickyNote` / `JournalProgressBar` / `JournalPrimaryButtonStyle` / `JournalSecondaryButtonStyle`：倾斜橡皮印章（带落印动画）、纸张小卡（支持色条、回形针与高亮态）、淡黄和纸便利贴、三段工时进度条与高对比手账按钮。
+  - `JournalSpreadShell`：双页活页容器（左页格纹素材区 + 中央 6 环书脊 `JournalBinderSpine` + 右页横线书写区 + 右缘彩色索引签 `JournalIndexTabs`，宽度低于 `860pt` 时自动折叠为单页纵向布局），内置纸感预设切换胶囊、章节实心身份胶囊、`JournalStatusState` 高对比状态胶囊与右页顶部状态色带（未写态叠加朱红描边提示）。
+  - `JournalStatusBanner` / `JournalStampBadge` / `JournalPaperCard` / `JournalStickyNote` / `JournalProgressBar` / `JournalPrimaryButtonStyle` / `JournalSecondaryButtonStyle`：未写/草稿/完成强视觉状态横幅、倾斜橡皮印章（带落印动画）、纸张小卡（支持色条、回形针与高亮态）、淡黄和纸便利贴、三段工时进度条与高对比手账按钮。

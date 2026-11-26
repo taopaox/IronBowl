@@ -212,6 +212,22 @@ public struct JournalPalette: Sendable {
 
 // MARK: - 章节与双页活页手账外壳
 
+public enum JournalStatusState: Equatable, Sendable {
+    case unwritten
+    case draft
+    case completed
+    case offDay
+
+    public func color(in palette: JournalPalette) -> Color {
+        switch self {
+        case .unwritten: palette.stampRed
+        case .draft: palette.stampAmber
+        case .completed: palette.stampGreen
+        case .offDay: palette.inkTertiary
+        }
+    }
+}
+
 public enum JournalChapter: String, Sendable, CaseIterable {
     case daily
     case weekly
@@ -245,6 +261,8 @@ public enum JournalChapter: String, Sendable, CaseIterable {
 public struct JournalSpreadShell<HeaderActions: View, LeftPage: View, RightPage: View>: View {
     let chapter: JournalChapter
     let settings: SettingsStore
+    let statusState: JournalStatusState
+    let statusBadgeText: String?
     let showHistoryTab: Bool
     let onSelectChapter: ((JournalChapter) -> Void)?
     let onOpenHistory: (() -> Void)?
@@ -257,6 +275,8 @@ public struct JournalSpreadShell<HeaderActions: View, LeftPage: View, RightPage:
     public init(
         chapter: JournalChapter,
         settings: SettingsStore,
+        statusState: JournalStatusState = .completed,
+        statusBadgeText: String? = nil,
         showHistoryTab: Bool = false,
         onSelectChapter: ((JournalChapter) -> Void)? = nil,
         onOpenHistory: (() -> Void)? = nil,
@@ -266,6 +286,8 @@ public struct JournalSpreadShell<HeaderActions: View, LeftPage: View, RightPage:
     ) {
         self.chapter = chapter
         self.settings = settings
+        self.statusState = statusState
+        self.statusBadgeText = statusBadgeText
         self.showHistoryTab = showHistoryTab
         self.onSelectChapter = onSelectChapter
         self.onOpenHistory = onOpenHistory
@@ -284,6 +306,7 @@ public struct JournalSpreadShell<HeaderActions: View, LeftPage: View, RightPage:
 
     public var body: some View {
         let p = palette
+        let statusColor = statusState.color(in: p)
         VStack(spacing: 0) {
             topBar(palette: p)
 
@@ -306,18 +329,30 @@ public struct JournalSpreadShell<HeaderActions: View, LeftPage: View, RightPage:
 
                             JournalBinderSpine(palette: p)
 
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 16) {
-                                    rightPage
+                            VStack(spacing: 0) {
+                                Rectangle()
+                                    .fill(statusColor)
+                                    .frame(height: statusState == .unwritten ? 5 : 3.5)
+
+                                ScrollView {
+                                    VStack(alignment: .leading, spacing: 16) {
+                                        rightPage
+                                    }
+                                    .padding(.horizontal, 26)
+                                    .padding(.vertical, 18)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                .padding(.horizontal, 26)
-                                .padding(.vertical, 20)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .scrollIndicators(.never)
                             }
-                            .scrollIndicators(.never)
                             .background {
                                 p.paper
                                 JournalRuledBackground(lineColor: p.paperLine)
+                            }
+                            .overlay {
+                                if statusState == .unwritten {
+                                    Rectangle()
+                                        .strokeBorder(p.stampRed.opacity(0.32), lineWidth: 2)
+                                }
                             }
                         }
                         .clipShape(.rect(cornerRadius: 10))
@@ -363,7 +398,16 @@ public struct JournalSpreadShell<HeaderActions: View, LeftPage: View, RightPage:
                             }
                             .padding(18)
                             .background(p.paper, in: .rect(cornerRadius: 12))
-                            .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(p.borderStrong) }
+                            .overlay(alignment: .top) {
+                                Rectangle()
+                                    .fill(statusColor)
+                                    .frame(height: 4)
+                                    .clipShape(.rect(cornerRadius: 12))
+                            }
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(statusState == .unwritten ? p.stampRed.opacity(0.45) : p.borderStrong, lineWidth: statusState == .unwritten ? 1.5 : 1)
+                            }
 
                             VStack(alignment: .leading, spacing: 14) {
                                 leftPage
@@ -382,11 +426,45 @@ public struct JournalSpreadShell<HeaderActions: View, LeftPage: View, RightPage:
     }
 
     private func topBar(palette p: JournalPalette) -> some View {
-        HStack(spacing: 10) {
+        let chapterColor = chapter.tabColor(in: p)
+        let statusColor = statusState.color(in: p)
+
+        return HStack(spacing: 10) {
             HStack(spacing: 8) {
+                Text(chapter.title)
+                    .font(DS.font(12, .heavy))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3.5)
+                    .background(chapterColor, in: .capsule)
+
                 Text(chapter.fullTitle)
                     .font(JournalPalette.serif(17, .bold))
                     .foregroundStyle(p.ink)
+
+                if let statusBadgeText, !statusBadgeText.isEmpty {
+                    let solidFill = statusState == .unwritten || statusState == .draft
+                    HStack(spacing: 4) {
+                        if statusState == .unwritten {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(DS.font(11))
+                        } else if statusState == .completed {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(DS.font(11))
+                        }
+                        Text(statusBadgeText)
+                            .font(DS.font(11.5, .bold))
+                    }
+                    .foregroundStyle(solidFill ? .white : statusColor)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3.5)
+                    .background(solidFill ? statusColor : statusColor.opacity(0.14), in: .capsule)
+                    .overlay {
+                        if !solidFill {
+                            Capsule().strokeBorder(statusColor.opacity(0.35))
+                        }
+                    }
+                }
 
                 HStack(spacing: 2) {
                     ForEach(JournalPaperPreset.allCases, id: \.self) { item in
@@ -395,10 +473,10 @@ public struct JournalSpreadShell<HeaderActions: View, LeftPage: View, RightPage:
                             settings[JournalKeys.paperPreset] = item
                         } label: {
                             Text(item.shortName)
-                                .font(DS.font(11.5, selected ? .semibold : .regular))
+                                .font(DS.font(11, selected ? .semibold : .regular))
                                 .foregroundStyle(selected ? p.ink : p.inkTertiary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2.5)
                                 .background(selected ? p.paperCard : .clear, in: .capsule)
                         }
                         .buttonStyle(.plain)
@@ -418,6 +496,103 @@ public struct JournalSpreadShell<HeaderActions: View, LeftPage: View, RightPage:
         .frame(height: 46)
         .padding(.top, 6)
         .windowTitleBar()
+    }
+}
+
+/// 醒目状态横幅：彻底区分未写（朱红警告）、草稿/待交付（琥珀提醒）、已完成（松绿轻提示）。
+public struct JournalStatusBanner: View {
+    let state: JournalStatusState
+    let title: String
+    let detail: String
+    let palette: JournalPalette
+    let actionTitle: String?
+    let actionDisabled: Bool
+    let action: (() -> Void)?
+
+    public init(
+        state: JournalStatusState,
+        title: String,
+        detail: String,
+        palette: JournalPalette,
+        actionTitle: String? = nil,
+        actionDisabled: Bool = false,
+        action: (() -> Void)? = nil
+    ) {
+        self.state = state
+        self.title = title
+        self.detail = detail
+        self.palette = palette
+        self.actionTitle = actionTitle
+        self.actionDisabled = actionDisabled
+        self.action = action
+    }
+
+    private var iconName: String {
+        switch state {
+        case .unwritten: "exclamationmark.circle.fill"
+        case .draft: "pencil.and.outline"
+        case .completed: "checkmark.seal.fill"
+        case .offDay: "cup.and.saucer.fill"
+        }
+    }
+
+    public var body: some View {
+        let color = state.color(in: palette)
+        let compact = state == .completed || state == .offDay
+
+        HStack(spacing: 0) {
+            if !compact {
+                Rectangle()
+                    .fill(color)
+                    .frame(width: 4)
+            }
+
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: iconName)
+                    .font(DS.font(compact ? 14 : 18, .bold))
+                    .foregroundStyle(color)
+
+                if compact {
+                    Text(title)
+                        .font(DS.font(13, .semibold))
+                        .foregroundStyle(color)
+                    if !detail.isEmpty {
+                        Text("· \(detail)")
+                            .font(DS.font(12))
+                            .foregroundStyle(palette.inkSecondary)
+                            .lineLimit(1)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(DS.font(14.5, .bold))
+                            .foregroundStyle(color)
+                        if !detail.isEmpty {
+                            Text(detail)
+                                .font(DS.font(12))
+                                .foregroundStyle(palette.inkSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+
+                Spacer(minLength: 6)
+
+                if let actionTitle, let action {
+                    Button(actionTitle, action: action)
+                        .buttonStyle(.journalPrimary(tint: color))
+                        .disabled(actionDisabled)
+                }
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, compact ? 8 : 11)
+        }
+        .background(color.opacity(compact ? 0.08 : 0.11))
+        .clipShape(.rect(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(color.opacity(compact ? 0.25 : 0.42), lineWidth: compact ? 1 : 1.3)
+        }
     }
 }
 

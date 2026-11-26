@@ -14,6 +14,8 @@ public protocol IronBowlPlugin: AnyObject {
     var systemImage: String { get }
     /// 只占位、尚未实现。
     var isComingSoon: Bool { get }
+    /// 左侧边栏标题右侧的语义状态角标（如「今日未写」「本周未写」）。
+    var sidebarBadge: SidebarBadge? { get }
     /// 是否以可折叠目录形式在左侧栏展示（子条目来自 `sidebarChildren`）。
     var isSidebarDirectory: Bool { get }
     /// 插件自己的数据库迁移。
@@ -46,6 +48,7 @@ public extension IronBowlPlugin {
     var sidebarTitle: String { title }
     var sidebarSection: String? { nil }
     var isComingSoon: Bool { false }
+    var sidebarBadge: SidebarBadge? { nil }
     var isSidebarDirectory: Bool { false }
     var migrations: [DatabaseMigration] { [] }
     func start(context: PluginContext) {}
@@ -58,6 +61,17 @@ public extension IronBowlPlugin {
     var quickActions: [QuickAction] { [] }
     var homeCards: [HomeCard] { [] }
     func handleHomeInput(_ text: String) async -> String? { nil }
+}
+
+/// 左侧栏插件条目右侧的状态角标。
+public struct SidebarBadge: Equatable {
+    public let text: String
+    public let color: Color
+
+    public init(_ text: String, color: Color) {
+        self.text = text
+        self.color = color
+    }
 }
 
 /// 侧栏中按 `sidebarSection` 归组后的插件分区。

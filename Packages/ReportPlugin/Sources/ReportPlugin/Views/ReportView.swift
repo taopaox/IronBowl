@@ -24,10 +24,36 @@ struct ReportView: View {
         model.periodKind == .weekly ? .weekly : .monthly
     }
 
+    private var reportStatusState: JournalStatusState {
+        if !model.hasReportContent {
+            return .unwritten
+        }
+        if model.isTitaConfigured, model.titaStatus?.state.isSubmitted == false {
+            return .draft
+        }
+        return .completed
+    }
+
+    private var reportStatusBadgeText: String {
+        let periodWord = model.periodKind == .weekly ? "本周" : "本月"
+        switch reportStatusState {
+        case .unwritten:
+            return model.isCurrentPeriod ? "\(periodWord)未写" : "\(model.activePeriodTitle)未写"
+        case .draft:
+            return "Tita 未交"
+        case .completed:
+            return model.isCurrentPeriod ? "\(periodWord)已写" : "已完成"
+        case .offDay:
+            return ""
+        }
+    }
+
     var body: some View {
         JournalSpreadShell(
             chapter: currentChapter,
             settings: model.settings,
+            statusState: reportStatusState,
+            statusBadgeText: reportStatusBadgeText,
             showHistoryTab: true,
             onSelectChapter: { target in
                 switch target {
@@ -384,6 +410,8 @@ struct ReportView: View {
 
         statusBanners
 
+        reportStatusBanner(palette: p)
+
         if model.hasReportContent || previewMode == .edit {
             if previewMode == .preview {
                 JournalMarkdownReportView(markdown: model.reportContent, palette: p, chapterColor: currentChapter.tabColor(in: p))
@@ -550,35 +578,85 @@ struct ReportView: View {
             "\(periodLabel)暂无每日日报，可在左页黄色便利贴填写要点后直接生成"
         }
 
-        return JournalPaperCard(palette: p, padding: 24) {
-            VStack(spacing: 12) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(DS.font(26))
-                    .foregroundStyle(currentChapter.tabColor(in: p))
-                Text("准备好生成「\(model.activePeriodTitle)」\(noun)")
-                    .font(JournalPalette.serif(18, .bold))
-                    .foregroundStyle(p.ink)
-                Text(materialSummary)
-                    .font(DS.body)
-                    .foregroundStyle(p.inkSecondary)
-                    .multilineTextAlignment(.center)
-                HStack(spacing: 10) {
-                    Button {
-                        Task { await model.generate() }
-                    } label: {
-                        Label("生成\(noun)", systemImage: "sparkles")
-                    }
-                    .buttonStyle(.journalPrimary(tint: currentChapter.tabColor(in: p)))
-                    .disabled(model.isGenerating)
-
-                    Button("直接手写") {
-                        previewMode = .edit
-                    }
-                    .buttonStyle(.journalSecondary(p))
+        return VStack(spacing: 14) {
+            Image(systemName: "doc.badge.plus")
+                .font(DS.font(28, .semibold))
+                .foregroundStyle(p.stampRed)
+            Text(model.isCurrentPeriod
+                ? "\(model.periodKind == .weekly ? "本周" : "本月")\(noun)未写"
+                : "「\(model.activePeriodTitle)」\(noun)未写")
+                .font(JournalPalette.serif(20, .bold))
+                .foregroundStyle(p.stampRed)
+            Text(materialSummary)
+                .font(DS.body)
+                .foregroundStyle(p.inkSecondary)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 10) {
+                Button {
+                    Task { await model.generate() }
+                } label: {
+                    Label("立即生成\(noun)", systemImage: "sparkles")
                 }
-                .padding(.top, 4)
+                .buttonStyle(.journalPrimary(tint: p.stampRed))
+                .disabled(model.isGenerating)
+
+                Button("直接手写") {
+                    previewMode = .edit
+                }
+                .buttonStyle(.journalSecondary(p))
             }
-            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity)
+        .background(p.stampRed.opacity(0.04), in: .rect(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(p.stampRed.opacity(0.55), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+        }
+    }
+
+    @ViewBuilder
+    private func reportStatusBanner(palette p: JournalPalette) -> some View {
+        let noun = model.periodKind.displayName
+        let periodLabel = model.periodKind == .weekly ? "本周" : "本月"
+        let scopePrefix = model.isCurrentPeriod ? "\(periodLabel)\(noun)" : "「\(model.activePeriodTitle)」\(noun)"
+
+        switch reportStatusState {
+        case .unwritten:
+            let detail = model.totalLogCount > 0
+                ? "已收集 \(model.loggedDaysCount) 天共 \(model.totalLogCount) 条日报（\(WorkCalendar.hoursText(model.totalHours))h），可直接一键汇总。"
+                : "\(periodLabel)暂无每日日报，可在左页黄色便利贴写要点后生成。"
+            JournalStatusBanner(
+                state: .unwritten,
+                title: "\(scopePrefix)未写",
+                detail: detail,
+                palette: p,
+                actionTitle: "✨ 立即生成\(noun)",
+                actionDisabled: model.isGenerating
+            ) {
+                Task { await model.generate() }
+            }
+        case .draft:
+            JournalStatusBanner(
+                state: .draft,
+                title: "\(scopePrefix)已写 · 尚未推送 Tita",
+                detail: "正文已保存在本地，核对四模块后即可提交。",
+                palette: p,
+                actionTitle: "✉️ 立即推送 Tita"
+            ) {
+                showTitaSubmit = true
+            }
+        case .completed:
+            let titaInfo = model.titaStatus.map { "Tita \($0.state.displayName)" } ?? "已保存本地"
+            JournalStatusBanner(
+                state: .completed,
+                title: "\(scopePrefix)已写",
+                detail: titaInfo,
+                palette: p
+            )
+        case .offDay:
+            EmptyView()
         }
     }
 

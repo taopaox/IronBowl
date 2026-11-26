@@ -297,14 +297,23 @@ public struct DSSidebarItem: View {
     let systemImage: String
     let selected: Bool
     let badge: String?
+    let badgeColor: Color?
     let action: () -> Void
     @State private var hovering = false
 
-    public init(_ title: String, systemImage: String, selected: Bool, badge: String? = nil, action: @escaping () -> Void) {
+    public init(
+        _ title: String,
+        systemImage: String,
+        selected: Bool,
+        badge: String? = nil,
+        badgeColor: Color? = nil,
+        action: @escaping () -> Void
+    ) {
         self.title = title
         self.systemImage = systemImage
         self.selected = selected
         self.badge = badge
+        self.badgeColor = badgeColor
         self.action = action
     }
 
@@ -317,9 +326,19 @@ public struct DSSidebarItem: View {
                 Text(title).font(DS.font(14.5))
                 Spacer(minLength: 0)
                 if let badge {
-                    Text(badge).font(DS.font(11.5)).foregroundStyle(DS.textTertiary)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .overlay { Capsule().strokeBorder(DS.border) }
+                    if let badgeColor {
+                        Text(badge)
+                            .font(DS.font(10.5, .semibold))
+                            .foregroundStyle(badgeColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(badgeColor.opacity(0.14), in: .capsule)
+                            .overlay { Capsule().strokeBorder(badgeColor.opacity(0.32)) }
+                    } else {
+                        Text(badge).font(DS.font(11.5)).foregroundStyle(DS.textTertiary)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .overlay { Capsule().strokeBorder(DS.border) }
+                    }
                 }
             }
             .foregroundStyle(DS.text)

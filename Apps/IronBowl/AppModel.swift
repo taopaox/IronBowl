@@ -55,6 +55,7 @@ final class AppModel {
     let webSessions: WebSessionManager
     let scheduler: TaskScheduler
     let systemMonitor: SystemMonitor
+    let updater = AppUpdater()
     let plugins: [IronBowlPlugin]
     var context: PluginContext!
 

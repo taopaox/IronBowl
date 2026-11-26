@@ -25,6 +25,11 @@ struct IronBowlApp: App {
                         .credits: AppBrand.aboutCredits(),
                     ])
                 }
+                Divider()
+                Button("检查更新…") {
+                    app.updater.checkForUpdates()
+                }
+                .disabled(!app.updater.canCheckForUpdates)
             }
             CommandGroup(replacing: .appSettings) {
                 SettingsCommand(app: app)

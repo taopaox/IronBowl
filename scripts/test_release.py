@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 import sys
 
@@ -82,6 +83,101 @@ class ReleaseScriptTests(unittest.TestCase):
             path.write_text(sample, encoding="utf-8")
             release.bump_project_yml(path, "0.2.0", 2)
             self.assertEqual(release.read_project_versions(path), ("0.2.0", 2))
+
+    def test_parse_sign_update_output(self) -> None:
+        raw = 'sparkle:edSignature="ZuOwgBjr627QB7VuVgMQ3r5NGFbsHjOR+p5nPTfxWSL2dS4emF02X+1YuhcPhcZH==" length="123456"\n'
+        sig, length = release.parse_sign_update_output(raw)
+        self.assertEqual(sig, "ZuOwgBjr627QB7VuVgMQ3r5NGFbsHjOR+p5nPTfxWSL2dS4emF02X+1YuhcPhcZH==")
+        self.assertEqual(length, 123456)
+
+        with self.assertRaises(ValueError):
+            release.parse_sign_update_output("invalid output")
+
+    def test_markdown_to_html_escapes_and_formats(self) -> None:
+        md = (
+            "## IronBowl v0.2.0 (Build 2)\n\n"
+            "### 新功能\n"
+            "- **app**: 支持 `Sparkle 2` <自动更新> ]]> 安全测试\n\n"
+            "> 提示：**首次打开**请执行\n"
+            "> ```bash\n"
+            "> xattr -cr /Applications/IronBowl.app\n"
+            "> ```\n"
+        )
+        rendered = release.markdown_to_html(md)
+        self.assertIn("<h2>IronBowl v0.2.0 (Build 2)</h2>", rendered)
+        self.assertIn("<h3>新功能</h3>", rendered)
+        self.assertIn("<li><strong>app</strong>: 支持 <code>Sparkle 2</code> &lt;自动更新&gt;", rendered)
+        self.assertIn("<pre><code>xattr -cr /Applications/IronBowl.app</code></pre>", rendered)
+        self.assertNotIn("]]>", rendered)
+
+    def test_render_appcast_xml_and_cli(self) -> None:
+        notes = "## IronBowl v0.3.0 (Build 5)\n\n### 新功能\n- 接入 Sparkle 2 自动更新\n"
+        xml_text = release.render_appcast_xml(
+            app_name="饭碗 IronBowl",
+            feed_url="https://github.com/taopaox/IronBowl/releases/latest/download/appcast-ironbowl.xml",
+            release_url="https://github.com/taopaox/IronBowl/releases/tag/v0.3.0",
+            download_url="https://github.com/taopaox/IronBowl/releases/download/v0.3.0/IronBowl-v0.3.0-macOS-arm64.zip",
+            version="0.3.0",
+            build=5,
+            length=987654,
+            ed_signature="abc123==",
+            notes_markdown=notes,
+            pub_date="Thu, 26 Nov 2026 10:00:00 GMT",
+        )
+        root = ET.fromstring(xml_text)
+        ns = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
+        item = root.find("./channel/item")
+        self.assertIsNotNone(item)
+        assert item is not None
+        self.assertEqual(item.findtext("title"), "v0.3.0")
+        self.assertEqual(item.findtext("sparkle:version", namespaces=ns), "5")
+        self.assertEqual(item.findtext("sparkle:shortVersionString", namespaces=ns), "0.3.0")
+        self.assertEqual(item.findtext("sparkle:minimumSystemVersion", namespaces=ns), "26.0")
+        self.assertIn("接入 Sparkle 2 自动更新", item.findtext("description") or "")
+        enclosure = item.find("enclosure")
+        self.assertIsNotNone(enclosure)
+        assert enclosure is not None
+        self.assertEqual(enclosure.attrib["length"], "987654")
+        self.assertEqual(
+            enclosure.attrib["{http://www.andymatuschak.org/xml-namespaces/sparkle}edSignature"],
+            "abc123==",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            archive = tmp_dir / "IronBowl.zip"
+            archive.write_bytes(b"zip-bytes-content")
+            notes_file = tmp_dir / "notes.md"
+            notes_file.write_text(notes, encoding="utf-8")
+            out_file = tmp_dir / "appcast-ironbowl.xml"
+            rc = release.main(
+                [
+                    "appcast",
+                    "--app-name",
+                    "饭碗 IronBowl",
+                    "--feed-url",
+                    "https://github.com/taopaox/IronBowl/releases/latest/download/appcast-ironbowl.xml",
+                    "--release-url",
+                    "https://github.com/taopaox/IronBowl/releases/tag/v0.3.0",
+                    "--download-url",
+                    "https://github.com/taopaox/IronBowl/releases/download/v0.3.0/IronBowl.zip",
+                    "--version",
+                    "0.3.0",
+                    "--build",
+                    "5",
+                    "--archive",
+                    str(archive),
+                    "--sign-output",
+                    f'sparkle:edSignature="sigXYZ==" length="{archive.stat().st_size}"',
+                    "--notes-file",
+                    str(notes_file),
+                    "--output",
+                    str(out_file),
+                ]
+            )
+            self.assertEqual(rc, 0)
+            parsed = ET.parse(out_file).getroot()
+            self.assertEqual(parsed.find("./channel/item/enclosure").attrib["length"], str(archive.stat().st_size))
 
 
 if __name__ == "__main__":

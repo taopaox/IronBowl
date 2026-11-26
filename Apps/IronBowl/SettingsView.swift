@@ -177,6 +177,7 @@ struct GeneralSettings: View {
                 }
                 .buttonStyle(.dsSecondary)
             }
+            AppUpdateSettingsRows(updater: app.updater)
         }
     }
 }

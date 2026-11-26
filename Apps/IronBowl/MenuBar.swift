@@ -236,6 +236,15 @@ struct MenuPanel: View {
             }
             .buttonStyle(.dsGhost)
 
+            Button {
+                runAndDismiss { app.updater.checkForUpdates() }
+            } label: {
+                Label("检查更新", systemImage: "arrow.triangle.2.circlepath")
+                    .font(DS.font(12.5))
+            }
+            .buttonStyle(.dsGhost)
+            .disabled(!app.updater.canCheckForUpdates)
+
             Spacer()
 
             Button {

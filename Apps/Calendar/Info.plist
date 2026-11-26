@@ -26,5 +26,13 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>饭碗 IronBowl</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/taopaox/IronBowl/releases/latest/download/appcast-calendar.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>BDkyFzrp28vcg8cMVHXpuc/NpDukEfbD+WPUlAR/TmA=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>

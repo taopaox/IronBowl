@@ -36,6 +36,11 @@ struct CalendarApp: App {
                         .credits: AppBrand.aboutCredits(),
                     ])
                 }
+                Divider()
+                Button("检查更新…") {
+                    app.updater.checkForUpdates()
+                }
+                .disabled(!app.updater.canCheckForUpdates)
             }
             CommandGroup(replacing: .appSettings) {
                 CalendarSettingsCommand(app: app)
@@ -89,6 +94,7 @@ final class StandaloneCalendar {
     let database: AppDatabase
     let settings: SettingsStore
     let workCalendar: WorkCalendar
+    let updater = AppUpdater()
     let plugin = CalendarPlugin()
     var now = Date()
     var settingsPage = CalendarPlugin.settingsDisplayID
@@ -182,7 +188,7 @@ struct StandaloneSettings: View {
         }
         return pluginPages + [
             SettingsPage(id: "about", title: "关于", systemImage: "info.circle") {
-                AnyView(StandaloneAboutSettings())
+                AnyView(StandaloneAboutSettings(updater: app.updater))
             }
         ]
     }
@@ -244,6 +250,7 @@ private struct StandaloneAppearanceSettings: View {
 }
 
 private struct StandaloneAboutSettings: View {
+    let updater: AppUpdater
     @State private var copied = false
 
     var body: some View {
@@ -290,6 +297,7 @@ private struct StandaloneAboutSettings: View {
                 }
                 .buttonStyle(.dsSecondary)
             }
+            AppUpdateSettingsRows(updater: updater)
         }
     }
 }

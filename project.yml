@@ -16,6 +16,9 @@ settings:
     ENABLE_HARDENED_RUNTIME: NO
     ENABLE_APP_SANDBOX: NO
 packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.10.1
   IronBowlKit:
     path: Packages/IronBowlKit
   ZentaoLogPlugin:
@@ -36,7 +39,9 @@ targets:
     platform: macOS
     sources:
       - path: Apps/IronBowl
+      - path: Apps/Shared
     dependencies:
+      - package: Sparkle
       - package: IronBowlKit
       - package: ZentaoLogPlugin
       - package: CalendarPlugin
@@ -55,6 +60,10 @@ targets:
         LSApplicationCategoryType: public.app-category.productivity
         NSUserNotificationAlertStyle: alert
         NSHumanReadableCopyright: 饭碗 IronBowl
+        SUFeedURL: https://github.com/taopaox/IronBowl/releases/latest/download/appcast-ironbowl.xml
+        SUPublicEDKey: BDkyFzrp28vcg8cMVHXpuc/NpDukEfbD+WPUlAR/TmA=
+        SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 86400
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.taopaox.ironbowl
@@ -67,7 +76,9 @@ targets:
     platform: macOS
     sources:
       - path: Apps/Calendar
+      - path: Apps/Shared
     dependencies:
+      - package: Sparkle
       - package: IronBowlKit
       - package: CalendarPlugin
     info:
@@ -80,6 +91,10 @@ targets:
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.lifestyle
         NSHumanReadableCopyright: 饭碗 IronBowl
+        SUFeedURL: https://github.com/taopaox/IronBowl/releases/latest/download/appcast-calendar.xml
+        SUPublicEDKey: BDkyFzrp28vcg8cMVHXpuc/NpDukEfbD+WPUlAR/TmA=
+        SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 86400
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.taopaox.ironbowl.calendar

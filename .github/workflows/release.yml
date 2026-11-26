@@ -74,9 +74,13 @@ jobs:
             plist="$PRODUCTS_DIR/$app/Contents/Info.plist"
             actual_ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
             actual_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")"
-            echo "$app -> version=$actual_ver build=$actual_build"
+            feed_url="$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$plist")"
+            pub_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$plist")"
+            echo "$app -> version=$actual_ver build=$actual_build feed=$feed_url"
             [[ "$actual_ver" == "$VER" ]]
             [[ "$actual_build" == "$EXPECTED_BUILD" ]]
+            [[ -n "$feed_url" ]]
+            [[ -n "$pub_key" ]]
           done
 
           package_app() {
@@ -106,6 +110,65 @@ jobs:
           (cd dist && shasum -a 256 *.dmg *.zip > SHA256SUMS.txt)
           ls -lh dist/
           cat dist/SHA256SUMS.txt
+
+      - name: 生成 Sparkle Appcast 并签名（Ed25519）
+        if: steps.plan.outputs.should_release == 'true'
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          VER: ${{ steps.plan.outputs.version }}
+          BUILD_NUM: ${{ steps.plan.outputs.build }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          REPO: ${{ github.repository }}
+          SPARKLE_VERSION: "2.10.1"
+        run: |
+          if [[ -z "$SPARKLE_PRIVATE_KEY" ]]; then
+            echo "缺少 SPARKLE_PRIVATE_KEY Secret，请先在仓库 Settings -> Secrets and variables -> Actions 中配置。" >&2
+            exit 1
+          fi
+
+          SPARKLE_TMP="$(mktemp -d)"
+          trap 'rm -rf "$SPARKLE_TMP"' EXIT
+          curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" -o "$SPARKLE_TMP/sparkle.tar.xz"
+          tar -xJf "$SPARKLE_TMP/sparkle.tar.xz" -C "$SPARKLE_TMP" bin/sign_update
+
+          IRONBOWL_ZIP="dist/IronBowl-v${VER}-macOS-arm64.zip"
+          CALENDAR_ZIP="dist/IronBowlCalendar-v${VER}-macOS-arm64.zip"
+
+          IRONBOWL_SIGN="$(printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$SPARKLE_TMP/bin/sign_update" --ed-key-file - "$IRONBOWL_ZIP")"
+          CALENDAR_SIGN="$(printf '%s\n' "$SPARKLE_PRIVATE_KEY" | "$SPARKLE_TMP/bin/sign_update" --ed-key-file - "$CALENDAR_ZIP")"
+
+          python3 scripts/release.py appcast \
+            --app-name "饭碗 IronBowl" \
+            --feed-url "https://github.com/${REPO}/releases/latest/download/appcast-ironbowl.xml" \
+            --release-url "https://github.com/${REPO}/releases/tag/${TAG}" \
+            --download-url "https://github.com/${REPO}/releases/download/${TAG}/IronBowl-v${VER}-macOS-arm64.zip" \
+            --version "$VER" \
+            --build "$BUILD_NUM" \
+            --archive "$IRONBOWL_ZIP" \
+            --sign-output "$IRONBOWL_SIGN" \
+            --notes-file release-notes.md \
+            --output dist/appcast-ironbowl.xml
+
+          python3 scripts/release.py appcast \
+            --app-name "饭碗万年历 IronBowlCalendar" \
+            --feed-url "https://github.com/${REPO}/releases/latest/download/appcast-calendar.xml" \
+            --release-url "https://github.com/${REPO}/releases/tag/${TAG}" \
+            --download-url "https://github.com/${REPO}/releases/download/${TAG}/IronBowlCalendar-v${VER}-macOS-arm64.zip" \
+            --version "$VER" \
+            --build "$BUILD_NUM" \
+            --archive "$CALENDAR_ZIP" \
+            --sign-output "$CALENDAR_SIGN" \
+            --notes-file release-notes.md \
+            --output dist/appcast-calendar.xml
+
+          python3 -c '
+          import xml.etree.ElementTree as ET
+          for p in ("dist/appcast-ironbowl.xml", "dist/appcast-calendar.xml"):
+              root = ET.parse(p).getroot()
+              enc = root.find("./channel/item/enclosure")
+              assert enc is not None, f"missing enclosure in {p}"
+              print(p, enc.attrib.get("url"), enc.attrib.get("length"))
+          '
 
       - name: 提交版本升级记录并推送 Tag
         if: steps.plan.outputs.should_release == 'true'

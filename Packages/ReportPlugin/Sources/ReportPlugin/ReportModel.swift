@@ -132,8 +132,12 @@ final class WeeklyReportModel {
 
     var activeTitaTemplateID: Int {
         switch periodKind {
-        case .weekly: settings[ReportKeys.titaWeeklyTemplateID]
-        case .monthly: settings[ReportKeys.titaMonthlyTemplateID]
+        case .weekly:
+            let saved = settings[ReportKeys.titaWeeklyTemplateID]
+            return saved > 0 ? saved : ReportKeys.titaWeeklyTemplateID.defaultValue
+        case .monthly:
+            let saved = settings[ReportKeys.titaMonthlyTemplateID]
+            return saved > 0 ? saved : ReportKeys.titaMonthlyTemplateID.defaultValue
         }
     }
 
@@ -881,6 +885,28 @@ final class WeeklyReportModel {
         }
     }
 
+    nonisolated static func resolveTitaTemplateID(
+        detailTemplateID: Int?,
+        statusTemplateID: Int?,
+        savedTemplateID: Int,
+        matchedTemplateID: Int?,
+        summaryType: TitaSummaryType
+    ) -> Int {
+        if let detailTemplateID, detailTemplateID > 0 {
+            return detailTemplateID
+        }
+        if let matchedTemplateID, matchedTemplateID > 0 {
+            return matchedTemplateID
+        }
+        if let statusTemplateID, statusTemplateID > 0 {
+            return statusTemplateID
+        }
+        if savedTemplateID > 0 {
+            return savedTemplateID
+        }
+        return summaryType == .weekly ? 1006 : 1007
+    }
+
     func prepareTitaEditor() async throws -> TitaPreparedEditor {
         if titaTenantID.isEmpty || titaUserID.isEmpty {
             _ = try await verifyTitaAccount()
@@ -900,7 +926,14 @@ final class WeeklyReportModel {
         }
 
         let detail = try await client.fetchDetail(summaryType: summaryType, summaryDate: summaryDate)
-        let templateID = detail?.templateID ?? status?.templateID ?? activeTitaTemplateID
+        let preferredTemplateID = Self.resolveTitaTemplateID(
+            detailTemplateID: detail?.templateID,
+            statusTemplateID: status?.templateID,
+            savedTemplateID: activeTitaTemplateID,
+            matchedTemplateID: nil,
+            summaryType: summaryType
+        )
+        var resolvedTemplateID = preferredTemplateID
 
         let moduleNames: [String]
         let existingTexts: [String]
@@ -915,7 +948,20 @@ final class WeeklyReportModel {
             sortIndices = richModules.map(\.sortIndex)
         } else {
             let templates = (try? await client.fetchTemplates(summaryType: summaryType)) ?? []
-            let matchedTemplate = templates.first { $0.templateID == templateID } ?? templates.first
+            let matchedTemplate = templates.first { $0.templateID == preferredTemplateID } ?? templates.first
+            if let matchedTemplate {
+                resolvedTemplateID = Self.resolveTitaTemplateID(
+                    detailTemplateID: detail?.templateID,
+                    statusTemplateID: status?.templateID,
+                    savedTemplateID: activeTitaTemplateID,
+                    matchedTemplateID: matchedTemplate.templateID,
+                    summaryType: summaryType
+                )
+                switch periodKind {
+                case .weekly: settings[ReportKeys.titaWeeklyTemplateID] = resolvedTemplateID
+                case .monthly: settings[ReportKeys.titaMonthlyTemplateID] = resolvedTemplateID
+                }
+            }
             let names = (matchedTemplate?.richtextModuleNames.isEmpty == false)
                 ? matchedTemplate!.richtextModuleNames
                 : TitaContentMapper.defaultModuleNames
@@ -946,7 +992,7 @@ final class WeeklyReportModel {
 
         return TitaPreparedEditor(
             detail: detail,
-            templateID: templateID,
+            templateID: resolvedTemplateID,
             modules: editableModules,
             mood: mood,
             remoteState: remoteState,

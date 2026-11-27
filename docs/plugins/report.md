@@ -76,7 +76,7 @@
    - `TitaPeriodCode` 按 Tita 规则将周报编码为周一所在自然月的第 `WW` 周（`YYYY-MM-WW`）、月报编码为 `YYYY-MM-01`。
    - `TitaContentMapper` 将本地生成的 Markdown 报告自动映射为 Tita 的 4 个富文本模块，`TitaRichTextConverter` 转为 ProseMirror HTML 与纯文本（上限 10,000 字）。
 3. **草稿保存与确认提交**：
-   - 查询接口：`GET summary/status`、`GET summary/selectTemplates`、`POST summary/detail`；
+   - 查询接口：`GET summary/status`、`GET summary/selectTemplates`、`POST summary/detail`（解析状态与详情时自动忽略非正 `tempId` / `summaryTemplateId`，并在初始化编辑面板与创建草稿前对齐 `summary/selectTemplates` 的有效模板 ID，模板失效时自动回退重试）；
    - 初始化与保存草稿：`POST summary/create/{dailyDate}/{reportType}/{templateId}`、`POST summary/mood/update/{feedId}/{moduleId}/{mood}`、`POST summary/richtext/update`；
    - 正式提交/更新：提交前重新拉取详情保留既有 OKR/附件/`@ta查看` 等模块数据，调用 `POST summary/checkchange/{feedId}` 与 `POST summary/submit/{feedId}/1`（需经二次确认弹窗），所有脱敏请求摘要写入 `~/Library/Application Support/IronBowl/logs/tita.log`。
 4. **历史周报与月报同步**：

@@ -1180,3 +1180,99 @@ import Testing
     #expect(plugin.homeCards[0].value() == "0h")
     plugin.stop()
 }
+
+@Test func titaClientParsingIgnoresNonPositiveTemplateIDsAndResolvesFallbacks() throws {
+    // 1. summary/status 返回 tempId=0 或负数或缺失时应解析为 nil，正整数与数字字符串正常保留
+    let zeroStatus = TitaClient.parseStatus(
+        ["summaryStatus": 3, "summaryId": "880017_804751550_26_5_123", "tempId": 0],
+        summaryType: .weekly,
+        summaryDate: "2026-11-04"
+    )
+    #expect(zeroStatus.state == .unSubmit)
+    #expect(zeroStatus.templateID == nil)
+
+    let negativeStatus = TitaClient.parseStatus(
+        ["summaryStatus": 0, "summaryId": "", "tempId": -1],
+        summaryType: .weekly,
+        summaryDate: "2026-11-04"
+    )
+    #expect(negativeStatus.templateID == nil)
+
+    let missingStatus = TitaClient.parseStatus(
+        ["summaryStatus": 1, "summaryId": "abc"],
+        summaryType: .monthly,
+        summaryDate: "2026-11-01"
+    )
+    #expect(missingStatus.templateID == nil)
+
+    let validStatus = TitaClient.parseStatus(
+        ["summaryStatus": 1, "summaryId": "abc", "tempId": "1006"],
+        summaryType: .weekly,
+        summaryDate: "2026-11-04"
+    )
+    #expect(validStatus.templateID == 1006)
+
+    // 2. summary/selectTemplates 过滤 id <= 0 的非法模板
+    let parsedTemplates = TitaClient.parseTemplates([
+        ["id": 0, "name": "无效占位模板"],
+        ["templateId": -5, "templateName": "负数模板"],
+        [
+            "id": 1006,
+            "name": " 周报 ",
+            "summaryTemplateModules": [
+                ["moduleName": "下一步工作计划", "moduleType": "richtext", "moduleObjType": 0, "sortIndex": 6],
+                ["moduleName": "工作总结（亮点与成功经验）", "moduleType": "richtext", "moduleObjType": 0, "sortIndex": 3],
+                ["moduleName": "心情", "moduleType": "select", "moduleObjType": 1, "sortIndex": 1],
+            ],
+        ],
+    ])
+    #expect(parsedTemplates.count == 1)
+    #expect(parsedTemplates[0].templateID == 1006)
+    #expect(parsedTemplates[0].name == "周报")
+    #expect(parsedTemplates[0].richtextModuleNames == ["工作总结（亮点与成功经验）", "下一步工作计划"])
+
+    // 3. summary/detail 返回 summaryTemplateId=0 时回退默认模板 ID
+    let weeklyDetail = try TitaClient.parseDetail(
+        ["dailyId": "feed-1", "summaryType": 26, "dailyDate": "2026-11-04", "summaryTemplateId": 0, "details": []],
+        fallbackType: .weekly,
+        fallbackDate: "2026-11-04"
+    )
+    #expect(weeklyDetail.templateID == 1006)
+
+    let monthlyDetail = try TitaClient.parseDetail(
+        ["dailyId": "feed-2", "summaryType": 27, "dailyDate": "2026-11-01", "summaryTemplateId": 0, "details": []],
+        fallbackType: .monthly,
+        fallbackDate: "2026-11-01"
+    )
+    #expect(monthlyDetail.templateID == 1007)
+
+    // 4. WeeklyReportModel 模板 ID 决策永不返回 0
+    #expect(WeeklyReportModel.resolveTitaTemplateID(
+        detailTemplateID: nil,
+        statusTemplateID: 0,
+        savedTemplateID: 0,
+        matchedTemplateID: nil,
+        summaryType: .weekly
+    ) == 1006)
+    #expect(WeeklyReportModel.resolveTitaTemplateID(
+        detailTemplateID: nil,
+        statusTemplateID: 0,
+        savedTemplateID: 0,
+        matchedTemplateID: nil,
+        summaryType: .monthly
+    ) == 1007)
+    #expect(WeeklyReportModel.resolveTitaTemplateID(
+        detailTemplateID: nil,
+        statusTemplateID: 0,
+        savedTemplateID: 1006,
+        matchedTemplateID: 2048,
+        summaryType: .weekly
+    ) == 2048)
+    #expect(WeeklyReportModel.resolveTitaTemplateID(
+        detailTemplateID: 3001,
+        statusTemplateID: 1006,
+        savedTemplateID: 1006,
+        matchedTemplateID: 2048,
+        summaryType: .weekly
+    ) == 3001)
+}

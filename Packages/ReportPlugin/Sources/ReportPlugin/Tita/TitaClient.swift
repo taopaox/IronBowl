@@ -139,17 +139,7 @@ public actor TitaClient {
             endpoint: "summary/selectTemplates?summaryType=\(summaryType.rawValue)"
         )
         let list = (obj["Data"] as? [[String: Any]]) ?? []
-        return list.compactMap { item in
-            guard let id = Self.int(item["id"] ?? item["templateId"]) else { return nil }
-            let name = ((item["name"] as? String) ?? (item["templateName"] as? String) ?? "模板 \(id)")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let modules = ((item["summaryTemplateModules"] as? [[String: Any]]) ?? [])
-                .filter { ($0["moduleType"] as? String) == "richtext" && (Self.int($0["moduleObjType"]) ?? 0) == 0 }
-                .sorted { (Self.int($0["sortIndex"]) ?? 0) < (Self.int($1["sortIndex"]) ?? 0) }
-                .compactMap { ($0["moduleName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            return TitaTemplateSummary(templateID: id, name: name, richtextModuleNames: modules)
-        }
+        return Self.parseTemplates(list)
     }
 
     public func fetchStatus(
@@ -170,15 +160,7 @@ public actor TitaClient {
                 templateID: nil
             )
         }
-        return TitaPeriodStatus(
-            summaryDate: summaryDate,
-            summaryType: summaryType,
-            state: TitaSubmitState(rawInt: Self.int(dataObj["summaryStatus"] ?? dataObj["summaryStatu"])),
-            dailyID: (dataObj["summaryId"] as? String) ?? "",
-            templateID: Self.int(dataObj["tempId"]),
-            submitDate: dataObj["submitDate"] as? String,
-            delayDate: dataObj["delayDate"] as? String
-        )
+        return Self.parseStatus(dataObj, summaryType: summaryType, summaryDate: summaryDate)
     }
 
     public func fetchDetail(summaryType: TitaSummaryType, summaryDate: String) async throws -> TitaReportDetail? {
@@ -194,10 +176,30 @@ public actor TitaClient {
         guard let dataObj = obj["Data"] as? [String: Any] else {
             return nil
         }
-        return try parseDetail(dataObj, fallbackType: summaryType, fallbackDate: summaryDate)
+        return try Self.parseDetail(dataObj, fallbackType: summaryType, fallbackDate: summaryDate)
     }
 
     public func createSummary(
+        summaryType: TitaSummaryType,
+        summaryDate: String,
+        templateID: Int
+    ) async throws -> TitaReportDetail {
+        let resolvedID = try await resolveTemplateID(preferred: templateID, summaryType: summaryType)
+        do {
+            return try await performCreateSummary(summaryType: summaryType, summaryDate: summaryDate, templateID: resolvedID)
+        } catch let error as TitaError {
+            guard case .apiError(_, let message) = error,
+                  message.contains("模板"),
+                  let templates = try? await fetchTemplates(summaryType: summaryType),
+                  let fallbackID = templates.first?.templateID,
+                  fallbackID != resolvedID else {
+                throw error
+            }
+            return try await performCreateSummary(summaryType: summaryType, summaryDate: summaryDate, templateID: fallbackID)
+        }
+    }
+
+    private func performCreateSummary(
         summaryType: TitaSummaryType,
         summaryDate: String,
         templateID: Int
@@ -211,7 +213,18 @@ public actor TitaClient {
         guard let dataObj = obj["Data"] as? [String: Any] else {
             throw TitaError.badResponse("创建总结草稿失败，未返回 Data")
         }
-        return try parseDetail(dataObj, fallbackType: summaryType, fallbackDate: summaryDate)
+        return try Self.parseDetail(dataObj, fallbackType: summaryType, fallbackDate: summaryDate)
+    }
+
+    private func resolveTemplateID(preferred: Int, summaryType: TitaSummaryType) async throws -> Int {
+        if preferred > 0 {
+            return preferred
+        }
+        if let templates = try? await fetchTemplates(summaryType: summaryType),
+           let first = templates.first {
+            return first.templateID
+        }
+        return summaryType == .weekly ? 1006 : 1007
     }
 
     // MARK: - 写入草稿与正式提交
@@ -509,7 +522,37 @@ public actor TitaClient {
         return (data, http)
     }
 
-    private func parseDetail(
+    nonisolated static func parseTemplates(_ list: [[String: Any]]) -> [TitaTemplateSummary] {
+        list.compactMap { item in
+            guard let id = positiveInt(item["id"] ?? item["templateId"]) else { return nil }
+            let name = ((item["name"] as? String) ?? (item["templateName"] as? String) ?? "模板 \(id)")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let modules = ((item["summaryTemplateModules"] as? [[String: Any]]) ?? [])
+                .filter { ($0["moduleType"] as? String) == "richtext" && (int($0["moduleObjType"]) ?? 0) == 0 }
+                .sorted { (int($0["sortIndex"]) ?? 0) < (int($1["sortIndex"]) ?? 0) }
+                .compactMap { ($0["moduleName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            return TitaTemplateSummary(templateID: id, name: name, richtextModuleNames: modules)
+        }
+    }
+
+    nonisolated static func parseStatus(
+        _ dataObj: [String: Any],
+        summaryType: TitaSummaryType,
+        summaryDate: String
+    ) -> TitaPeriodStatus {
+        TitaPeriodStatus(
+            summaryDate: summaryDate,
+            summaryType: summaryType,
+            state: TitaSubmitState(rawInt: int(dataObj["summaryStatus"] ?? dataObj["summaryStatu"])),
+            dailyID: (dataObj["summaryId"] as? String) ?? "",
+            templateID: positiveInt(dataObj["tempId"]),
+            submitDate: dataObj["submitDate"] as? String,
+            delayDate: dataObj["delayDate"] as? String
+        )
+    }
+
+    nonisolated static func parseDetail(
         _ dataObj: [String: Any],
         fallbackType: TitaSummaryType,
         fallbackDate: String
@@ -518,19 +561,19 @@ public actor TitaClient {
         guard !dailyID.isEmpty else {
             throw TitaError.badResponse("详情缺少 dailyId")
         }
-        let summaryType = Self.int(dataObj["summaryType"]).flatMap(TitaSummaryType.init(rawValue:)) ?? fallbackType
+        let summaryType = int(dataObj["summaryType"]).flatMap(TitaSummaryType.init(rawValue:)) ?? fallbackType
         let summaryDate = (dataObj["dailyDate"] as? String) ?? fallbackDate
-        let submitState = TitaSubmitState(rawInt: Self.int(dataObj["submitState"]))
-        let templateID = Self.int(dataObj["summaryTemplateId"]) ?? (summaryType == .weekly ? 1006 : 1007)
+        let submitState = TitaSubmitState(rawInt: int(dataObj["submitState"]))
+        let templateID = positiveInt(dataObj["summaryTemplateId"]) ?? (summaryType == .weekly ? 1006 : 1007)
         let delayDate = dataObj["delayDate"] as? String
 
         let rawDetails = (dataObj["details"] as? [[String: Any]]) ?? []
         let modules: [TitaReportModule] = rawDetails.compactMap { item in
-            guard let moduleId = Self.int(item["moduleId"]) else { return nil }
+            guard let moduleId = int(item["moduleId"]) else { return nil }
             let moduleName = ((item["moduleName"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let moduleType = (item["moduleType"] as? String) ?? ""
-            let moduleObjType = Self.int(item["moduleObjType"]) ?? 0
-            let sortIndex = Self.int(item["sortIndex"]) ?? 0
+            let moduleObjType = int(item["moduleObjType"]) ?? 0
+            let sortIndex = int(item["sortIndex"]) ?? 0
             let isDelete = (item["isDelete"] as? Bool) ?? false
 
             let objData = item["objectData"]
@@ -551,7 +594,7 @@ public actor TitaClient {
                 }
             } else if let str = objData as? String {
                 rawObjectDataJSON = str
-            } else if let num = Self.int(objData) {
+            } else if let num = int(objData) {
                 rawObjectDataJSON = "\(num)"
             } else {
                 rawObjectDataJSON = ""
@@ -581,7 +624,12 @@ public actor TitaClient {
         )
     }
 
-    private static func int(_ v: Any?) -> Int? {
+    nonisolated private static func positiveInt(_ v: Any?) -> Int? {
+        guard let value = int(v), value > 0 else { return nil }
+        return value
+    }
+
+    nonisolated private static func int(_ v: Any?) -> Int? {
         if let i = v as? Int { return i }
         if let s = v as? String { return Int(s) }
         if let d = v as? Double { return Int(d) }

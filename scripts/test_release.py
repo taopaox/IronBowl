@@ -66,6 +66,8 @@ class ReleaseScriptTests(unittest.TestCase):
         self.assertIn("### 修复", notes)
         self.assertIn("### 文档", notes)
         self.assertIn("### 构建与维护", notes)
+        self.assertIn("饭碗-v0.2.0-macOS-arm64.dmg", notes)
+        self.assertIn("万年历-v0.2.0-macOS-arm64.dmg", notes)
         self.assertIn("IronBowl-v0.2.0-macOS-arm64.dmg", notes)
         self.assertIn("IronBowlCalendar-v0.2.0-macOS-arm64.zip", notes)
         self.assertIn("https://github.com/taopaox/IronBowl/compare/v0.1.0...v0.2.0", notes)

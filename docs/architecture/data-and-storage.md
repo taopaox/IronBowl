@@ -98,8 +98,9 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `AIProviderStore` | `ai.providers` / `ai.default` | `[agy, codex]` / `.agy` | AI CLI 配置与默认提供者 |
 | `ChatKeys` | `chat.defaultWorkspace` / `chat.detailLevel` / `chat.sidebarCollapsed` / `chat.lastThreadID` / `chat.lastModelByProvider` / `chat.workbenchBridgeEnabled` | `""` / `.all` / `false` / `nil` / `[:]` / `true` | 首页对话默认工作目录、输出详略级别、对话栏折叠、上次选中对话 ID、记忆模型及工作台 `ironbowl-cli` 直连开关 |
 | `WebKeys` | `web.tombstone.enabled` | `true` | 是否开启后台网页墓碑休眠 |
-| `WebKeys` | `web.tombstone.idleMinutes` | `15` | 后台闲置休眠分钟数（0 表示不按时长） |
-| `WebKeys` | `web.tombstone.maxLiveCount` | `4` | 最多同时保活网页数（0 表示不限） |
+| `WebKeys` | `web.tombstone.idleMinutes` | `5` | 后台闲置休眠分钟数（0 表示不按时长） |
+| `WebKeys` | `web.tombstone.windowCloseSeconds` | `60` | 主窗口关闭后快速休眠秒数（0 表示跟随后台闲置时长） |
+| `WebKeys` | `web.tombstone.maxLiveCount` | `2` | 最多同时保活网页数（0 表示不限） |
 | `SchedulerKeys` | `scheduler.seededIDs` | `[]` | 已初始化写入过的内置定时任务 ID 列表（防用户删除后重建） |
 | `LogKeys` | `zentao.*` / `git.*` / `scan.*` / `log.*` / `reminder.*` / `zentao.watch.*` | 见 [禅道日志文档](../plugins/zentao-log.md) | 禅道账号、Git 扫描、AI 提示词、工时提醒与新指派 Bug/任务巡检配置 |
 | `LogKeys.quickLogShortcut` | `log.quickLogShortcut` | `true` | 启用日报插件的全局快捷记日志组合键 ⌃⌥⌘L |

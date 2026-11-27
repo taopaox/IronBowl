@@ -6,9 +6,11 @@ public enum WebKeys {
     /// 是否启用后台网页墓碑休眠。
     public static let tombstoneEnabled = SettingKey<Bool>("web.tombstone.enabled", default: true)
     /// 后台闲置多少分钟后自动休眠（0 表示不按时间休眠，仅按数量上限）。
-    public static let tombstoneIdleMinutes = SettingKey<Int>("web.tombstone.idleMinutes", default: 15)
+    public static let tombstoneIdleMinutes = SettingKey<Int>("web.tombstone.idleMinutes", default: 5)
     /// 最多同时保活的网页数（0 表示不限数量）。
-    public static let tombstoneMaxLiveCount = SettingKey<Int>("web.tombstone.maxLiveCount", default: 4)
+    public static let tombstoneMaxLiveCount = SettingKey<Int>("web.tombstone.maxLiveCount", default: 2)
+    /// 主窗口关闭退回菜单栏后，经过多少秒自动休眠后台网页（0 表示跟随后台闲置时长）。
+    public static let tombstoneWindowCloseSeconds = SettingKey<Int>("web.tombstone.windowCloseSeconds", default: 60)
 }
 
 /// 全应用共享的网页会话与墓碑管理器。所有内嵌网页的插件统一通过它调度内存回收。
@@ -16,14 +18,19 @@ public enum WebKeys {
 public final class WebSessionManager {
     public let settings: SettingsStore
     public private(set) var sessionIDs: [String] = []
+    public private(set) var isHostWindowOpen = true
 
     @ObservationIgnored private var sessions: [String: WebSession] = [:]
     @ObservationIgnored private var displayTokens: [String: UUID] = [:]
     @ObservationIgnored private var sweepTimer: Timer?
+    @ObservationIgnored private let timerEnabled: Bool
     @ObservationIgnored private let headlessForTesting: Bool
+    @ObservationIgnored private var windowClosedAt: Date?
+    @ObservationIgnored private var windowCloseTask: Task<Void, Never>?
 
     public init(settings: SettingsStore, startTimer: Bool = true, headlessForTesting: Bool = false) {
         self.settings = settings
+        self.timerEnabled = startTimer
         self.headlessForTesting = headlessForTesting
         if startTimer {
             sweepTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
@@ -42,6 +49,7 @@ public final class WebSessionManager {
         get { settings[WebKeys.tombstoneEnabled] }
         set {
             settings[WebKeys.tombstoneEnabled] = newValue
+            scheduleWindowCloseTaskIfNeeded()
             if newValue {
                 Task { await sweep() }
             }
@@ -61,6 +69,15 @@ public final class WebSessionManager {
         set {
             settings[WebKeys.tombstoneMaxLiveCount] = max(0, newValue)
             Task { await enforceLiveLimit() }
+        }
+    }
+
+    public var windowCloseSeconds: Int {
+        get { settings[WebKeys.tombstoneWindowCloseSeconds] }
+        set {
+            settings[WebKeys.tombstoneWindowCloseSeconds] = max(0, newValue)
+            scheduleWindowCloseTaskIfNeeded()
+            Task { await sweep() }
         }
     }
 
@@ -202,6 +219,39 @@ public final class WebSessionManager {
         }
     }
 
+    /// 同步宿主主窗口的开启状态；关闭主窗口后标记全部网页为后台并调度快速休眠。
+    public func setHostWindowOpen(_ isOpen: Bool, now: Date = Date()) {
+        windowCloseTask?.cancel()
+        windowCloseTask = nil
+        if isOpen {
+            isHostWindowOpen = true
+            windowClosedAt = nil
+        } else {
+            isHostWindowOpen = false
+            windowClosedAt = now
+            detachAllDisplays()
+            scheduleWindowCloseTaskIfNeeded()
+        }
+    }
+
+    private func scheduleWindowCloseTaskIfNeeded() {
+        windowCloseTask?.cancel()
+        windowCloseTask = nil
+        guard timerEnabled, !isHostWindowOpen, tombstoneEnabled, let closedAt = windowClosedAt else { return }
+        let closeSeconds = windowCloseSeconds
+        guard closeSeconds > 0 else { return }
+        let targetDate = closedAt.addingTimeInterval(TimeInterval(closeSeconds))
+        windowCloseTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                let remaining = targetDate.timeIntervalSinceNow
+                if remaining <= 0 { break }
+                try? await Task.sleep(for: .milliseconds(Int(ceil(remaining * 1000)) + 5))
+            }
+            guard let self, !Task.isCancelled, !self.isHostWindowOpen else { return }
+            await self.sweep(now: max(Date(), targetDate))
+        }
+    }
+
     // MARK: - 墓碑回收
 
     @discardableResult
@@ -224,15 +274,21 @@ public final class WebSessionManager {
 
     public func sweep(now: Date = Date()) async {
         guard tombstoneEnabled else { return }
+        let closeSeconds = windowCloseSeconds
+        let shouldCloseSweep = !isHostWindowOpen
+            && closeSeconds > 0
+            && windowClosedAt.map { now.timeIntervalSince($0) >= TimeInterval(closeSeconds) } == true
+
         let minutes = idleMinutes
-        if minutes > 0 {
-            let threshold = TimeInterval(minutes * 60)
+        if shouldCloseSweep || minutes > 0 {
+            let idleThreshold = TimeInterval(minutes * 60)
             for id in sessionIDs {
                 guard let session = sessions[id],
                       session.state == .active,
                       !session.isVisible,
-                      !session.neverSuspend,
-                      now.timeIntervalSince(session.lastActiveAt) >= threshold else { continue }
+                      !session.neverSuspend else { continue }
+                let idleExpired = minutes > 0 && now.timeIntervalSince(session.lastActiveAt) >= idleThreshold
+                guard shouldCloseSweep || idleExpired else { continue }
                 await session.suspendToTombstone(force: false)
             }
         }
@@ -295,6 +351,9 @@ public final class WebSessionManager {
     public func stop() {
         sweepTimer?.invalidate()
         sweepTimer = nil
+        windowCloseTask?.cancel()
+        windowCloseTask = nil
+        windowClosedAt = nil
         displayTokens.removeAll()
         for session in sessions.values {
             session.teardown()

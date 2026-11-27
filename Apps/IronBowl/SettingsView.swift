@@ -442,11 +442,19 @@ struct WebSettings: View {
     @State private var statusNotice: String?
 
     private let idleOptions: [DSPickerOption<Int>] = [
-        DSPickerOption(5, title: "5 分钟", subtitle: "更快回收后台网页内存，适合内存紧张时。"),
-        DSPickerOption(15, title: "15 分钟（推荐）", subtitle: "兼顾内存节省与切换流畅度。", triggerTitle: "15 分钟（推荐）"),
+        DSPickerOption(3, title: "3 分钟", subtitle: "极速回收后台网页内存，适合 8G/16G 内存机型。"),
+        DSPickerOption(5, title: "5 分钟（推荐）", subtitle: "兼顾内存节省与日常切换流畅度。", triggerTitle: "5 分钟（推荐）"),
+        DSPickerOption(15, title: "15 分钟", subtitle: "常规后台保留时长，频繁来回切页更顺滑。"),
         DSPickerOption(30, title: "30 分钟", subtitle: "短时间切走仍保持网页活跃。"),
         DSPickerOption(60, title: "60 分钟", subtitle: "长时间保留后台网页状态，减少恢复等待。"),
         DSPickerOption(0, title: "不按时间（仅按上限）", subtitle: "后台网页不按闲置时间休眠，仅受同时保活数量限制。"),
+    ]
+
+    private let windowCloseOptions: [DSPickerOption<Int>] = [
+        DSPickerOption(30, title: "30 秒", subtitle: "关掉主窗口半分钟后立即释放网页进程内存。"),
+        DSPickerOption(60, title: "1 分钟（推荐）", subtitle: "关窗退回菜单栏 1 分钟后自动休眠所有网页，再打开自动恢复。", triggerTitle: "1 分钟（推荐）"),
+        DSPickerOption(120, title: "2 分钟", subtitle: "短暂关窗重开无需重新加载网页。"),
+        DSPickerOption(0, title: "跟随后台闲置时长", subtitle: "关窗后不提前回收，统一按上方后台闲置时长处理。"),
     ]
 
     var body: some View {
@@ -459,6 +467,13 @@ struct WebSettings: View {
                 DSPicker(
                     selection: Binding(get: { web.idleMinutes }, set: { web.idleMinutes = $0 }),
                     options: idleOptions
+                )
+                .disabled(!web.tombstoneEnabled)
+            }
+            DSRow("关闭主窗口后休眠", description: "主窗口关闭退回菜单栏后，快速回收已打开网页的内存。") {
+                DSPicker(
+                    selection: Binding(get: { web.windowCloseSeconds }, set: { web.windowCloseSeconds = $0 }),
+                    options: windowCloseOptions
                 )
                 .disabled(!web.tombstoneEnabled)
             }

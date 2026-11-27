@@ -450,8 +450,8 @@ final class AppModel {
         isMainWindowOpen = isOpen
         backgroundTrimTask?.cancel()
         backgroundTrimTask = nil
+        webSessions.setHostWindowOpen(isOpen)
         if !isOpen {
-            webSessions.detachAllDisplays()
             backgroundTrimTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(180))
                 guard let self, !Task.isCancelled, !self.isMainWindowOpen else { return }
@@ -466,6 +466,7 @@ final class AppModel {
 
     func reloadAllStoresAfterRestore() {
         settings.reload()
+        webSessions.setHostWindowOpen(isMainWindowOpen)
         applyAppearance()
         DS.fontScale = settings[AppKeys.fontScale]
         userProfile.reloadAvatar()

@@ -18,8 +18,12 @@ import Testing
 
     let manager = WebSessionManager(settings: settings, startTimer: false, headlessForTesting: true)
     #expect(manager.tombstoneEnabled == true)
-    #expect(manager.idleMinutes == 15)
-    #expect(manager.maxLiveCount == 4)
+    #expect(manager.idleMinutes == 5)
+    #expect(manager.maxLiveCount == 2)
+    #expect(manager.windowCloseSeconds == 60)
+
+    // 先放宽保活上限至 4，单独验证闲置时长休眠逻辑
+    manager.maxLiveCount = 4
 
     // 1. 超过闲置时间后自动休眠，未超时的与免休眠、正在显示的保持活跃
     let now = Date()
@@ -30,8 +34,8 @@ import Testing
     let s3 = manager.session(id: "s3", initialURL: "https://example.com/3", neverSuspend: true)
     let s4 = manager.session(id: "s4", initialURL: "https://example.com/4")
 
-    s1.lastActiveAt = now.addingTimeInterval(-20 * 60) // 20 分钟前，应休眠
-    s2.lastActiveAt = now.addingTimeInterval(-5 * 60)  // 5 分钟前，保留
+    s1.lastActiveAt = now.addingTimeInterval(-6 * 60)  // 6 分钟前，超过默认 5 分钟应休眠
+    s2.lastActiveAt = now.addingTimeInterval(-2 * 60)  // 2 分钟前，保留
     s3.lastActiveAt = now.addingTimeInterval(-60 * 60) // 免休眠，保留
     let token4 = UUID()
     manager.attachDisplay(sessionID: "s4", token: token4) // 正在显示，保留
@@ -87,4 +91,74 @@ import Testing
     manager.remove(id: "s3")
     #expect(manager.hasSession(id: "s3") == false)
     #expect(manager.existingSession(id: "s3") == nil)
+}
+
+@MainActor @Test func webSessionWindowCloseFastTombstone() async throws {
+    let dbURL = FileManager.default.temporaryDirectory.appending(path: "ib-web-window-close-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: dbURL) }
+    let db = try AppDatabase(url: dbURL, migrations: [])
+    let settings = SettingsStore(database: db)
+
+    let manager = WebSessionManager(settings: settings, startTimer: false, headlessForTesting: true)
+    manager.idleMinutes = 30
+    manager.maxLiveCount = 4
+    manager.windowCloseSeconds = 60
+
+    let t0 = Date()
+    let s1 = manager.session(id: "w1", initialURL: "https://example.com/w1")
+    let s2 = manager.session(id: "w2", initialURL: "https://example.com/w2")
+    let s3 = manager.session(id: "w3", initialURL: "https://example.com/w3", neverSuspend: true)
+    s1.lastActiveAt = t0
+    s2.lastActiveAt = t0
+    s3.lastActiveAt = t0
+
+    let token1 = UUID()
+    manager.attachDisplay(sessionID: "w1", token: token1)
+    #expect(s1.isVisible == true)
+
+    // 1. 关闭主窗口时立即将网页标为后台；未满 60 秒前不休眠
+    manager.setHostWindowOpen(false, now: t0)
+    #expect(manager.isHostWindowOpen == false)
+    #expect(s1.isVisible == false)
+    await manager.sweep(now: t0.addingTimeInterval(30))
+    #expect(s1.state == .active)
+    #expect(s2.state == .active)
+    #expect(s3.state == .active)
+
+    // 2. 在超时前重新打开主窗口应取消快速休眠
+    manager.setHostWindowOpen(true, now: t0.addingTimeInterval(40))
+    #expect(manager.isHostWindowOpen == true)
+    await manager.sweep(now: t0.addingTimeInterval(90))
+    #expect(s1.state == .active)
+    #expect(s2.state == .active)
+
+    // 3. 再次关闭主窗口且满 60 秒后，可休眠页自动墓碑化，免休眠页仍保留
+    let t1 = t0.addingTimeInterval(100)
+    manager.setHostWindowOpen(false, now: t1)
+    await manager.sweep(now: t1.addingTimeInterval(60))
+    #expect(s1.state == .tombstoned)
+    #expect(s2.state == .tombstoned)
+    #expect(s3.state == .active)
+
+    // 4. 设为 0（跟随后台闲置时长）后不再触发关窗加速回收
+    manager.windowCloseSeconds = 0
+    let s4 = manager.session(id: "w4", initialURL: "https://example.com/w4")
+    s4.lastActiveAt = t1
+    manager.setHostWindowOpen(false, now: t1)
+    await manager.sweep(now: t1.addingTimeInterval(120))
+    #expect(s4.state == .active)
+
+    // 5. 启用定时调度时，关窗满配置秒数后自动触发休眠
+    let scheduledManager = WebSessionManager(settings: settings, startTimer: true, headlessForTesting: true)
+    defer { scheduledManager.stop() }
+    scheduledManager.idleMinutes = 30
+    scheduledManager.maxLiveCount = 4
+    scheduledManager.windowCloseSeconds = 1
+    let timed = scheduledManager.session(id: "timed", initialURL: "https://example.com/timed")
+    scheduledManager.setHostWindowOpen(false)
+    let deadline = Date().addingTimeInterval(3)
+    while timed.state != .tombstoned, Date() < deadline {
+        try? await Task.sleep(for: .milliseconds(100))
+    }
+    #expect(timed.state == .tombstoned)
 }

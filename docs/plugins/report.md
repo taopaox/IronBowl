@@ -18,8 +18,8 @@
 | `Store/ReportStore.swift` | `ReportPeriodKind`, `WeeklyReportStyle`, `ReportKeys`, `WeeklyReportRecord`, `MonthlyReportRecord`, `ReportMigrations`, `ReportStore` | 设置键（含 Tita 配置）、拆分迁移 `ReportMigrations.weekly`（`report.v1` / `weeklyReport`）与 `ReportMigrations.monthly`（`report.v2` / `monthlyReport`）及读写操作 |
 | `Generator/WeeklyReportGenerator.swift` | `DailyReportDay`, `WeeklyReportInput`, `MonthlyReportInput`, `WeeklyReportOutput`, `WeeklyReportGenerator` | 周报/月报提示词模板渲染、只读 JSON Schema AI 生成与 4 种风格的规则兜底汇总（含 `tita` 模板风格） |
 | `Tita/TitaModels.swift` | `TitaSummaryType`, `TitaSubmitState`, `TitaMood`, `TitaAccountInfo`, `TitaPeriodStatus`, `TitaTemplateSummary`, `TitaReportDetail`, `TitaEditableModule`, `TitaSearchFeedItem`, `TitaHistorySyncResult`, `TitaError` | Tita 周报（`26`）/月报（`27`）接口数据模型、历史列表模型与状态枚举 |
-| `Tita/TitaHelpers.swift` | `TitaPeriodCode`, `TitaCredentialParser`, `TitaBSGlobalParser`, `TitaRichTextConverter`, `TitaContentMapper`, `TitaSubmitPayloadBuilder`, `TitaProseMirrorParser` | Tita 周期正反向编码（`YYYY-MM-WW` / `YYYY-MM-01` ↔ `WeekRange` / `MonthRange`）、cURL/Cookie 解析、`BSGlobal` 识别、ProseMirror HTML/JSON 与 Markdown 互转、4 模块内容映射与提交请求体拼装 |
-| `Tita/TitaClient.swift` | `TitaClient`, `TitaLog` | Tita 直连 HTTP 客户端（Cookie 鉴权、会话复用与 `URLSession` 长连接、TLS 握手/建连瞬断自动重试、身份探测、模板拉取、历史分页拉取 `summary/search`、草稿更新、正式提交与回查）及脱敏接口日志 `tita.log` |
+| `Tita/TitaHelpers.swift` | `TitaPeriodCode`, `TitaCredentialParser`, `TitaBSGlobalParser`, `TitaRichTextConverter`, `TitaContentMapper`, `TitaSubmitPayloadBuilder`, `TitaProseMirrorParser` | Tita 周期正反向编码（`YYYY-MM-WW` / `YYYY-MM-01` ↔ `WeekRange` / `MonthRange`）、cURL/Cookie 解析、`BSGlobal` 识别、ProseMirror `EditorState` JSON 与 Markdown 互转、4 模块内容映射与提交请求体拼装 |
+| `Tita/TitaClient.swift` | `TitaClient`, `TitaLog` | Tita 直连 HTTP 客户端（Cookie 鉴权、会话复用与 `URLSession` 长连接、TLS 握手/建连瞬断自动重试、身份探测、模板拉取、历史分页拉取 `summary/search`、草稿更新、正式提交、删除 `summary/delete` 与回查）及脱敏接口日志 `tita.log` |
 | `Tita/TitaHistorySyncService.swift` | `TitaHistorySyncService` | 自动分页拉取 Tita 个人全部历史周报/月报并安全合并写入本地 `weeklyReport` / `monthlyReport`（默认保护本地已编辑内容） |
 | `Views/ReportView.swift` | `ReportView` | 双页活页手账工作区（`JournalSpreadShell`）：顶栏展示章节实心身份胶囊（「周报」松绿 / 「月报」靛蓝）与高对比状态胶囊（「本周未写 / 本月未写 / Tita 未交 / 本周已写」）、历史弹层、刷新与 AI 选择器，右缘提供「日报 / 周报 / 月报 / 历史」彩签；左页展示周期撕历、三联汇总、周/月筛选条及联动日报荧光笔重点的每日摘录（支持 `+ 引用` 插入正文）；右页顶部贯通状态色带，内置 `JournalStatusBanner` 醒目横幅、默认展开的大尺寸黄色便利贴「补充说明」（`JournalStickyNote`，支持按需收起）、可点击 Tita 状态橡皮印章、单行聚焦工具栏与手账排印正文/Markdown 编辑区 |
 | `Views/ReportSettingsView.swift` | `ReportSettingsView` | 按 `periodKind` 分别呈现「周报 → 周报生成」与「月报 → 月报生成」设置页：默认风格、草稿/工时开关、提示词编辑与「Tita 对接」跳转入口 |
@@ -74,10 +74,10 @@
    - **导入 Cookie / Copy as cURL**：`TitaCredentialParser` 支持直接粘贴 Chrome DevTools 复制的 `curl` 命令、`Cookie:` 请求头或纯 Cookie 字符串，并自动识别 URL 中的 `tenantId` 与 `userId`。
 2. **周期映射与富文本拆分**：
    - `TitaPeriodCode` 按 Tita 规则将周报编码为周一所在自然月的第 `WW` 周（`YYYY-MM-WW`）、月报编码为 `YYYY-MM-01`。
-   - `TitaContentMapper` 将本地生成的 Markdown 报告自动映射为 Tita 的 4 个富文本模块，`TitaRichTextConverter` 转为 ProseMirror HTML 与纯文本（上限 10,000 字）。
+   - `TitaContentMapper` 将本地生成的 Markdown 报告自动映射为 Tita 的 4 个富文本模块，`TitaRichTextConverter` 转为 Tita ProseMirror `EditorState` JSON（`{"doc": ..., "selection": ...}`）与纯文本（上限 10,000 字）。
 3. **草稿保存与确认提交**：
    - 查询接口：`GET summary/status`、`GET summary/selectTemplates`、`POST summary/detail`（解析状态与详情时自动忽略非正 `tempId` / `summaryTemplateId`，并在初始化编辑面板与创建草稿前对齐 `summary/selectTemplates` 的有效模板 ID，模板失效时自动回退重试）；
-   - 初始化与保存草稿：`POST summary/create/{dailyDate}/{reportType}/{templateId}`、`POST summary/mood/update/{feedId}/{moduleId}/{mood}`、`POST summary/richtext/update`；
+   - 初始化与保存草稿：`POST summary/create/{dailyDate}/{reportType}/{templateId}`、`POST summary/mood/update/{feedId}/{moduleId}/{mood}`、`POST summary/richtext/update`、`POST summary/delete/{feedId}`；
    - 正式提交/更新：提交前重新拉取详情保留既有 OKR/附件/`@ta查看` 等模块数据，调用 `POST summary/checkchange/{feedId}` 与 `POST summary/submit/{feedId}/1`（需经二次确认弹窗）；`WeeklyReportModel` 自动复用同一会话的 `TitaClient`（保持 `URLSession` TLS 长连接），对 TLS 握手/建连瞬断与幂等请求自动退避重试，所有脱敏请求摘要及传输层错误均写入 `~/Library/Application Support/IronBowl/logs/tita.log`。
 4. **历史周报与月报同步**：
    - 在「设置 → 周报 → Tita 对接」点击「一键同步全部历史」，或在周报/月报页面历史弹层点击「同步 Tita」。

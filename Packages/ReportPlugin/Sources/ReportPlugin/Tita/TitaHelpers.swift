@@ -338,7 +338,7 @@ public nonisolated enum TitaBSGlobalParser {
 
 // MARK: - ProseMirror 富文本转换
 
-/// 将 Markdown 报告段落转换为 Tita ProseMirror HTML 与纯文本。
+/// 将 Markdown 报告段落转换为 Tita ProseMirror EditorState JSON（`{"doc": ..., "selection": ...}`）与纯文本。
 public nonisolated enum TitaRichTextConverter {
     public struct ConvertedContent: Sendable, Equatable {
         public let plainText: String
@@ -355,23 +355,46 @@ public nonisolated enum TitaRichTextConverter {
             .replacingOccurrences(of: "\r\n", with: "\n")
             .components(separatedBy: "\n")
 
-        var htmlBlocks: [String] = []
+        var blocks: [[String: Any]] = []
         var plainLines: [String] = []
 
         enum ListKind { case ordered, unordered }
         var activeList: ListKind?
-        var listItemsHTML: [String] = []
+        var listItems: [[String: Any]] = []
 
         func flushList() {
-            guard let kind = activeList, !listItemsHTML.isEmpty else {
+            guard let kind = activeList, !listItems.isEmpty else {
                 activeList = nil
-                listItemsHTML.removeAll()
+                listItems.removeAll()
                 return
             }
-            let tag = kind == .ordered ? "ol" : "ul"
-            htmlBlocks.append("<\(tag)>\(listItemsHTML.joined())</\(tag)>")
+            switch kind {
+            case .ordered:
+                blocks.append([
+                    "type": "orderedList",
+                    "attrs": ["order": 1],
+                    "content": listItems,
+                ])
+            case .unordered:
+                blocks.append([
+                    "type": "bulletList",
+                    "content": listItems,
+                ])
+            }
             activeList = nil
-            listItemsHTML.removeAll()
+            listItems.removeAll()
+        }
+
+        func makeParagraph(_ text: String) -> [String: Any] {
+            var paragraph: [String: Any] = [
+                "type": "paragraph",
+                "attrs": ["textAlign": "left"],
+            ]
+            let inlineNodes = parseInlineNodes(text)
+            if !inlineNodes.isEmpty {
+                paragraph["content"] = inlineNodes
+            }
+            return paragraph
         }
 
         for rawLine in lines {
@@ -387,9 +410,18 @@ public nonisolated enum TitaRichTextConverter {
             if let headingRange = line.range(of: #"^#{1,6}\s+"#, options: .regularExpression) {
                 flushList()
                 let body = String(line[headingRange.upperBound...]).trimmingCharacters(in: .whitespaces)
-                guard !body.isEmpty else { continue }
-                htmlBlocks.append("<p style=\"text-align:left\"><strong>\(renderInlineHTML(stripOuterBold(body)))</strong></p>")
-                plainLines.append(stripMarkdownInline(body))
+                let headingText = stripMarkdownInline(stripOuterBold(body)).trimmingCharacters(in: .whitespaces)
+                guard !headingText.isEmpty else { continue }
+                blocks.append([
+                    "type": "paragraph",
+                    "attrs": ["textAlign": "left"],
+                    "content": [[
+                        "type": "text",
+                        "marks": [["type": "strong"]],
+                        "text": headingText,
+                    ]],
+                ])
+                plainLines.append(headingText)
                 continue
             }
 
@@ -400,7 +432,10 @@ public nonisolated enum TitaRichTextConverter {
                 }
                 let prefix = String(line[..<orderedRange.upperBound]).trimmingCharacters(in: .whitespaces)
                 let body = String(line[orderedRange.upperBound...]).trimmingCharacters(in: .whitespaces)
-                listItemsHTML.append("<li class=\"tita-rich-editor-li\"><p style=\"text-align:left\">\(renderInlineHTML(body))</p></li>")
+                listItems.append([
+                    "type": "listItem",
+                    "content": [makeParagraph(body)],
+                ])
                 plainLines.append("\(prefix) \(stripMarkdownInline(body))")
                 continue
             }
@@ -411,13 +446,16 @@ public nonisolated enum TitaRichTextConverter {
                     activeList = .unordered
                 }
                 let body = String(line[bulletRange.upperBound...]).trimmingCharacters(in: .whitespaces)
-                listItemsHTML.append("<li class=\"tita-rich-editor-li\"><p style=\"text-align:left\">\(renderInlineHTML(body))</p></li>")
+                listItems.append([
+                    "type": "listItem",
+                    "content": [makeParagraph(body)],
+                ])
                 plainLines.append("• \(stripMarkdownInline(body))")
                 continue
             }
 
             flushList()
-            htmlBlocks.append("<p style=\"text-align:left\">\(renderInlineHTML(line))</p>")
+            blocks.append(makeParagraph(line))
             plainLines.append(stripMarkdownInline(line))
         }
 
@@ -432,11 +470,37 @@ public nonisolated enum TitaRichTextConverter {
             plainText = String(plainText.prefix(maxPlainLength))
         }
 
-        let richText = htmlBlocks.isEmpty ? "<p style=\"text-align:left\"></p>" : htmlBlocks.joined()
+        if blocks.isEmpty {
+            blocks.append([
+                "type": "paragraph",
+                "attrs": ["textAlign": "left"],
+            ])
+        }
+
+        let firstType = blocks.first?["type"] as? String
+        let initialSelectionPos = (firstType == "orderedList" || firstType == "bulletList") ? 3 : 1
+        let editorState: [String: Any] = [
+            "doc": [
+                "type": "doc",
+                "content": blocks,
+            ],
+            "selection": [
+                "type": "text",
+                "anchor": initialSelectionPos,
+                "head": initialSelectionPos,
+            ],
+        ]
+
+        let richText: String
+        if let data = try? JSONSerialization.data(withJSONObject: editorState, options: [.sortedKeys]) {
+            richText = String(decoding: data, as: UTF8.self)
+        } else {
+            richText = "{\"doc\":{\"content\":[{\"attrs\":{\"textAlign\":\"left\"},\"type\":\"paragraph\"}],\"type\":\"doc\"},\"selection\":{\"anchor\":1,\"head\":1,\"type\":\"text\"}}"
+        }
         return ConvertedContent(plainText: plainText, richText: richText)
     }
 
-    /// 当远端模块仅返回 `richText` 时提取可读纯文本用于展示或回填编辑。
+    /// 当远端模块仅返回旧版 HTML `richText` 时提取可读纯文本用于展示或回填编辑。
     public static func plainTextFromHTML(_ html: String) -> String {
         guard !html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
         var text = html
@@ -483,25 +547,51 @@ public nonisolated enum TitaRichTextConverter {
             .replacingOccurrences(of: #"`([^`]+)`"#, with: "$1", options: .regularExpression)
     }
 
-    private static func renderInlineHTML(_ text: String) -> String {
-        var escaped = escapeHTML(text)
-        escaped = replaceRegex(escaped, pattern: #"\*\*(.+?)\*\*"#, template: "<strong>$1</strong>")
-        escaped = replaceRegex(escaped, pattern: #"`([^`]+)`"#, template: "<code>$1</code>")
-        return escaped
-    }
+    /// 将单行文本拆分为 ProseMirror `text` 节点数组（保留 `strong` 标记，过滤空文本节点）。
+    private static func parseInlineNodes(_ text: String) -> [[String: Any]] {
+        let strippedCode = text.replacingOccurrences(of: #"`([^`]+)`"#, with: "$1", options: .regularExpression)
+        guard !strippedCode.isEmpty else { return [] }
 
-    private static func escapeHTML(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-    }
+        guard let regex = try? NSRegularExpression(pattern: #"\*\*(.+?)\*\*"#, options: []) else {
+            return [["type": "text", "text": strippedCode]]
+        }
 
-    private static func replaceRegex(_ text: String, pattern: String, template: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return text }
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: template)
+        let nsText = strippedCode as NSString
+        let matches = regex.matches(in: strippedCode, options: [], range: NSRange(location: 0, length: nsText.length))
+        if matches.isEmpty {
+            return [["type": "text", "text": strippedCode]]
+        }
+
+        var nodes: [[String: Any]] = []
+        var cursor = 0
+        for match in matches {
+            let fullRange = match.range
+            if fullRange.location > cursor {
+                let plainPart = nsText.substring(with: NSRange(location: cursor, length: fullRange.location - cursor))
+                if !plainPart.isEmpty {
+                    nodes.append(["type": "text", "text": plainPart])
+                }
+            }
+            if match.numberOfRanges > 1 {
+                let boldPart = nsText.substring(with: match.range(at: 1))
+                if !boldPart.isEmpty {
+                    nodes.append([
+                        "type": "text",
+                        "marks": [["type": "strong"]],
+                        "text": boldPart,
+                    ])
+                }
+            }
+            cursor = fullRange.location + fullRange.length
+        }
+
+        if cursor < nsText.length {
+            let tail = nsText.substring(from: cursor)
+            if !tail.isEmpty {
+                nodes.append(["type": "text", "text": tail])
+            }
+        }
+        return nodes
     }
 }
 

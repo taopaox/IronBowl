@@ -684,12 +684,44 @@ import Testing
     #expect(stdMapped[1].contains("联调延迟"))
     #expect(stdMapped[3].contains("推进任务 B"))
 
-    // HTML 转换验证
+    // ProseMirror EditorState JSON 转换与双向往返验证
     let converted = TitaRichTextConverter.convert(markdown: mapped[0])
-    #expect(converted.richText.contains("<strong>饭碗</strong>"))
-    #expect(converted.richText.contains("<ol><li class=\"tita-rich-editor-li\"><p style=\"text-align:left\">完成 <strong>Tita</strong> 对接 <code>API</code> 开发</p></li>"))
+    #expect(!converted.richText.contains("<p"))
+    #expect(!converted.richText.contains("<ul"))
+    #expect(!converted.richText.contains("<ol"))
+
+    let jsonData = try #require(converted.richText.data(using: .utf8))
+    let stateObj = try #require((try JSONSerialization.jsonObject(with: jsonData)) as? [String: Any])
+    let docObj = try #require(stateObj["doc"] as? [String: Any])
+    #expect(docObj["type"] as? String == "doc")
+    let selectionObj = try #require(stateObj["selection"] as? [String: Any])
+    #expect(selectionObj["type"] as? String == "text")
+    let contentNodes = try #require(docObj["content"] as? [[String: Any]])
+    #expect(contentNodes.first?["type"] as? String == "paragraph")
+    #expect(contentNodes.contains { ($0["type"] as? String) == "orderedList" })
+
+    // 确认无空文本节点
+    let roundtripMd = TitaProseMirrorParser.toMarkdown(richContent: converted.richText)
+    #expect(roundtripMd.contains("**饭碗**"))
+    #expect(roundtripMd.contains("1. 完成 **Tita** 对接 API 开发"))
+    #expect(roundtripMd.contains("2. 支持自动拆分"))
+
+    // 列表首行时 selection 从 3 开始，空内容时生成单段落合法 JSON
+    let bulletConverted = TitaRichTextConverter.convert(markdown: "- 第一条\n- 第二条")
+    let bulletState = try #require((try JSONSerialization.jsonObject(with: Data(bulletConverted.richText.utf8))) as? [String: Any])
+    #expect((bulletState["selection"] as? [String: Any])?["anchor"] as? Int == 3)
+    #expect(TitaProseMirrorParser.toMarkdown(richContent: bulletConverted.richText).contains("- 第一条"))
+
+    let emptyConverted = TitaRichTextConverter.convert(markdown: "   ")
+    let emptyState = try #require((try JSONSerialization.jsonObject(with: Data(emptyConverted.richText.utf8))) as? [String: Any])
+    let emptyDoc = try #require(emptyState["doc"] as? [String: Any])
+    let emptyContent = try #require(emptyDoc["content"] as? [[String: Any]])
+    #expect(emptyContent.count == 1)
+    #expect(emptyContent[0]["type"] as? String == "paragraph")
+    #expect(emptyContent[0]["content"] == nil)
+
     #expect(converted.plainText.contains("完成 Tita 对接 API 开发"))
-    #expect(TitaRichTextConverter.plainTextFromHTML(converted.richText).contains("饭碗"))
+    #expect(TitaRichTextConverter.plainTextFromHTML("<p style=\"text-align:left\"><strong>饭碗</strong></p>").contains("饭碗"))
 
     // 风格兜底测试 (.tita)
     let week = WeekRange.fromStartDateString("2026-11-23")!
@@ -1303,4 +1335,48 @@ import Testing
 
     let untouched = TitaClient.mapTransportError(URLError(.timedOut)) as? URLError
     #expect(untouched?.code == .timedOut)
+}
+
+@Test func titaClientParseDetailExtractsCleanMarkdownFromProseMirrorAndTitaNewlines() throws {
+    let proseMirrorJSON = #"{"doc":{"type":"doc","content":[{"type":"orderedList","attrs":{"order":1},"content":[{"type":"listItem","content":[{"type":"paragraph","attrs":{"textAlign":"left"},"content":[{"type":"text","marks":[{"type":"strong"}],"text":"重点工作："},{"type":"text","text":"完成联调"}]}]}]}]},"selection":{"type":"text","anchor":3,"head":3}}"#
+    let detail = try TitaClient.parseDetail(
+        [
+            "dailyId": "feed-pm",
+            "summaryType": 26,
+            "dailyDate": "2026-11-03",
+            "summaryTemplateId": 1006,
+            "details": [
+                [
+                    "moduleId": 11,
+                    "moduleName": "亮点",
+                    "moduleType": "richtext",
+                    "moduleObjType": 0,
+                    "sortIndex": 1,
+                    "isDelete": false,
+                    "objectData": [
+                        "text": "#tita-n#重点工作：完成联调",
+                        "richText": proseMirrorJSON,
+                    ],
+                ],
+                [
+                    "moduleId": 12,
+                    "moduleName": "问题",
+                    "moduleType": "richtext",
+                    "moduleObjType": 0,
+                    "sortIndex": 2,
+                    "isDelete": false,
+                    "objectData": [
+                        "text": "#tita-n#第一行#tita-n#第二行",
+                        "richText": "",
+                    ],
+                ],
+            ],
+        ],
+        fallbackType: .weekly,
+        fallbackDate: "2026-11-03"
+    )
+    #expect(detail.richtextModules.count == 2)
+    #expect(detail.richtextModules[0].plainText == "1. **重点工作：**完成联调")
+    #expect(!detail.richtextModules[0].plainText.contains("#tita-n#"))
+    #expect(detail.richtextModules[1].plainText == "第一行\n第二行")
 }

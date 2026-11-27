@@ -249,6 +249,19 @@ public actor TitaClient {
         return summaryType == .weekly ? 1006 : 1007
     }
 
+    /// 删除指定 `dailyId` 的 Tita 总结。
+    public func deleteSummary(dailyID: String) async throws {
+        let trimmed = dailyID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw TitaError.badResponse("删除总结失败：dailyId 为空")
+        }
+        _ = try await apiRequest(
+            method: "POST",
+            endpoint: "summary/delete/\(trimmed)",
+            jsonBody: [:]
+        )
+    }
+
     // MARK: - 写入草稿与正式提交
 
     public func updateMood(feedID: String, moduleID: Int, mood: TitaMood) async throws {
@@ -648,10 +661,18 @@ public actor TitaClient {
             var richTextHTML = ""
 
             if let dict = objData as? [String: Any] {
-                plainText = (dict["text"] as? String) ?? ""
+                let rawText = (dict["text"] as? String) ?? ""
                 richTextHTML = (dict["richText"] as? String) ?? ""
-                if plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !richTextHTML.isEmpty {
-                    plainText = TitaRichTextConverter.plainTextFromHTML(richTextHTML)
+                if !richTextHTML.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || rawText.contains("#tita-n#") {
+                    let parsed = TitaProseMirrorParser.toMarkdown(richContent: richTextHTML)
+                    plainText = parsed.isEmpty ? rawText.replacingOccurrences(of: "#tita-n#", with: "\n") : parsed
+                } else if rawText.contains("#tita-n#") {
+                    plainText = rawText
+                        .replacingOccurrences(of: "#tita-n#", with: "\n")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
+                    plainText = rawText
                 }
                 if let d = try? JSONSerialization.data(withJSONObject: dict, options: []) {
                     rawObjectDataJSON = String(decoding: d, as: UTF8.self)

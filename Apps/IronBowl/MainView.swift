@@ -610,17 +610,32 @@ private struct SidebarWebPluginRow: View {
             .buttonStyle(.plain)
 
             if hovering {
-                Button {
-                    plugin.onSidebarCloseWeb()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(DS.font(11, .medium))
-                        .foregroundStyle(DS.textSecondary)
-                        .frame(width: DS.s(20), height: DS.s(20))
-                        .contentShape(.rect)
+                HStack(spacing: 2) {
+                    Menu {
+                        menuContent()
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(DS.font(12))
+                            .foregroundStyle(DS.textSecondary)
+                            .frame(width: DS.s(22), height: DS.s(22))
+                            .contentShape(.rect)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+
+                    Button {
+                        plugin.onSidebarCloseWeb()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(DS.font(11, .medium))
+                            .foregroundStyle(DS.textSecondary)
+                            .frame(width: DS.s(20), height: DS.s(20))
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .help("关闭网页")
                 }
-                .buttonStyle(.plain)
-                .help("关闭网页")
             } else if badge == nil {
                 if plugin.isSidebarWebSuspended {
                     Image(systemName: "moon.zzz")
@@ -639,10 +654,24 @@ private struct SidebarWebPluginRow: View {
         .frame(height: DS.s(30))
         .background(selected ? DS.selected : hovering ? DS.hover : .clear, in: .rect(cornerRadius: DS.controlRadius))
         .contentShape(.rect)
+        .help(plugin.isSidebarWebSuspended ? "\(plugin.sidebarTitle)（已休眠省内存，点击唤醒）" : plugin.sidebarTitle)
         .onHover { hovering = $0 }
-        .contextMenu {
-            Button("打开\(plugin.sidebarTitle)", action: onSelect)
-            Button("关闭网页") { plugin.onSidebarCloseWeb() }
+        .contextMenu { menuContent() }
+    }
+
+    @ViewBuilder
+    private func menuContent() -> some View {
+        Button("打开\(plugin.sidebarTitle)", action: onSelect)
+        Divider()
+        Button("立即休眠") {
+            plugin.onSidebarSuspendWeb()
+        }
+        .disabled(plugin.isSidebarWebSuspended || !plugin.isSidebarWebOpen)
+        Button(plugin.isSidebarWebNeverSuspend ? "取消免休眠" : "设为免休眠") {
+            plugin.onSidebarToggleNeverSuspend()
+        }
+        Button("关闭网页") {
+            plugin.onSidebarCloseWeb()
         }
     }
 }
@@ -1210,9 +1239,10 @@ private struct ResourceDetailRow: View {
                     .foregroundStyle(DS.textSecondary)
             }
 
-            if item.canSuspend || onClose != nil {
+            let canManualSuspend = item.kind == .webPage && !item.sessionIDs.isEmpty
+            if canManualSuspend || onClose != nil {
                 HStack(spacing: 2) {
-                    if item.canSuspend {
+                    if canManualSuspend {
                         Button(action: onSuspend) {
                             Image(systemName: "moon.zzz")
                                 .font(DS.font(12))

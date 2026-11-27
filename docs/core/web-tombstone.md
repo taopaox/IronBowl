@@ -27,8 +27,9 @@ stateDiagram-v2
 3. **进入墓碑（`suspendToTombstone`）**：
    - 先截取当前页面快照 `snapshot`（`takeSnapshot`），并保存 `WKWebView.interactionState`（完整前进/后退历史栈）。
    - 拆除并置空 `WKWebView`，释放 WebContent 进程内存，状态切换为 `.tombstoned`，`WebContainerView` 展示低透明度快照与「重新唤醒」卡片（当调用方传入 `onClose` 回调时，卡片同时提供「关闭网页」按钮以直接销毁会话）。
-4. **无感唤醒（`wakeIfNeeded`）**：
-   - 重新切回或主窗口关闭再打开时，立即重建 `WKWebView` 并回填 `savedInteractionState`。
+4. **无感唤醒与冷启动延后加载（`wakeIfNeeded` / `armColdLaunchDeferral`）**：
+   - 正常切回或主窗口关闭再打开后台自动休眠的网页时，立即重建 `WKWebView` 并回填 `savedInteractionState`。
+   - 应用冷启动时若上次停留在内嵌网页插件（`feishu` 或 `aiweb`），`AppModel` 会调用 `armColdLaunchDeferral()` 让首个被动恢复挂载的网页会话默认以 `.tombstoned` 待唤醒态初始化（`deferAutoWake = true`，不创建 `WKWebView` 渲染进程）；在当前可见页上手动强制休眠（`suspend(id:, force: true)`）同样设置 `deferAutoWake = true`，直到用户点击墓碑卡片「重新唤醒」、点击顶栏刷新或主动点选侧栏/菜单栏/命令面板条目（`allowAutoWake(id:)`）时才唤醒。
    - 唤醒期间叠加原快照防白屏（`isWakingUp`），导航完成后平滑淡出，并设 2.5 秒兜底定时器 `scheduleWakeFallback()` 避免长时间遮挡。
 5. **崩溃兜底（`webViewWebContentProcessDidTerminate`）**：若页面在可见态被系统终止渲染进程则自动 `reload()`；若在后台被杀则转入墓碑状态等待下次切回唤醒。
 6. **会话状态查询与销毁**：`WebSessionManager.hasSession(id:)` 结合可观测的 `sessionIDs` 实时反映网页是否已打开（含休眠态），`remove(id:)` 触发 `WebSession.teardown()` 并移除会话。

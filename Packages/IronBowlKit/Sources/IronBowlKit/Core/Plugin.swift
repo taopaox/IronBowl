@@ -22,6 +22,8 @@ public protocol IronBowlPlugin: AnyObject {
     var isSidebarWebOpen: Bool { get }
     /// 当前插件自身的内嵌网页是否处于休眠状态。
     var isSidebarWebSuspended: Bool { get }
+    /// 当前插件自身的内嵌网页是否设置为免休眠。
+    var isSidebarWebNeverSuspend: Bool { get }
     /// 插件自己的数据库迁移。
     var migrations: [DatabaseMigration] { get }
 
@@ -42,6 +44,10 @@ public protocol IronBowlPlugin: AnyObject {
     func onSidebarSelect()
     /// 用户从左侧栏关闭该插件当前打开的内嵌网页时调用。
     func onSidebarCloseWeb()
+    /// 用户从左侧栏手动休眠该插件当前打开的内嵌网页时调用。
+    func onSidebarSuspendWeb()
+    /// 用户从左侧栏切换该插件内嵌网页免休眠状态时调用。
+    func onSidebarToggleNeverSuspend()
     /// 按会话 ID 关闭归属本插件的内嵌网页；若不属于本插件返回 false。
     func closeWebSession(id: String) -> Bool
     /// 首页的快捷标签。
@@ -71,6 +77,7 @@ public extension IronBowlPlugin {
     var isSidebarDirectory: Bool { false }
     var isSidebarWebOpen: Bool { false }
     var isSidebarWebSuspended: Bool { false }
+    var isSidebarWebNeverSuspend: Bool { false }
     var migrations: [DatabaseMigration] { [] }
     func start(context: PluginContext) {}
     func stop() {}
@@ -80,6 +87,8 @@ public extension IronBowlPlugin {
     var sidebarChildren: [SidebarPinnedItem] { [] }
     func onSidebarSelect() {}
     func onSidebarCloseWeb() {}
+    func onSidebarSuspendWeb() {}
+    func onSidebarToggleNeverSuspend() {}
     func closeWebSession(id: String) -> Bool { false }
     var quickActions: [QuickAction] { [] }
     var homeCards: [HomeCard] { [] }

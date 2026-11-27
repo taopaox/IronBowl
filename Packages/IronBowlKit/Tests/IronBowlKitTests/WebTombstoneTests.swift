@@ -162,3 +162,47 @@ import Testing
     }
     #expect(timed.state == .tombstoned)
 }
+
+@MainActor @Test func coldLaunchDeferralAndVisibleManualSuspend() async throws {
+    let dbURL = FileManager.default.temporaryDirectory.appending(path: "ib-web-cold-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: dbURL) }
+    let db = try AppDatabase(url: dbURL, migrations: [])
+    let settings = SettingsStore(database: db)
+
+    let manager = WebSessionManager(settings: settings, startTimer: false, headlessForTesting: true)
+    manager.armColdLaunchDeferral()
+
+    // 1. 首个冷启动恢复挂载的网页应保持在墓碑待唤醒状态，被动 attachDisplay 不自动唤醒
+    let s1 = manager.session(id: "cold.1", initialURL: "https://example.com/1")
+    #expect(s1.state == .tombstoned)
+    #expect(s1.deferAutoWake == true)
+
+    let token1 = UUID()
+    manager.attachDisplay(sessionID: "cold.1", token: token1)
+    #expect(s1.isVisible == true)
+    #expect(s1.state == .tombstoned)
+
+    // 2. 延后标记仅作用于首个会话，后续会话正常激活
+    let s2 = manager.session(id: "cold.2", initialURL: "https://example.com/2")
+    #expect(s2.state == .active)
+    #expect(s2.deferAutoWake == false)
+
+    // 3. 点击墓碑卡片「重新唤醒」(forceWake: true) 后立即恢复活跃
+    manager.attachDisplay(sessionID: "cold.1", token: token1, forceWake: true)
+    #expect(s1.state == .active)
+    #expect(s1.deferAutoWake == false)
+
+    // 4. 在可见态手动强制休眠后，标记 deferAutoWake，被动重新挂载不唤醒，主动 allowAutoWake 后立即唤醒
+    let suspended = await manager.suspend(id: "cold.1", force: true)
+    #expect(suspended == true)
+    #expect(s1.state == .tombstoned)
+    #expect(s1.deferAutoWake == true)
+
+    let token2 = UUID()
+    manager.attachDisplay(sessionID: "cold.1", token: token2)
+    #expect(s1.state == .tombstoned)
+
+    manager.allowAutoWake(id: "cold.1")
+    #expect(s1.state == .active)
+    #expect(s1.deferAutoWake == false)
+}

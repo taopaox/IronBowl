@@ -21,6 +21,7 @@ public final class WebSession {
     public private(set) var snapshot: NSImage?
     public private(set) var isWakingUp = false
     public private(set) var isVisible = false
+    public private(set) var deferAutoWake = false
     public var lastActiveAt = Date()
     public private(set) var tombstonedAt: Date?
 
@@ -57,6 +58,7 @@ public final class WebSession {
         self.neverSuspend = neverSuspend
         self.displayName = displayName
         self.headlessForTesting = headlessForTesting
+        self.deferAutoWake = !startActive
         self.state = startActive ? .active : .tombstoned
         if !startActive {
             self.tombstonedAt = Date()
@@ -170,6 +172,7 @@ public final class WebSession {
         isLoading = false
         estimatedProgress = 0
         isWakingUp = false
+        deferAutoWake = force && isVisible
         state = .tombstoned
         tombstonedAt = Date()
         return true
@@ -177,12 +180,20 @@ public final class WebSession {
 
     public func wakeIfNeeded() {
         lastActiveAt = Date()
+        deferAutoWake = false
         guard state == .tombstoned else { return }
         state = .active
         tombstonedAt = nil
         guard !headlessForTesting else { return }
         let restore = savedInteractionState
         createAndLoadWebView(urlString: currentURL, restoreInteractionState: restore)
+    }
+
+    public func allowAutoWake() {
+        deferAutoWake = false
+        if isVisible {
+            wakeIfNeeded()
+        }
     }
 
     public func teardown() {

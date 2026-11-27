@@ -74,7 +74,7 @@ public struct WebContainerView: View {
                         .lineLimit(1)
                     HStack(spacing: 8) {
                         Button("重新唤醒") {
-                            manager.attachDisplay(sessionID: session.id, token: displayToken)
+                            manager.attachDisplay(sessionID: session.id, token: displayToken, forceWake: true)
                         }
                         .buttonStyle(.dsPrimary)
 

@@ -140,6 +140,9 @@ final class AppModel {
             webSessions?.activeWebProcessDescriptors() ?? []
         }
         selection = settings[AppKeys.lastPlugin]
+        if selection == FeishuPlugin.pluginID || selection == AIWebPlugin.pluginID {
+            webSessions.armColdLaunchDeferral()
+        }
         context = PluginContext(
             database: database, settings: settings, reminders: reminders,
             workCalendar: workCalendar, providers: providers, webSessions: webSessions,
@@ -243,6 +246,7 @@ final class AppModel {
     func plugin(_ id: String?) -> IronBowlPlugin? { plugins.first { $0.id == id } }
 
     func select(_ id: String) {
+        webSessions.cancelColdLaunchDeferral()
         guard selection != id else { return }
         selection = id
         settings.setDeferred(id, for: AppKeys.lastPlugin)

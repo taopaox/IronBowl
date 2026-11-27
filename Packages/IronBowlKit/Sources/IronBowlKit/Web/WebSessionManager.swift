@@ -27,6 +27,7 @@ public final class WebSessionManager {
     @ObservationIgnored private let headlessForTesting: Bool
     @ObservationIgnored private var windowClosedAt: Date?
     @ObservationIgnored private var windowCloseTask: Task<Void, Never>?
+    @ObservationIgnored private var deferNextColdSession = false
 
     public init(settings: SettingsStore, startTimer: Bool = true, headlessForTesting: Bool = false) {
         self.settings = settings
@@ -140,6 +141,22 @@ public final class WebSessionManager {
 
     // MARK: - 会话生命周期
 
+    /// 应用冷启动且上次停留在网页插件时调用：让首个被动恢复挂载的网页先处于墓碑待唤醒状态（0 MB）。
+    public func armColdLaunchDeferral() {
+        deferNextColdSession = true
+    }
+
+    /// 用户主动切换侧栏、菜单栏或命令面板入口时取消冷启动延后标记。
+    public func cancelColdLaunchDeferral() {
+        deferNextColdSession = false
+    }
+
+    /// 用户主动点选某个网页条目时允许其自动唤醒（若当前可见则立即唤醒）。
+    public func allowAutoWake(id: String) {
+        cancelColdLaunchDeferral()
+        sessions[id]?.allowAutoWake()
+    }
+
     public func session(
         id: String,
         initialURL: String,
@@ -154,18 +171,22 @@ public final class WebSessionManager {
             }
             return existing
         }
+        let startActive = !deferNextColdSession
+        deferNextColdSession = false
         let created = WebSession(
             id: id,
             initialURL: initialURL,
             blockedSchemes: blockedSchemes,
             neverSuspend: neverSuspend,
             displayName: displayName,
-            startActive: true,
+            startActive: startActive,
             headlessForTesting: headlessForTesting
         )
         sessions[id] = created
         sessionIDs.append(id)
-        Task { await enforceLiveLimit() }
+        if startActive {
+            Task { await enforceLiveLimit() }
+        }
         return created
     }
 
@@ -194,12 +215,14 @@ public final class WebSessionManager {
         }
     }
 
-    public func attachDisplay(sessionID: String, token: UUID) {
+    public func attachDisplay(sessionID: String, token: UUID, forceWake: Bool = false) {
         displayTokens[sessionID] = token
         guard let session = sessions[sessionID] else { return }
         session.markVisible(true)
-        session.wakeIfNeeded()
-        Task { await enforceLiveLimit() }
+        if forceWake || !session.deferAutoWake {
+            session.wakeIfNeeded()
+            Task { await enforceLiveLimit() }
+        }
     }
 
     public func detachDisplay(sessionID: String, token: UUID) {

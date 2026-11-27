@@ -11,7 +11,7 @@
 | `Views/ZentaoDailyChatCard.swift` | `ZentaoDailyChatCard` | 在首页聊天流内直接渲染并操作的日报卡片（切换禅道任务、调整工时、修改内容、记加班、重新生成与提交禅道） |
 | `LogModel.swift` | `LogModel` | `@Observable` 业务状态：扫描、任务/已写工时同步、草稿读写、当日工时/加班、提交与 AI 解析 |
 | `DailyLogQuery.swift` | `ZentaoDailyLogService`, `DailyLogItem`, `DailyLogRangeResult` | 面向周报等跨天插件的只读区间日报查询服务（融合禅道远端、本地已提交与未提交草稿并去重） |
-| `Git/GitScanner.swift` | `GitScanner`, `RepoActivity`, `GitCommit`, `RepoWorkspaceStatus` | 多层级发现 Git 仓库、按作者邮箱和本地当天 00:00–24:00 扫描提交（跨仓库按哈希去重），并支持巡检未提交改动与未推送提交（`workspaceStatus`） |
+| `Git/GitScanner.swift` | `GitScanner`, `RepoActivity`, `GitCommit`, `GitPeriodStats`, `GitMonthlyStats`, `GitMonthlyRawCommit`, `RepoWorkspaceStatus` | 多层级发现 Git 仓库、按作者邮箱和本地当天 00:00–24:00 扫描提交（跨仓库按哈希去重），提供年度/季度 `periodStats`、月度细分 `monthlyStats`（含合并/净提交、主贡献者、高峰日、Bug/接口/部署分类）并巡检未提交改动与未推送提交（`workspaceStatus`） |
 | `Draft/DraftGenerator.swift` | `DraftGenerator`, `DraftEntry`, `DraftInput` | 按工作日/下班时间拆条、权重分配工时、AI 结构化生成与失败拼接兜底、剩余工时递减 |
 | `Zentao/ZentaoClient.swift` | `ZentaoClient`, `ZentaoTask`, `ZentaoEstimate`, `ZentaoBug` | 禅道 PATH_INFO `.json` 客户端（登录、自动重登、企业版 `effort` 与开源版 `recordEstimate` 兼容、提交回查、指派给我的任务与 Bug 列表） |
 | `ZentaoAssignedWatcher.swift` | `ZentaoAssignedWatcher`, `ZentaoAssignedDiff` | 后台低频巡检新指派或重新激活的禅道 Bug 与任务，首次静默建立基线，后续增量弹窗并支持一键转待办 |

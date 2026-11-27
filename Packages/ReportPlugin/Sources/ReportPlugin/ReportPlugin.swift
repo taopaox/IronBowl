@@ -181,7 +181,7 @@ public final class MonthlyReportPlugin: IronBowlPlugin {
     public let title = "月报"
     public let sidebarSection: String? = "汇报"
     public let systemImage = "doc.richtext"
-    public var migrations: [DatabaseMigration] { [ReportMigrations.monthly] }
+    public var migrations: [DatabaseMigration] { [ReportMigrations.monthly, ReportMigrations.monthlyOKR] }
 
     public var sidebarBadge: SidebarBadge? {
         guard let model else { return nil }

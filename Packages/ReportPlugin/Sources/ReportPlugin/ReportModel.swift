@@ -21,6 +21,7 @@ final class WeeklyReportModel {
     var providerKind: AIProviderKind
 
     var extraNotes: String = ""
+    var monthlyOKR: String = ""
     var reportTitle: String = ""
     var reportContent: String = ""
 
@@ -29,6 +30,8 @@ final class WeeklyReportModel {
     private(set) var recentReports: [WeeklyReportRecord] = []
     private(set) var recentMonthlyReports: [MonthlyReportRecord] = []
     private(set) var monthWeeklySummaries: [WeeklyReportRecord] = []
+    private(set) var monthGitStats: GitMonthlyStats = .empty
+    var isLoadingGitStats = false
 
     var isLoadingLogs = false
     var isGenerating = false
@@ -94,6 +97,27 @@ final class WeeklyReportModel {
     var includeHours: Bool {
         get { settings[ReportKeys.includeHours] }
         set { settings[ReportKeys.includeHours] = newValue }
+    }
+
+    var includeGitStats: Bool {
+        get { settings[ReportKeys.includeGitStats] }
+        set {
+            guard settings[ReportKeys.includeGitStats] != newValue else { return }
+            settings[ReportKeys.includeGitStats] = newValue
+            if newValue && periodKind == .monthly {
+                Task { await refreshMonthGitStats() }
+            }
+        }
+    }
+
+    var feishuCLIPath: String {
+        get { settings[ReportKeys.feishuCLIPath] }
+        set { settings[ReportKeys.feishuCLIPath] = newValue }
+    }
+
+    var feishuMonthlyDocURL: String {
+        get { settings[ReportKeys.feishuMonthlyDocURL] }
+        set { settings[ReportKeys.feishuMonthlyDocURL] = newValue }
     }
 
     var isZentaoConfigured: Bool {
@@ -308,6 +332,7 @@ final class WeeklyReportModel {
         clearActiveFilter()
         syncedFromZentao = false
         remoteError = nil
+        monthGitStats = .empty
         titaStatus = nil
         titaStatusError = nil
         message = nil
@@ -331,6 +356,7 @@ final class WeeklyReportModel {
         clearActiveFilter()
         syncedFromZentao = false
         remoteError = nil
+        monthGitStats = .empty
         titaStatus = nil
         titaStatusError = nil
         message = nil
@@ -354,6 +380,7 @@ final class WeeklyReportModel {
         clearActiveFilter()
         syncedFromZentao = false
         remoteError = nil
+        monthGitStats = .empty
         titaStatus = nil
         titaStatusError = nil
         message = nil
@@ -435,18 +462,34 @@ final class WeeklyReportModel {
         let start = activeStartDateString
         let end = activeEndDateString
         let include = includeDrafts
+        let shouldFetchGit = (targetKind == .monthly && includeGitStats)
 
-        let result = await dailyLogService.fetch(
+        if shouldFetchGit {
+            isLoadingGitStats = true
+        }
+
+        async let logResult = dailyLogService.fetch(
             from: start,
             to: end,
             includeDrafts: include
         )
+        async let gitResult: GitMonthlyStats? = shouldFetchGit
+            ? fetchMonthGitStats(start: start, end: end)
+            : nil
+
+        let (result, fetchedGit) = await (logResult, gitResult)
         isLoadingLogs = false
+        if shouldFetchGit {
+            isLoadingGitStats = false
+        }
         guard periodKind == targetKind && activePeriodKey == targetKey else { return }
 
         rawItemsByDate = result.itemsByDate
         syncedFromZentao = result.syncedFromZentao
         remoteError = result.remoteError
+        if let fetchedGit {
+            monthGitStats = fetchedGit
+        }
         rebuildDays(using: result.itemsByDate, periodKind: targetKind, week: targetWeek, month: targetMonth)
         if targetKind == .monthly {
             recentMonthlyReports = store.recentMonthlyReports()
@@ -454,6 +497,29 @@ final class WeeklyReportModel {
         } else {
             recentReports = store.recentReports()
         }
+    }
+
+    func refreshMonthGitStats() async {
+        guard periodKind == .monthly, !isLoadingGitStats else { return }
+        let targetKey = month.monthKey
+        let start = month.startDateString
+        let end = month.endDateString
+        isLoadingGitStats = true
+        defer { isLoadingGitStats = false }
+        let stats = await fetchMonthGitStats(start: start, end: end)
+        guard periodKind == .monthly && month.monthKey == targetKey else { return }
+        monthGitStats = stats
+    }
+
+    private func fetchMonthGitStats(start: String, end: String) async -> GitMonthlyStats {
+        let repos = GitScanner.configuredRepos(database: context.database, settings: settings)
+        let email = await GitScanner.configuredAuthorEmail(settings: settings)
+        return await GitScanner.monthlyStats(
+            repos: repos,
+            authorEmail: email,
+            startDate: start,
+            endDate: end
+        )
     }
 
     private func rebuildDays(
@@ -493,11 +559,17 @@ final class WeeklyReportModel {
         }
 
         let trimmedNotes = extraNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedOKR = periodKind == .monthly ? monthlyOKR.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let hasGit = periodKind == .monthly && includeGitStats && monthGitStats.totalCommits > 0
         let noun = periodKind.displayName
         let periodLabel = periodKind == .weekly ? "本周" : "本月"
-        if totalLogCount == 0 && trimmedNotes.isEmpty {
+        if totalLogCount == 0 && trimmedNotes.isEmpty && trimmedOKR.isEmpty && !hasGit {
             errorMessage = "\(periodLabel)暂未查到每日日报，请先刷新查询禅道记录，或在补充说明中填写工作要点后再生成。"
             return
+        }
+
+        if periodKind == .monthly && includeGitStats && !monthGitStats.hasData {
+            await refreshMonthGitStats()
         }
 
         let provider = context.providers.config(providerKind)
@@ -545,7 +617,10 @@ final class WeeklyReportModel {
                 extraNotes: extraNotes,
                 style: style,
                 includeHours: includeHours,
-                promptTemplate: settings[ReportKeys.monthlyPrompt]
+                promptTemplate: settings[ReportKeys.monthlyPrompt],
+                monthlyOKR: monthlyOKR,
+                gitStats: monthGitStats,
+                includeGitStats: includeGitStats
             )
             output = await WeeklyReportGenerator.generate(input, provider: activeProvider)
 
@@ -564,7 +639,8 @@ final class WeeklyReportModel {
                 providerName: output.usedAI ? provider.kind.displayName : "本地规则汇总",
                 totalHours: totalHours,
                 generatedAt: currentMonthlyRecord?.generatedAt ?? now,
-                updatedAt: now
+                updatedAt: now,
+                monthlyOKR: monthlyOKR
             )
             store.saveMonthly(record)
             currentMonthlyRecord = record
@@ -594,6 +670,7 @@ final class WeeklyReportModel {
     }
 
     func loadSavedReport(for targetWeek: WeekRange) {
+        monthlyOKR = ""
         if let saved = store.report(forWeekStart: targetWeek.startDateString) {
             currentRecord = saved
             reportTitle = saved.title
@@ -613,11 +690,13 @@ final class WeeklyReportModel {
             reportTitle = saved.title
             reportContent = saved.content
             extraNotes = saved.extraNotes
+            monthlyOKR = saved.monthlyOKR
         } else {
             currentMonthlyRecord = nil
             reportTitle = WeeklyReportGenerator.defaultTitle(for: targetMonth)
             reportContent = ""
             extraNotes = ""
+            monthlyOKR = ""
         }
     }
 
@@ -658,7 +737,8 @@ final class WeeklyReportModel {
             recentReports = store.recentReports()
 
         case .monthly:
-            guard currentMonthlyRecord != nil || !trimmedContent.isEmpty else { return }
+            let trimmedOKR = monthlyOKR.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard currentMonthlyRecord != nil || !trimmedContent.isEmpty || !trimmedOKR.isEmpty else { return }
             let now = Date()
             let resolvedTitle = reportTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? WeeklyReportGenerator.defaultTitle(for: month)
@@ -674,7 +754,8 @@ final class WeeklyReportModel {
                 providerName: currentMonthlyRecord?.providerName ?? "手动编辑",
                 totalHours: totalHours > 0 ? totalHours : (currentMonthlyRecord?.totalHours ?? 0),
                 generatedAt: currentMonthlyRecord?.generatedAt ?? now,
-                updatedAt: now
+                updatedAt: now,
+                monthlyOKR: monthlyOKR
             )
             store.saveMonthly(record)
             currentMonthlyRecord = record
@@ -700,6 +781,7 @@ final class WeeklyReportModel {
         }
         reportContent = ""
         extraNotes = ""
+        monthlyOKR = ""
         errorMessage = nil
     }
 

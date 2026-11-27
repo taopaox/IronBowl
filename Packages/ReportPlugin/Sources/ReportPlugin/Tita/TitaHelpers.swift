@@ -627,10 +627,21 @@ public nonisolated enum TitaContentMapper {
         var grouped: [SemanticBucket: [String]] = [:]
 
         for section in sections {
-            let bucket = classifyHeading(section.heading)
             let body = section.body.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !body.isEmpty else { continue }
 
+            if let heading = section.heading, isCombinedProblemAndImprovementHeading(heading) {
+                let split = splitProblemsAndImprovement(body)
+                if !split.problems.isEmpty && !split.improvement.isEmpty {
+                    grouped[.problems, default: []].append(split.problems)
+                    grouped[.improvement, default: []].append(split.improvement)
+                    continue
+                }
+                grouped[.problems, default: []].append(body)
+                continue
+            }
+
+            let bucket = classifyHeading(section.heading)
             let shouldKeepSubheading: Bool = {
                 guard let h = section.heading else { return false }
                 switch bucket {
@@ -706,25 +717,115 @@ public nonisolated enum TitaContentMapper {
         return sections
     }
 
+    private static let problemKeywords = ["问题", "不足", "风险", "阻塞", "困难"]
+    private static let improvementKeywords = ["改进", "措施", "建议", "思考", "行动", "优化方向"]
+
+    private static func isCombinedProblemAndImprovementHeading(_ heading: String) -> Bool {
+        containsAny(heading, problemKeywords) && containsAny(heading, improvementKeywords)
+    }
+
+    private static func splitProblemsAndImprovement(_ body: String) -> (problems: String, improvement: String) {
+        let lines = body.components(separatedBy: .newlines)
+        var hasLevelThree = false
+        for raw in lines where raw.trimmingCharacters(in: .whitespaces).hasPrefix("### ") {
+            hasLevelThree = true
+            break
+        }
+
+        if hasLevelThree {
+            var problemParts: [String] = []
+            var improvementParts: [String] = []
+            var currentHeading = ""
+            var currentLines: [String] = []
+
+            func flushSub() {
+                let text = currentLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                currentLines.removeAll()
+                guard !text.isEmpty else { return }
+                let isImp = containsAny(currentHeading, improvementKeywords) && !containsAny(currentHeading, problemKeywords)
+                if isImp {
+                    improvementParts.append(text)
+                } else {
+                    problemParts.append(text)
+                }
+            }
+
+            for raw in lines {
+                let trimmed = raw.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("### ") {
+                    flushSub()
+                    currentHeading = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
+                    currentLines.append(raw)
+                }
+            }
+            flushSub()
+            return (
+                problemParts.joined(separator: "\n\n"),
+                improvementParts.joined(separator: "\n\n")
+            )
+        }
+
+        var problemLines: [String] = []
+        var improvementLines: [String] = []
+        var currentTargetIsImprovement = false
+
+        for raw in lines {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                if currentTargetIsImprovement {
+                    if improvementLines.last?.isEmpty == false { improvementLines.append("") }
+                } else {
+                    if problemLines.last?.isEmpty == false { problemLines.append("") }
+                }
+                continue
+            }
+
+            let normalizedLabel = trimmed
+                .replacingOccurrences(of: #"^(?:[-*•]|\d+[.)、])\s*"#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: "**", with: "")
+            let looksLikeImprovementHeader = containsAny(String(normalizedLabel.prefix(16)), ["改进措施", "改进建议", "优化建议", "改进思考", "应对措施", "后续改进", "给公司的建议", "改进"])
+                && !containsAny(String(normalizedLabel.prefix(10)), ["问题", "不足", "风险"])
+            let looksLikeProblemHeader = containsAny(String(normalizedLabel.prefix(16)), ["存在问题", "存在的问题", "主要问题", "问题与不足", "问题分析", "根因"])
+
+            if looksLikeImprovementHeader {
+                currentTargetIsImprovement = true
+            } else if looksLikeProblemHeader {
+                currentTargetIsImprovement = false
+            }
+
+            if currentTargetIsImprovement {
+                improvementLines.append(raw)
+            } else {
+                problemLines.append(raw)
+            }
+        }
+
+        return (
+            problemLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines),
+            improvementLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
     private static func classifyHeading(_ heading: String?) -> SemanticBucket {
         guard let h = heading else { return .highlights }
-        if containsAny(h, ["计划", "下一步", "下周", "下月", "规划"]) {
+        if containsAny(h, ["计划", "下一步", "下周", "下月", "下一个月", "工作重点", "下阶段", "规划"]) {
             return .plan
         }
-        if containsAny(h, ["改进", "思考", "行动", "反思", "优化方向"]) {
+        if containsAny(h, improvementKeywords) {
             return .improvement
         }
-        if containsAny(h, ["问题", "不足", "风险", "阻塞", "困难"]) {
+        if containsAny(h, problemKeywords) {
             return .problems
         }
         return .highlights
     }
 
     private static func classifyModuleName(_ name: String) -> SemanticBucket {
-        if containsAny(name, ["计划", "下一步", "下周", "下月"]) {
+        if containsAny(name, ["计划", "下一步", "下周", "下月", "下一个月", "工作重点"]) {
             return .plan
         }
-        if containsAny(name, ["改进", "思考", "行动"]) {
+        if containsAny(name, ["改进", "思考", "行动", "措施", "建议"]) {
             return .improvement
         }
         if containsAny(name, ["问题", "不足", "风险"]) {

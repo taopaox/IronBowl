@@ -165,7 +165,8 @@ public nonisolated enum TitaHistorySyncService {
                 providerName: providerName,
                 totalHours: existing?.totalHours ?? 0,
                 generatedAt: existing?.generatedAt ?? timestamp,
-                updatedAt: timestamp
+                updatedAt: timestamp,
+                monthlyOKR: existing?.monthlyOKR ?? ""
             )
             store.saveMonthly(record)
             if existing == nil {

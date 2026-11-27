@@ -514,7 +514,7 @@ import Testing
     #expect(monthlyPlugin.sidebarSection == "汇报")
 
     let combinedMigrations = weeklyPlugin.migrations + monthlyPlugin.migrations
-    #expect(Set(combinedMigrations.map(\.identifier)).count == 2)
+    #expect(Set(combinedMigrations.map(\.identifier)).count == 3)
 
     let db = try AppDatabase(url: url, migrations: ZentaoLogPlugin().migrations + combinedMigrations)
     let settings = SettingsStore(database: db)
@@ -1577,4 +1577,166 @@ import Testing
     #expect(plugin.canHandleChatIntent("生成今年年报"))
     #expect(!plugin.canHandleChatIntent("年报代码怎么报错了"))
     plugin.stop()
+}
+
+@MainActor @Test func monthlyOKRGitStatsMapperMoodAndFeishuDocServiceWorkEndToEnd() async throws {
+    // 1. MonthlyReportRecord.monthlyOKR 持久化迁移 report.v4
+    let url = FileManager.default.temporaryDirectory.appending(path: "report-okr-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let db = try AppDatabase(url: url, migrations: ReportMigrations.all)
+    let store = ReportStore(db: db)
+
+    let record = MonthlyReportRecord(
+        monthKey: "2026-11",
+        periodStart: "2026-11-01",
+        periodEnd: "2026-11-30",
+        title: "2026年11月工作月报",
+        content: "## 一、当月OKR完成情况\n\n1. O1 完成 100%",
+        extraNotes: "补充",
+        style: WeeklyReportStyle.standard.rawValue,
+        providerName: "本地规则汇总",
+        totalHours: 168,
+        generatedAt: Date(),
+        updatedAt: Date(),
+        monthlyOKR: "O1: 完成核心项目交付（100%）"
+    )
+    store.saveMonthly(record)
+    #expect(store.monthlyReport(forMonthKey: "2026-11")?.monthlyOKR == "O1: 完成核心项目交付（100%）")
+
+    // 2. 月报提示词注入 {{monthlyOKR}} 与 {{gitStats}} 及本地兜底
+    let nov = MonthRange.fromMonthKey("2026-11")!
+    let gitStats = GitMonthlyStats(
+        totalReposScanned: 5,
+        activeRepoCount: 3,
+        inactiveRepoCount: 2,
+        totalCommits: 40,
+        mergeCommits: 6,
+        netCommits: 34,
+        addedLines: 2200,
+        deletedLines: 450,
+        topContributor: "沈昆（34 次）",
+        peakDay: "2026-11-20",
+        peakDayCommits: 8,
+        repoDistribution: [GitRepoCommitCount(name: "app-web", commits: 25)],
+        bugFixCommits: 9,
+        apiIntegrationCommits: 7,
+        deployConfigCommits: 4
+    )
+    let input = MonthlyReportInput(
+        month: nov,
+        days: [],
+        weeklySummaries: [],
+        extraNotes: "无",
+        style: .standard,
+        includeHours: true,
+        promptTemplate: WeeklyReportGenerator.defaultMonthlyPrompt,
+        monthlyOKR: "O1: 完成核心交付",
+        gitStats: gitStats,
+        includeGitStats: true
+    )
+    let prompt = WeeklyReportGenerator.prompt(input)
+    #expect(prompt.contains("O1: 完成核心交付"))
+    #expect(prompt.contains("剔除合并后净提交 34 次"))
+    #expect(prompt.contains("Bug 修复 9 次"))
+
+    let fallback = WeeklyReportGenerator.fallbackReport(input)
+    #expect(fallback.content.contains("## 一、当月OKR完成情况"))
+    #expect(fallback.content.contains("## 附：Git 数据概览"))
+    #expect(fallback.content.contains("剔除合并后净提交 34 次"))
+
+    // 3. TitaContentMapper 映射公司规范五段式月报到 Tita 4 模块
+    let companyMonthlyMD = """
+    ## 一、当月OKR完成情况
+
+    1. O1 完成度 100%。
+
+    ## 二、当月亮点工作
+
+    1. 完成 3 个核心模块上线，接口联调耗时下降 30%。
+
+    ## 三、当月存在的问题及改进措施 / 建议
+
+    ### 存在的问题
+    1. 跨端适配回归耗时偏长，根因是缺少真机自动化校验。
+
+    ### 改进措施 / 建议
+    1. 上线前增加多端构建校验脚本并冻结接口契约。
+
+    ## 四、下一个月工作重点
+
+    1. 完成 2 期版本上线与性能优化 20%。
+
+    ## 附：Git 数据概览
+
+    - 总提交 40 次，净提交 34 次。
+    """
+    let mapped = TitaContentMapper.map(markdown: companyMonthlyMD, toModules: TitaContentMapper.defaultModuleNames)
+    #expect(mapped.count == 4)
+    #expect(mapped[0].contains("O1 完成度 100%"))
+    #expect(mapped[0].contains("完成 3 个核心模块上线"))
+    #expect(mapped[0].contains("总提交 40 次"))
+    #expect(mapped[1].contains("缺少真机自动化校验"))
+    #expect(mapped[2].contains("冻结接口契约"))
+    #expect(mapped[3].contains("性能优化 20%"))
+
+    // 4. TitaReportDetail.currentMood 解析 selectedValues JSON
+    let detailWithMood = TitaReportDetail(
+        dailyID: "d1",
+        summaryDate: "2026-11-01",
+        summaryType: .monthly,
+        submitState: .onTime,
+        templateID: 1007,
+        delayDate: nil,
+        modules: [
+            TitaReportModule(moduleId: 1, moduleName: "心情", moduleType: "select", moduleObjType: 1, sortIndex: 1, isDelete: false, plainText: "", richTextHTML: "", rawObjectDataJSON: "{\"selectedValues\":[2],\"selectedValues2\":null}"),
+        ]
+    )
+    #expect(detailWithMood.currentMood == .fighting)
+
+    // 5. FeishuDocService 纯解析测试
+    let auth = try FeishuDocService.parseAuthStatus(#"""
+    {
+      "identities": {
+        "user": {
+          "status": "missing",
+          "available": false,
+          "userName": "沈昆",
+          "tokenStatus": "expired",
+          "hint": "run: lark-cli auth login --help"
+        }
+      }
+    }
+    """#)
+    #expect(!auth.isAvailable)
+    #expect(auth.userName == "沈昆")
+    #expect(auth.tokenStatus == "expired")
+
+    let login = try FeishuDocService.parseDeviceLogin(#"""
+    {
+      "device_code": "dev-123",
+      "expires_in": 600,
+      "verification_url": "https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=f1&user_code=XK3S-WT5E"
+    }
+    """#)
+    #expect(login.deviceCode == "dev-123")
+    #expect(login.userCode == "XK3S-WT5E")
+    #expect(login.verificationURL.contains("flow_id=f1"))
+
+    let doc = try FeishuDocService.parseFetchedDoc(#"""
+    {"ok":true,"data":{"title":"2026年11月月报","content":"# 2026年11月月报\n\n正文"}}
+    """#, docURL: "https://example.feishu.cn/wiki/w1")
+    #expect(doc.title == "2026年11月月报")
+    #expect(doc.markdown.contains("正文"))
+
+    let node = FeishuDocService.parseWikiNodeInfo(#"""
+    {"ok":true,"data":{"node":{"space_id":"7001","node_token":"wikcnParent","obj_token":"docxParent","obj_type":"docx","title":"11月月报"}}}
+    """#)
+    #expect(node?.spaceID == "7001")
+    #expect(node?.nodeToken == "wikcnParent")
+
+    let children = FeishuDocService.parseWikiChildNodes(#"""
+    {"ok":true,"data":{"items":[{"space_id":"7001","node_token":"wikcnW1","obj_token":"docxW1","obj_type":"docx","title":"第1周周报"},{"space_id":"7001","node_token":"wikcnSheet","obj_token":"sht1","obj_type":"sheet","title":"表格忽略"}]}}
+    """#)
+    #expect(children.count == 1)
+    #expect(children[0].title == "第1周周报")
 }

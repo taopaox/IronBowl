@@ -22,6 +22,11 @@ struct ReportSettingsView: View {
             DSRow("附带工时统计", description: "在周报/月报提示词和本地汇总结果中附带总工时与加班时长。") {
                 DSToggle(isOn: s.binding(ReportKeys.includeHours))
             }
+            if periodKind == .monthly {
+                DSRow("附带 Git 月度统计", description: "自动扫描代码根目录下的 Git 仓库本月提交（含净提交、合并、Bug/接口/部署分布）并注入月报。") {
+                    DSToggle(isOn: s.binding(ReportKeys.includeGitStats))
+                }
+            }
         }
 
         if periodKind == .weekly {
@@ -45,7 +50,7 @@ struct ReportSettingsView: View {
         } else {
             DSSection(
                 "月报生成提示词",
-                footer: "占位符：{{monthRange}} 月份与日期区间，{{totalHours}} 本月工时汇总，{{styleInstruction}} 风格要求，{{dailyLogs}} 本月每日日报，{{weeklyReports}} 本月已有周报参考，{{extraNotes}} 补充说明。"
+                footer: "占位符：{{monthRange}} 月份与日期区间，{{totalHours}} 本月工时汇总，{{styleInstruction}} 风格要求，{{monthlyOKR}} 本月 OKR，{{gitStats}} Git 月度统计，{{dailyLogs}} 本月每日日报，{{weeklyReports}} 本月已有周报参考，{{extraNotes}} 补充说明。"
             ) {
                 DSBlockRow {
                     TextEditor(text: s.binding(ReportKeys.monthlyPrompt))
@@ -58,6 +63,19 @@ struct ReportSettingsView: View {
                         s[ReportKeys.monthlyPrompt] = WeeklyReportGenerator.defaultMonthlyPrompt
                     }
                     .buttonStyle(.dsSecondary)
+                }
+            }
+
+            DSSection("飞书文档（lark-cli）", footer: "用于在月报页一键读取飞书子周报素材，或将生成的月报覆盖写入目标飞书文档。") {
+                DSRow("lark-cli 路径", description: "留空时自动从登录 shell PATH、nvm、Homebrew 查找。") {
+                    TextField("自动探测", text: s.binding(ReportKeys.feishuCLIPath))
+                        .textFieldStyle(.ds)
+                        .frame(width: 280)
+                }
+                DSRow("默认月报文档链接", description: "点击「写飞书」时自动填入的目标飞书云文档或知识库 URL。") {
+                    TextField("https://...feishu.cn/wiki/... 或 /docx/...", text: s.binding(ReportKeys.feishuMonthlyDocURL))
+                        .textFieldStyle(.ds)
+                        .frame(width: 320)
                 }
             }
         }

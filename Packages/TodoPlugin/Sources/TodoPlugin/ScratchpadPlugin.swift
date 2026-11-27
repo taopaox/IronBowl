@@ -69,7 +69,14 @@ public final class ScratchpadPlugin: IronBowlPlugin {
                 id: "scratchpad.notes",
                 label: "随手便签",
                 value: { "\(context.scratchpad.notes.count) 条" },
-                detail: { context.scratchpad.notes.first?.displayTitle ?? "暂存 JSON、命令与备忘" },
+                detail: {
+                    let clipCount = context.clipboard.historyItems.count
+                    let snippetCount = context.clipboard.snippetItems.count
+                    if clipCount > 0 || snippetCount > 0 {
+                        return "剪贴板 \(clipCount) 条 · 片段 \(snippetCount) 个"
+                    }
+                    return context.scratchpad.notes.first?.displayTitle ?? "暂存 JSON、命令与备忘"
+                },
                 action: { context.openPlugin(Self.pluginID) }
             ),
         ]
@@ -284,6 +291,14 @@ private struct ScratchpadSettingsView: View {
                         }
                     ))
                 }
+            }
+        }
+        DSSection("剪贴板历史与常用片段", footer: "自动忽略系统钥匙串、1Password、Bitwarden 与 Concealed/Transient 密文剪贴板类型；已固定为「常用片段」的条目不受历史条数上限裁剪。") {
+            DSRow("开启剪贴板历史监听", description: "记录日常复制的文本、JSON、链接与终端命令，重复复制自动去重并累加次数。") {
+                DSToggle(isOn: settings.binding(ClipboardKeys.historyEnabled))
+            }
+            DSRow("历史保留上限") {
+                DSStepper(intValue: settings.binding(ClipboardKeys.maxHistoryCount), in: 50...1000, step: 50) { "\($0) 条" }
             }
         }
     }

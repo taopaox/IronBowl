@@ -20,7 +20,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 
 `AppDatabase` 使用 GRDB `DatabasePool` 打开数据库，启用 `config.foreignKeysEnabled = true`，并在启动时按序执行 `coreMigrations + pluginMigrations`。
 
-### 核心迁移（`core.v1` ~ `core.v10`）
+### 核心迁移（`core.v1` ~ `core.v11`）
 
 | 迁移版本 | 表名 | 主键 | 字段 | 用途 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -38,6 +38,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `core.v8` | `todoItem` | `id` (TEXT) | `title`, `notes`, `dueDate`（索引）, `remindAt`, `remindedAt`, `priority`, `estimatedHours`, `isCompleted`（索引）, `completedAt`, `loggedDate`, `zentaoObjectType`, `zentaoObjectID`, `createdAt`, `updatedAt`（索引） | 跨工作台、万年历与禅道日报共享的待办与备忘数据 |
 | `core.v9` | `scratchpadNote` | `id` (TEXT) | `title`, `content`, `colorTag`, `isPinned`, `createdAt`, `updatedAt`（索引） | 随手便签与剪贴板暂存板内容 |
 | `core.v10` | `attendanceDailyRecord` | `date` (TEXT, `yyyy-MM-dd`) | `clockIn`, `clockOut`, `onDutyResult`, `offDutyResult`, `source`, `fetchedAt` | 每日完整上下班打卡与异常状态（自动迁入既有 `attendanceClockIn` 记录） |
+| `core.v11` | `clipboardHistory` | `id` (TEXT) | `content`, `contentHash`（索引）, `kind`, `sourceApp`, `charCount`, `copyCount`, `isSnippet`（索引）, `snippetTitle`, `copiedAt`（索引） | 剪贴板历史流与永久保留的常用片段（Snippets） |
 
 ### 禅道日志插件迁移（`LogMigrations`）
 

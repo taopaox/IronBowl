@@ -90,6 +90,7 @@ flowchart LR
 | `scheduler` | `TaskScheduler` | 注册定时任务动作、写入默认定时任务并统一调度执行 |
 | `todos` | `TodoStore` | 读写跨应用共享的待办与备忘数据并触发跨进程同步 |
 | `scratchpad` | `ScratchpadStore` | 读写随手便签与剪贴板暂存数据 |
+| `clipboard` | `ClipboardHistoryStore` | 监听剪贴板历史、过滤敏感类型与管理常用片段库 |
 | `openPlugin` | `(String) -> Void` | 跳转到指定插件主视图并激活主窗口 |
 | `openSettings` | `(String?) -> Void` | 打开设置窗口并定位到指定设置页 ID |
 

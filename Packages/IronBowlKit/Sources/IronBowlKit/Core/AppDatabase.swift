@@ -230,5 +230,19 @@ public nonisolated final class AppDatabase: Sendable {
                     """)
             }
         },
+        DatabaseMigration("core.v11") { db in
+            try db.create(table: "clipboardHistory") { t in
+                t.primaryKey("id", .text)
+                t.column("content", .text).notNull()
+                t.column("contentHash", .text).notNull().indexed()
+                t.column("kind", .text).notNull().defaults(to: "text")
+                t.column("sourceApp", .text).notNull().defaults(to: "")
+                t.column("charCount", .integer).notNull().defaults(to: 0)
+                t.column("copyCount", .integer).notNull().defaults(to: 1)
+                t.column("isSnippet", .boolean).notNull().defaults(to: false).indexed()
+                t.column("snippetTitle", .text).notNull().defaults(to: "")
+                t.column("copiedAt", .datetime).notNull().indexed()
+            }
+        },
     ]
 }

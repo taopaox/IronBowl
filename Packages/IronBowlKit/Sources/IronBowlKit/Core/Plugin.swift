@@ -279,6 +279,7 @@ public final class PluginContext {
     public let scheduler: TaskScheduler
     public let todos: TodoStore
     public let scratchpad: ScratchpadStore
+    public let clipboard: ClipboardHistoryStore
     /// 打开主窗口并切到某个插件页。
     public let openPlugin: (String) -> Void
     /// 打开设置窗口，可指定页面 id。
@@ -294,6 +295,7 @@ public final class PluginContext {
         scheduler: TaskScheduler? = nil,
         todos: TodoStore? = nil,
         scratchpad: ScratchpadStore? = nil,
+        clipboard: ClipboardHistoryStore? = nil,
         openPlugin: @escaping (String) -> Void,
         openSettings: @escaping (String?) -> Void
     ) {
@@ -313,6 +315,7 @@ public final class PluginContext {
         )
         self.todos = todos ?? TodoStore(database: database)
         self.scratchpad = scratchpad ?? ScratchpadStore(database: database)
+        self.clipboard = clipboard ?? ClipboardHistoryStore(database: database, settings: settings)
         self.openPlugin = openPlugin
         self.openSettings = openSettings
     }

@@ -136,6 +136,7 @@ final class AppModel {
             openPlugin: { [weak self] id in self?.open(plugin: id) },
             openSettings: { [weak self] page in self?.openSettings(page: page) }
         )
+        context.clipboard.startMonitoring()
         syncPlugins()
         applyDockMode()
         applyAppearance()
@@ -415,6 +416,7 @@ final class AppModel {
         workCalendar.reload()
         context.todos.reload()
         context.scratchpad.reload()
+        context.clipboard.reload()
         reminders.reloadHistory()
         scheduler.recomputeNextRuns()
         chat.loadThreads()

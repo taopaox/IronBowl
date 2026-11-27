@@ -6,7 +6,8 @@
 
 | 文件 | 核心类型 | 职责 |
 | :--- | :--- | :--- |
-| `ChatModels.swift` | `ChatThread`, `ChatMessage`, `ChatActivityItem`, `ChatCardAttachment`, `ChatPermissionMode`, `ChatOutputDetailLevel`, `ChatTokenUsage`, `ChatKeys` | 定义对话线程、消息角色与状态、活动条目、功能卡片快照与设置键 |
+| `ChatModels.swift` | `ChatThread`, `ChatMessage`, `ChatActivityItem`, `ChatCardAttachment`, `ChatPermissionMode`, `ChatOutputDetailLevel`, `ChatTokenUsage`, `ChatKeys` | 定义对话线程、消息角色与状态、活动条目、功能卡片快照与设置键（含 `chat.workbenchBridgeEnabled`） |
+| `WorkbenchBridgeCLI.swift` | `WorkbenchBridgeCLI` | 生成并维护 `~/Library/Application Support/IronBowl/bin/ironbowl-cli` 本地桥接脚本，让首页 AI 可查询与联动工作台全库数据 |
 | `AIChatStreamParser.swift` | `AIChatStreamParser`, `AIChatStreamEvent` | 将 `agy --output-format stream-json` 与 `codex exec --json` 的 NDJSON 行解析为统一事件流 |
 | `AIChatRunner.swift` | `AIChatRunner` | 组装首次/续聊命令行参数并通过 `Shell.streamLines` 在指定工作目录流式执行 |
 | `ChatStore.swift` | `ChatStore` | 管理对话列表、当前选中对话、后台并行任务、中止/重试及 GRDB 持久化 |
@@ -33,3 +34,9 @@
 
 - [`IronBowlPlugin`](../../Packages/IronBowlKit/Sources/IronBowlKit/Core/Plugin.swift) 新增 `canHandleChatIntent(_:)`、`handleChatIntent(_:onProgress:)` 与 `makeInteractiveChatCard(for:)`（均提供默认空实现）。
 - 首页「今天」在对话模式下发送消息时，优先匹配已启用插件的业务指令（如「生成今日日报」「生成本周周报」「生成本月月报」），并通过 `ChatStore.runPluginIntentTurn` 在当前对话内实时推送活动进度、写入 `ChatPluginExecutionResult` 并渲染可编辑/重生成/提交的交互卡片；未命中或涉及代码/排错提问时交给 `AIChatRunner`（`agy` / `codex`）。
+
+## 本地工作台工具桥接（`WorkbenchBridgeCLI`）
+
+- 当 `ChatKeys.workbenchBridgeEnabled`（`chat.workbenchBridgeEnabled`，默认 `true`）开启时，`ChatStore.sendMessage` 会在首次发起会话前调用 `WorkbenchBridgeCLI.ensureInstalled()` 安装 `~/Library/Application Support/IronBowl/bin/ironbowl-cli`，并通过 `<ironbowl_workbench>` 精简说明将脚本路径、共享 SQLite 路径及当前权限注入首轮上下文（不污染展示给用户的对话消息气泡）。
+- AI 可通过 `ironbowl-cli` 执行只读查询（`status`、`todos`、`logs`、`reports`、`notes`、`snippets`、`attendance`、`search`）与写入联动（`todo-add`、`todo-done`、`note-add`、`draft-add`、`overtime-set`）；当对话切换为 `.readOnly` 只读沙箱时会自动附带 `--read-only` 拦截一切写入。
+- 每轮对话结束后通过 `ChatStore.onTurnCompleted` 自动重载 `WorkCalendar`、`TodoStore`、`ScratchpadStore`、`ClipboardHistoryStore` 并发送禅道外部草稿变更通知，确保自然语言操作结果即时同步到界面。

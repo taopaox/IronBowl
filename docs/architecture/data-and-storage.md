@@ -15,6 +15,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `~/Library/Application Support/IronBowl/ai-logos/` | AI 目录插件上传/抓取的本地 PNG Logo 与远程图标缓存（`AILogoStore`） |
 | `~/Library/Application Support/IronBowl/user-avatars/` | 用户自定义左下角头像/Logo 归一化 PNG 文件（`AppPaths.userAvatarsDirectory`、`UserProfileStore`） |
 | `~/Library/Application Support/IronBowl/backups/` | 一键恢复备份前自动留存的安全库快照 `pre-restore-*.sqlite`（保留最近 5 份，`DataBackupService`） |
+| `~/Library/Application Support/IronBowl/bin/ironbowl-cli` | 首页 AI 对话工作台本地 CLI 工具桥接脚本（`WorkbenchBridgeCLI`） |
 
 ## 数据库与迁移（`AppDatabase`）
 
@@ -94,7 +95,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `WorkCalendar` | `holiday.source` / `holiday.frequency` | `.holidayCNjsDelivr` / `.yearly` | 节假日数据源与更新频率 |
 | `WorkCalendar` | `holiday.lastFetch` | `nil` | 上次成功拉取节假日的时间 |
 | `AIProviderStore` | `ai.providers` / `ai.default` | `[agy, codex]` / `.agy` | AI CLI 配置与默认提供者 |
-| `ChatKeys` | `chat.defaultWorkspace` / `chat.detailLevel` / `chat.sidebarCollapsed` / `chat.lastThreadID` / `chat.lastModelByProvider` | `""` / `.all` / `false` / `nil` / `[:]` | 首页对话默认工作目录、输出详略级别、对话栏折叠、上次选中对话 ID 及各提供商记忆模型 |
+| `ChatKeys` | `chat.defaultWorkspace` / `chat.detailLevel` / `chat.sidebarCollapsed` / `chat.lastThreadID` / `chat.lastModelByProvider` / `chat.workbenchBridgeEnabled` | `""` / `.all` / `false` / `nil` / `[:]` / `true` | 首页对话默认工作目录、输出详略级别、对话栏折叠、上次选中对话 ID、记忆模型及工作台 `ironbowl-cli` 直连开关 |
 | `WebKeys` | `web.tombstone.enabled` | `true` | 是否开启后台网页墓碑休眠 |
 | `WebKeys` | `web.tombstone.idleMinutes` | `15` | 后台闲置休眠分钟数（0 表示不按时长） |
 | `WebKeys` | `web.tombstone.maxLiveCount` | `4` | 最多同时保活网页数（0 表示不限） |

@@ -150,6 +150,17 @@ final class AppModel {
         syncPlugins()
         commandPalette = CommandPaletteController(app: self)
         commandPalette.syncShortcut()
+        chat.onTurnCompleted = { [weak self] in
+            guard let self else { return }
+            self.workCalendar.reload()
+            self.context.todos.reload()
+            self.context.scratchpad.reload()
+            self.context.clipboard.reload()
+            NotificationCenter.default.post(
+                name: ZentaoLogPlugin.externalDraftAddedNotification,
+                object: WorkCalendar.dayString(Date())
+            )
+        }
         applyDockMode()
         applyAppearance()
         DS.fontScale = settings[AppKeys.fontScale]
@@ -181,6 +192,7 @@ final class AppModel {
         }
         clock?.tolerance = 5
         Task {
+            _ = try? WorkbenchBridgeCLI.ensureInstalled()
             await providers.autodetectMissingPaths()
             await providers.loadAllModels()
             await workCalendar.updateIfNeeded()

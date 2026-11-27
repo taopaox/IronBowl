@@ -282,6 +282,30 @@ struct HomeView: View {
             .fixedSize()
             .help(activePermissionMode.detail)
 
+            Button {
+                app.chat.workbenchBridgeEnabled.toggle()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "puzzlepiece.extension")
+                        .font(DS.font(11))
+                    Text("工作台直连")
+                        .font(DS.font(12, .medium))
+                }
+                .foregroundStyle(app.chat.workbenchBridgeEnabled ? DS.brand : DS.textTertiary)
+                .padding(.horizontal, 8)
+                .frame(height: DS.s(26))
+                .background(
+                    app.chat.workbenchBridgeEnabled ? DS.brand.opacity(0.12) : DS.well,
+                    in: .rect(cornerRadius: 7)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7)
+                        .strokeBorder(app.chat.workbenchBridgeEnabled ? DS.brand.opacity(0.35) : DS.border)
+                }
+            }
+            .buttonStyle(.plain)
+            .help("开启后 AI 可通过本地 ironbowl-cli 直接查询与联动待办、禅道日报草稿、周报月报、便签与考勤数据")
+
             Spacer(minLength: 8)
 
             DSPicker(
@@ -715,6 +739,9 @@ struct HomeView: View {
         }
         if app.enabledPlugins.contains(where: { $0.id == "report.monthly" }) {
             items.append(("生成本月月报（对话卡片）", "doc.richtext", "生成本月月报"))
+        }
+        if app.chat.workbenchBridgeEnabled {
+            items.append(("盘点今日待办与工时", "sparkles.rectangle.stack", "帮我查看今天的考勤打卡、待办事项和禅道日报状态，并给出接下来的工作建议"))
         }
         return items
     }

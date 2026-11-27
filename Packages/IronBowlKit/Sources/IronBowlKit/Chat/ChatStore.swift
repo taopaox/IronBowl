@@ -15,6 +15,7 @@ public final class ChatStore {
     public var runningThreadIDs: Set<String> = []
 
     @ObservationIgnored private var activeRuns: [String: ActiveRun] = [:]
+    @ObservationIgnored public var onTurnCompleted: (() -> Void)?
 
     public init(database: AppDatabase, settings: SettingsStore, providers: AIProviderStore) {
         self.database = database
@@ -33,6 +34,11 @@ public final class ChatStore {
     public var sidebarCollapsed: Bool {
         get { settings[ChatKeys.sidebarCollapsed] }
         set { settings[ChatKeys.sidebarCollapsed] = newValue }
+    }
+
+    public var workbenchBridgeEnabled: Bool {
+        get { settings[ChatKeys.workbenchBridgeEnabled] }
+        set { settings[ChatKeys.workbenchBridgeEnabled] = newValue }
     }
 
     public var defaultWorkspacePath: String {
@@ -392,11 +398,21 @@ public final class ChatStore {
         guard !runningThreadIDs.contains(thread.id) else { return }
 
         let priorMessages = messagesByThread[thread.id] ?? []
+        var workbenchPreamble: String?
+        if workbenchBridgeEnabled, thread.remoteSessionID == nil,
+           let cliURL = try? WorkbenchBridgeCLI.ensureInstalled() {
+            workbenchPreamble = WorkbenchBridgeCLI.promptPreamble(
+                cliPath: cliURL.path,
+                databasePath: database.path,
+                permissionMode: permissionMode
+            )
+        }
         let promptToSend = Self.composePrompt(
             userText: text,
             attachedCards: attachedCards,
             priorMessages: priorMessages,
-            hasRemoteSession: thread.remoteSessionID != nil
+            hasRemoteSession: thread.remoteSessionID != nil,
+            workbenchPreamble: workbenchPreamble
         )
 
         let userMessage = ChatMessage(
@@ -647,6 +663,7 @@ public final class ChatStore {
             sortThreads()
             persistThread(updated)
         }
+        onTurnCompleted?()
     }
 
     private func markCancelled(threadID: String, messageID: String) {
@@ -753,6 +770,7 @@ public final class ChatStore {
             sortThreads()
             persistThread(updated)
         }
+        onTurnCompleted?()
     }
 
     // MARK: - 内部辅助
@@ -817,9 +835,14 @@ public final class ChatStore {
         userText: String,
         attachedCards: [ChatCardAttachment],
         priorMessages: [ChatMessage],
-        hasRemoteSession: Bool
+        hasRemoteSession: Bool,
+        workbenchPreamble: String? = nil
     ) -> String {
         var sections: [String] = []
+
+        if !hasRemoteSession, let workbenchPreamble, !workbenchPreamble.isEmpty {
+            sections.append(workbenchPreamble)
+        }
 
         if !hasRemoteSession {
             let history = priorMessages

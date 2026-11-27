@@ -47,3 +47,39 @@ func localZentaoEfforts() async throws {
         #expect(!taskEstimates.isEmpty)
     }
 }
+
+@Test func parsesGitPorcelainBranchStatus() throws {
+    let clean = GitScanner.parsePorcelainBranchStatus(repoPath: "/work/clean", output: "## main...origin/main\n")
+    let cleanStatus = try #require(clean)
+    #expect(cleanStatus.branch == "main")
+    #expect(cleanStatus.hasUpstream)
+    #expect(cleanStatus.uncommittedCount == 0)
+    #expect(cleanStatus.unpushedCount == 0)
+    #expect(!cleanStatus.needsAttention)
+
+    let dirtyAndAhead = GitScanner.parsePorcelainBranchStatus(
+        repoPath: "/work/app",
+        output: """
+        ## feat/login...origin/feat/login [ahead 2, behind 1]
+         M Sources/App.swift
+        ?? Sources/NewFile.swift
+        """
+    )
+    let dirtyStatus = try #require(dirtyAndAhead)
+    #expect(dirtyStatus.branch == "feat/login")
+    #expect(dirtyStatus.hasUpstream)
+    #expect(dirtyStatus.uncommittedCount == 2)
+    #expect(dirtyStatus.unpushedCount == 2)
+    #expect(dirtyStatus.needsAttention)
+
+    let noUpstream = GitScanner.parsePorcelainBranchStatus(
+        repoPath: "/work/local-only",
+        output: "## dev\n M README.md\n"
+    )
+    let localStatus = try #require(noUpstream)
+    #expect(localStatus.branch == "dev")
+    #expect(!localStatus.hasUpstream)
+    #expect(localStatus.uncommittedCount == 1)
+    #expect(localStatus.unpushedCount == 0)
+    #expect(localStatus.needsAttention)
+}

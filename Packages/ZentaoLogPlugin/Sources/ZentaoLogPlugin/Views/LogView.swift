@@ -87,7 +87,12 @@ struct LogView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("\(model.dateString) 共 \(hoursText(model.pendingDrafts.reduce(0) { $0 + $1.hours })) 小时，将逐条写入禅道任务工时并回查确认。")
+            let base = "\(model.dateString) 共 \(hoursText(model.pendingDrafts.reduce(0) { $0 + $1.hours })) 小时，将逐条写入禅道任务工时并回查确认。"
+            if model.dirtyRepoStatuses.isEmpty {
+                Text(base)
+            } else {
+                Text(base + "\n\n⚠️ 注意：检测到 \(model.dirtyRepoStatuses.map(\.repoName).joined(separator: "、")) 仍有未提交或未 Push 的本地改动。")
+            }
         }
     }
 
@@ -212,6 +217,11 @@ struct LogView: View {
         let dayTodos = model.todosForCurrentDate()
         if !dayTodos.isEmpty {
             JournalTodoCard(model: model, items: dayTodos, palette: p)
+        }
+
+        // 3.8 下班前未提交 / 未推送巡检
+        if !model.dirtyRepoStatuses.isEmpty {
+            JournalGitInspectionCard(statuses: model.dirtyRepoStatuses, palette: p)
         }
 
         // 4. Git 提交小票
@@ -707,6 +717,64 @@ private struct JournalTodoCard: View {
                             .padding(.vertical, 2)
                             .background(palette.stampRed.opacity(0.10), in: .rect(cornerRadius: 5))
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 下班前 Git 仓库未提交/未推送巡检卡
+
+private struct JournalGitInspectionCard: View {
+    let statuses: [RepoWorkspaceStatus]
+    let palette: JournalPalette
+
+    var body: some View {
+        JournalPaperCard(palette: palette, accent: palette.stampAmber, padding: 11) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(DS.font(12, .bold))
+                        .foregroundStyle(palette.stampAmber)
+                    Text("下班前巡检：\(statuses.count) 个仓库有未落盘代码")
+                        .font(DS.font(12.5, .bold))
+                        .foregroundStyle(palette.ink)
+                    Spacer()
+                }
+
+                ForEach(statuses) { status in
+                    HStack(spacing: 6) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 5) {
+                                Text(status.repoName)
+                                    .font(DS.font(12, .semibold))
+                                    .foregroundStyle(palette.ink)
+                                Text(status.branch)
+                                    .font(DS.font(10.5))
+                                    .foregroundStyle(palette.inkTertiary)
+                            }
+                            HStack(spacing: 5) {
+                                if status.uncommittedCount > 0 {
+                                    Tag("未提交 \(status.uncommittedCount) 处", color: palette.stampAmber)
+                                }
+                                if status.unpushedCount > 0 {
+                                    Tag("未 Push \(status.unpushedCount) 个提交", color: palette.stampRed)
+                                }
+                            }
+                        }
+
+                        Spacer(minLength: 4)
+
+                        Button {
+                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: status.repoPath)])
+                        } label: {
+                            Image(systemName: "folder")
+                                .font(DS.font(11.5))
+                                .foregroundStyle(palette.inkSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("在访达中定位仓库：\(status.repoPath)")
                     }
                 }
             }

@@ -34,6 +34,8 @@ final class LogModel {
     // 当前日期与数据
     var date: Date = Calendar.current.startOfDay(for: Date())
     var activities: [RepoActivity] = []
+    var repoStatuses: [RepoWorkspaceStatus] = []
+    var dirtyRepoStatuses: [RepoWorkspaceStatus] { repoStatuses.filter(\.needsAttention) }
     var tasks: [ZentaoTask] = []
     var drafts: [DraftEntry] = [] {
         didSet {
@@ -279,7 +281,12 @@ final class LogModel {
         isScanning = true
         defer { isScanning = false }
         let targetDate = date
-        guard let acts = await scanActivities(for: targetDate) else { return }
+        let activeRepos = activeReposList()
+        async let actsTask = scanActivities(for: targetDate, repos: activeRepos)
+        async let statusTask = GitScanner.workspaceStatus(repos: activeRepos)
+        let (acts, statuses) = await (actsTask, statusTask)
+        repoStatuses = statuses
+        guard let acts else { return }
         if Calendar.current.isDate(date, inSameDayAs: targetDate) {
             activities = acts
             lastScan = Date()
@@ -289,24 +296,31 @@ final class LogModel {
         }
     }
 
-    private func scanActivities(for day: Date) async -> [RepoActivity]? {
+    private func activeReposList() -> [String] {
+        let excluded = Set(mappings.values.filter(\.excluded).map(\.repoPath))
+        return repos().filter { !excluded.contains($0) }
+    }
+
+    private func scanActivities(for day: Date, repos: [String]? = nil) async -> [RepoActivity]? {
         let email = await authorEmail()
         guard !email.isEmpty else {
             errorMessage = "没有提交作者邮箱，请在设置里填写"
             return nil
         }
-        let excluded = Set(mappings.values.filter(\.excluded).map(\.repoPath))
-        let repos = repos().filter { !excluded.contains($0) }
-        return await GitScanner.activity(repos: repos, authorEmail: email, day: day)
+        let targetRepos = repos ?? activeReposList()
+        return await GitScanner.activity(repos: targetRepos, authorEmail: email, day: day)
     }
 
-    /// 只为菜单栏统计今天的提交数。
+    /// 只为菜单栏统计今天的提交数，并刷新本地工作区巡检状态。
     func scanTodayCount() async {
+        let activeRepos = activeReposList()
+        async let statusTask = GitScanner.workspaceStatus(repos: activeRepos)
         let email = await authorEmail()
-        guard !email.isEmpty else { return }
-        let excluded = Set(mappings.values.filter(\.excluded).map(\.repoPath))
-        let acts = await GitScanner.activity(repos: repos().filter { !excluded.contains($0) }, authorEmail: email, day: Date())
-        todayCommitCount = acts.reduce(0) { $0 + $1.commits.count }
+        if !email.isEmpty {
+            let acts = await GitScanner.activity(repos: activeRepos, authorEmail: email, day: Date())
+            todayCommitCount = acts.reduce(0) { $0 + $1.commits.count }
+        }
+        repoStatuses = await statusTask
     }
 
     func loadTasks() async {

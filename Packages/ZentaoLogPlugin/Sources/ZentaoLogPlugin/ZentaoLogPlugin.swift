@@ -420,6 +420,10 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
             MenuBarItem(id: "zentao.nextReminder", title: "离下次提醒还有多久") {
                 scheduler.nextReminder().map { "距提醒 " + countdown(to: $0) }
             },
+            MenuBarItem(id: "zentao.gitDirty", title: "未提交/未推送仓库数") {
+                let dirtyCount = model.dirtyRepoStatuses.count
+                return dirtyCount > 0 ? "待推 \(dirtyCount)库" : nil
+            },
         ]
     }
 }

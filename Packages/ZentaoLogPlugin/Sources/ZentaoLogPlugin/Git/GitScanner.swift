@@ -27,6 +27,18 @@ public nonisolated struct RepoActivity: Sendable, Identifiable, Hashable {
     public var weight: Double { Double(commits.count) + log2(1 + Double(lines)) }
 }
 
+/// 本地仓库的未提交改动与未推送提交状态。
+public nonisolated struct RepoWorkspaceStatus: Sendable, Identifiable, Hashable, Codable {
+    public let repoPath: String
+    public let branch: String
+    public let uncommittedCount: Int
+    public let unpushedCount: Int
+    public let hasUpstream: Bool
+    public var id: String { repoPath }
+    public var repoName: String { (repoPath as NSString).lastPathComponent }
+    public var needsAttention: Bool { uncommittedCount > 0 || unpushedCount > 0 }
+}
+
 public nonisolated enum GitScanner {
     static let git = "/usr/bin/git"
 
@@ -119,6 +131,58 @@ public nonisolated enum GitScanner {
         guard let r = try? await Shell.run(git, ["config", "--global", "user.email"], timeout: 10), r.status == 0 else { return nil }
         let s = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return s.isEmpty ? nil : s
+    }
+
+    /// 并发扫描本地仓库的未提交改动与未推送提交状态。
+    @concurrent
+    public static func workspaceStatus(repos: [String]) async -> [RepoWorkspaceStatus] {
+        await withTaskGroup(of: RepoWorkspaceStatus?.self) { group in
+            for repo in repos {
+                group.addTask {
+                    let args = ["-C", repo, "status", "--porcelain=v1", "-b"]
+                    guard let r = try? await Shell.run(git, args, timeout: 15), r.status == 0 else { return nil }
+                    return parsePorcelainBranchStatus(repoPath: repo, output: r.stdout)
+                }
+            }
+            var statuses: [RepoWorkspaceStatus] = []
+            for await status in group {
+                if let status { statuses.append(status) }
+            }
+            return statuses.sorted { $0.repoName.localizedStandardCompare($1.repoName) == .orderedAscending }
+        }
+    }
+
+    public static func parsePorcelainBranchStatus(repoPath: String, output: String) -> RepoWorkspaceStatus? {
+        let lines = output
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+        guard let header = lines.first, header.hasPrefix("## ") else { return nil }
+        let body = String(header.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+        var branch = body
+        var hasUpstream = false
+        var unpushedCount = 0
+
+        if body.hasPrefix("No commits yet on ") {
+            branch = String(body.dropFirst("No commits yet on ".count))
+        } else if let dotsRange = body.range(of: "...") {
+            hasUpstream = true
+            branch = String(body[..<dotsRange.lowerBound])
+            let rest = String(body[dotsRange.upperBound...])
+            if let match = rest.firstMatch(of: /\bahead\s+(\d+)/), let count = Int(match.1) {
+                unpushedCount = count
+            }
+        } else if let bracketRange = body.range(of: " [") {
+            branch = String(body[..<bracketRange.lowerBound])
+        }
+
+        let uncommittedCount = lines.dropFirst().filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+        return RepoWorkspaceStatus(
+            repoPath: repoPath,
+            branch: branch,
+            uncommittedCount: uncommittedCount,
+            unpushedCount: unpushedCount,
+            hasUpstream: hasUpstream
+        )
     }
 
     static func parseLog(_ text: String) -> [GitCommit] {

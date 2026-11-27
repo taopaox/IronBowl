@@ -36,6 +36,8 @@ packages:
     path: Packages/ReportPlugin
   TodoPlugin:
     path: Packages/TodoPlugin
+  WorkspacePlugin:
+    path: Packages/WorkspacePlugin
 targets:
   IronBowl:
     type: application
@@ -53,6 +55,7 @@ targets:
       - package: SchedulerPlugin
       - package: ReportPlugin
       - package: TodoPlugin
+      - package: WorkspacePlugin
     info:
       path: Apps/IronBowl/Info.plist
       properties:

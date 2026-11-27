@@ -25,6 +25,7 @@ flowchart LR
     IronBowl --> SchedulerPlugin["Packages/SchedulerPlugin<br/>(定时任务)"]
     IronBowl --> ReportPlugin["Packages/ReportPlugin<br/>(周报月报)"]
     IronBowl --> TodoPlugin["Packages/TodoPlugin<br/>(待办备忘)"]
+    IronBowl --> WorkspacePlugin["Packages/WorkspacePlugin<br/>(代码仓库)"]
 
     CalendarApp["Apps/Calendar<br/>(独立版万年历)"] --> IronBowlKit
     CalendarApp --> CalendarPlugin
@@ -38,6 +39,8 @@ flowchart LR
     ReportPlugin --> ZentaoLogPlugin
     TodoPlugin --> IronBowlKit
     TodoPlugin --> ZentaoLogPlugin
+    WorkspacePlugin --> IronBowlKit
+    WorkspacePlugin --> ZentaoLogPlugin
 ```
 
 ## 目录职责划分
@@ -93,6 +96,7 @@ flowchart LR
 | `clipboard` | `ClipboardHistoryStore` | 监听剪贴板历史、过滤敏感类型与管理常用片段库 |
 | `openPlugin` | `(String) -> Void` | 跳转到指定插件主视图并激活主窗口 |
 | `openSettings` | `(String?) -> Void` | 打开设置窗口并定位到指定设置页 ID |
+| `openChatInWorkspace` | `(String) -> Void` | 切到首页「今天」并绑定指定仓库目录发起对话 |
 
 ### 运行时注册与占位插件
 
@@ -108,5 +112,6 @@ flowchart LR
 9. `AnnualReviewPlugin`（`report.annual`，季度/年报）
 10. `TodoPlugin`（`todo`，待办）
 11. `ScratchpadPlugin`（`scratchpad`，随手便签）
+12. `WorkspacePlugin`（`workspace`，代码仓库）
 
 当应用版本升级引入新插件 ID 时，`AppModel` 会比对 `app.knownPlugins` 与 `app.enabledPlugins`，自动将新增插件加入已启用列表，避免老用户升级后看不到新插件。

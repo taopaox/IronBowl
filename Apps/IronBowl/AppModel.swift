@@ -8,6 +8,7 @@ import ReportPlugin
 import SchedulerPlugin
 import SwiftUI
 import TodoPlugin
+import WorkspacePlugin
 import ZentaoLogPlugin
 
 enum DockMode: String, Codable, Sendable, CaseIterable, Identifiable {
@@ -82,6 +83,7 @@ final class AppModel {
             AnnualReviewPlugin(),
             TodoPlugin(),
             ScratchpadPlugin(),
+            WorkspacePlugin(),
         ]
         self.plugins = plugins
         defer { AppModel.shared = self }
@@ -134,7 +136,8 @@ final class AppModel {
             workCalendar: workCalendar, providers: providers, webSessions: webSessions,
             scheduler: scheduler,
             openPlugin: { [weak self] id in self?.open(plugin: id) },
-            openSettings: { [weak self] page in self?.openSettings(page: page) }
+            openSettings: { [weak self] page in self?.openSettings(page: page) },
+            openChatInWorkspace: { [weak self] path in self?.openChat(inWorkspace: path) }
         )
         context.clipboard.startMonitoring()
         syncPlugins()
@@ -219,6 +222,20 @@ final class AppModel {
         select(id)
         openMainWindow?()
         NSApp.activate()
+    }
+
+    func openChat(inWorkspace path: String) {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        chat.defaultWorkspacePath = trimmed
+        if let thread = chat.selectedThread, (chat.messagesByThread[thread.id] ?? []).isEmpty {
+            chat.updateThread(thread.id, workspacePath: trimmed)
+        } else {
+            let folderName = URL(fileURLWithPath: trimmed).lastPathComponent
+            let title = folderName.isEmpty ? "工作区对话" : "\(folderName) 对话"
+            _ = chat.createThread(title: title, workspacePath: trimmed)
+        }
+        open(plugin: Self.homeID)
     }
 
     func closeWebSession(id: String) {

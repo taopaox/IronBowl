@@ -284,6 +284,8 @@ public final class PluginContext {
     public let openPlugin: (String) -> Void
     /// 打开设置窗口，可指定页面 id。
     public let openSettings: (String?) -> Void
+    /// 切换到首页「今天」并绑定指定工作目录发起对话。
+    public let openChatInWorkspace: (String) -> Void
 
     public init(
         database: AppDatabase,
@@ -297,7 +299,8 @@ public final class PluginContext {
         scratchpad: ScratchpadStore? = nil,
         clipboard: ClipboardHistoryStore? = nil,
         openPlugin: @escaping (String) -> Void,
-        openSettings: @escaping (String?) -> Void
+        openSettings: @escaping (String?) -> Void,
+        openChatInWorkspace: @escaping (String) -> Void = { _ in }
     ) {
         self.database = database
         self.settings = settings
@@ -318,6 +321,7 @@ public final class PluginContext {
         self.clipboard = clipboard ?? ClipboardHistoryStore(database: database, settings: settings)
         self.openPlugin = openPlugin
         self.openSettings = openSettings
+        self.openChatInWorkspace = openChatInWorkspace
     }
 }
 

@@ -63,4 +63,5 @@ docs/
 - **共享数据库**：`~/Library/Application Support/IronBowl/ironbowl.sqlite`
 - **应用日志目录**：`~/Library/Application Support/IronBowl/logs/`（含禅道接口调试日志 `zentao.log`、Tita 接口调试日志 `tita.log`）
 - **AI 图标目录**：`~/Library/Application Support/IronBowl/ai-logos/`
+- **个人头像目录**：`~/Library/Application Support/IronBowl/user-avatars/`
 - **默认 Debug 构建产物**：`build/DerivedData/Build/Products/Debug/IronBowl.app` 与 `IronBowlCalendar.app`

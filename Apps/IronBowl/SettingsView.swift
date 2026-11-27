@@ -110,9 +110,58 @@ struct SettingsView: View {
 
 struct GeneralSettings: View {
     @Bindable var app: AppModel
+    @State private var avatarError: String?
 
     var body: some View {
         let s = app.settings
+        let profile = app.userProfile
+        DSSection("个人资料", footer: "显示在主窗口左下角；也可以直接点击左下角头像或姓名快速编辑。") {
+            DSRow("头像 / Logo", description: profile.hasCustomAvatar ? "已使用自定义图片" : "默认使用应用图标") {
+                HStack(spacing: 8) {
+                    UserProfileAvatarView(image: profile.avatarImage, size: DS.s(30))
+                    Button("选择图片…") {
+                        guard let url = UserProfileAvatarPicker.pickLocalImageURL() else { return }
+                        do {
+                            try profile.saveAvatar(from: url)
+                            avatarError = nil
+                        } catch {
+                            avatarError = error.localizedDescription
+                        }
+                    }
+                    .buttonStyle(.dsSecondary)
+                    if profile.hasCustomAvatar {
+                        Button("恢复默认") {
+                            profile.clearAvatar()
+                            avatarError = nil
+                        }
+                        .buttonStyle(.dsGhost)
+                    }
+                }
+            }
+            if let avatarError {
+                DSBlockRow {
+                    DSBanner(.danger, avatarError)
+                }
+            }
+            DSRow("显示姓名", description: "留空时默认使用系统用户名（\(profile.fallbackDisplayName)）。") {
+                TextField(
+                    "",
+                    text: Binding(get: { profile.displayName }, set: { profile.displayName = $0 }),
+                    prompt: Text(profile.fallbackDisplayName)
+                )
+                .textFieldStyle(.ds)
+                .frame(width: DS.s(240))
+            }
+            DSRow("个人标语", description: "显示在左下角姓名下方，留空时不显示。") {
+                TextField(
+                    "",
+                    text: Binding(get: { profile.slogan }, set: { profile.slogan = $0 }),
+                    prompt: Text("写一句个人签名或标语")
+                )
+                .textFieldStyle(.ds)
+                .frame(width: DS.s(240))
+            }
+        }
         DSSection("启动与显示") {
             DSLaunchAtLoginRow(controller: app.launchAtLogin, appName: "饭碗")
             DSRow("程序坞图标", description: "饭碗平时只在菜单栏，这里决定要不要在程序坞里出现。") {

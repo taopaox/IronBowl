@@ -26,6 +26,12 @@ public nonisolated enum AppPaths {
         return dir
     }
 
+    public nonisolated static var userAvatarsDirectory: URL {
+        let dir = supportDirectory.appending(path: "user-avatars", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     public nonisolated static var databaseURL: URL {
         supportDirectory.appending(path: "ironbowl.sqlite")
     }

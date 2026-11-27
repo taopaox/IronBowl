@@ -47,6 +47,7 @@ final class AppModel {
     nonisolated(unsafe) static weak var shared: AppModel?
     let database: AppDatabase
     let settings: SettingsStore
+    let userProfile: UserProfileStore
     let reminders: ReminderCenter
     let workCalendar: WorkCalendar
     let providers: AIProviderStore
@@ -87,6 +88,7 @@ final class AppModel {
         }
         reminders = ReminderCenter(database: database)
         settings = SettingsStore(database: database)
+        userProfile = UserProfileStore(settings: settings)
         if let existingEnabled = settings[AppKeys.enabledPlugins] {
             let known = Set(settings[AppKeys.knownPlugins])
             var nextEnabled = Set(existingEnabled)
@@ -138,6 +140,7 @@ final class AppModel {
             guard let self else { return }
             self.applyAppearance()
             DS.fontScale = self.settings[AppKeys.fontScale]
+            self.userProfile.reloadAvatar()
             self.calendarModel?.syncExternalChanges()
             self.scheduler.recomputeNextRuns()
         }

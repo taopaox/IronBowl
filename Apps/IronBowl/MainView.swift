@@ -86,6 +86,8 @@ struct Sidebar: View {
     @AppStorage("sidebarCollapsedDirs") private var collapsedDirsRaw = ""
     @State private var renamingItem: SidebarPinnedItem?
     @State private var renameText = ""
+    @State private var editingProfile = false
+    @State private var hoveringProfile = false
 
     private var collapsedDirs: Set<String> {
         Set(collapsedDirsRaw.split(separator: ",").map(String.init))
@@ -177,24 +179,55 @@ struct Sidebar: View {
             ResourceCard(app: app, isVisible: isVisible).padding(.horizontal, 10).padding(.bottom, 8)
             TodayCard(app: app).padding(.horizontal, 10).padding(.bottom, 8)
 
-            HStack(spacing: 6) {
-                Image("AppLogo")
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: DS.s(18), height: DS.s(18))
-                Text(NSFullUserName().isEmpty ? "我" : NSFullUserName()).font(DS.font(13.5))
-                    .lineLimit(1)
-                Spacer()
+            let slogan = app.userProfile.effectiveSlogan
+            let hasSlogan = slogan != nil
+            HStack(spacing: 4) {
+                Button {
+                    editingProfile = true
+                } label: {
+                    HStack(spacing: 8) {
+                        UserProfileAvatarView(
+                            image: app.userProfile.avatarImage,
+                            size: hasSlogan ? DS.s(28) : DS.s(22)
+                        )
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(app.userProfile.effectiveDisplayName)
+                                .font(DS.font(13.5, .medium))
+                                .foregroundStyle(DS.text)
+                                .lineLimit(1)
+                            if let slogan {
+                                Text(slogan)
+                                    .font(DS.font(11))
+                                    .foregroundStyle(DS.textSecondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 5)
+                    .background(hoveringProfile ? DS.hover : .clear, in: .rect(cornerRadius: DS.controlRadius))
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .onHover { hoveringProfile = $0 }
+                .help(profileHelpText(name: app.userProfile.effectiveDisplayName, slogan: slogan))
+
                 Button { openWindow(id: "settings") } label: { Image(systemName: "gearshape") }
                     .buttonStyle(.dsGhost)
                     .help("设置")
             }
-            .padding(.horizontal, 14)
-            .frame(height: 44)
+            .padding(.horizontal, 8)
+            .padding(.vertical, hasSlogan ? 6 : 4)
+            .frame(minHeight: hasSlogan ? DS.s(52) : DS.s(44))
             .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
         }
         .background(DS.sidebar)
+        .sheet(isPresented: $editingProfile) {
+            UserProfileEditorSheet(profile: app.userProfile) {
+                editingProfile = false
+            }
+        }
         .sheet(item: $renamingItem) { item in
             VStack(alignment: .leading, spacing: 14) {
                 Text("重命名固定网页").font(DS.sectionTitle)
@@ -221,6 +254,13 @@ struct Sidebar: View {
             .frame(width: DS.s(320))
             .background(DS.card)
         }
+    }
+
+    private func profileHelpText(name: String, slogan: String?) -> String {
+        if let slogan {
+            return "\(name)\n\(slogan)\n点击编辑个人资料"
+        }
+        return "\(name)\n点击编辑个人资料"
     }
 
     @ViewBuilder

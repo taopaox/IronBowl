@@ -13,6 +13,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `~/Library/Application Support/IronBowl/logs/` | 日志目录（`AppPaths.logsDirectory`） |
 | `~/Library/Application Support/IronBowl/logs/zentao.log` | 禅道 HTTP 请求/响应调试日志（不含密码，超过 2MB 自动清空轮转） |
 | `~/Library/Application Support/IronBowl/ai-logos/` | AI 目录插件上传/抓取的本地 PNG Logo 与远程图标缓存（`AILogoStore`） |
+| `~/Library/Application Support/IronBowl/user-avatars/` | 用户自定义左下角头像/Logo 归一化 PNG 文件（`AppPaths.userAvatarsDirectory`、`UserProfileStore`） |
 
 ## 数据库与迁移（`AppDatabase`）
 
@@ -79,6 +80,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `AppKeys` | `app.menuBarItems` | `["zentao.status"]` | 菜单栏图标后拼接显示的条目及顺序 |
 | `AppKeys` | `app.dockMode` | `.whenWindowOpen` | 程序坞图标策略（`always` / `whenWindowOpen` / `never`） |
 | `AppKeys` | `app.lastPlugin` | `"home"` | 上次停留在主窗口的页面 ID |
+| `UserProfileKeys` | `user.displayName` / `user.slogan` / `user.avatarFilename` | `""` / `""` / `nil` | 左下角自定义显示姓名、个人标语与自定义头像 PNG 文件名 |
 | `WorkCalendar` | `work.weekdays` | `[2,3,4,5,6]` | 每周工作日（周一至周五） |
 | `WorkCalendar` | `work.start` / `work.end` | `"09:00"` / `"18:00"` | 上下班时间 |
 | `WorkCalendar` | `work.lunchMinutes` | `60` | 午休分钟数 |

@@ -3,6 +3,7 @@ import IronBowlKit
 
 public enum FeishuKeys {
     public static let homeURL = SettingKey<String>("feishu.homeURL", default: FeishuURL.defaultHomeURL)
+    public static let homeNeverSuspend = SettingKey<Bool>("feishu.homeNeverSuspend", default: false)
     public static let pinnedPages = SettingKey<[FeishuPinnedPage]>("feishu.pinnedPages", default: [])
     public static let lastPageID = SettingKey<String>("feishu.lastPageID", default: FeishuModel.homePageID)
 }

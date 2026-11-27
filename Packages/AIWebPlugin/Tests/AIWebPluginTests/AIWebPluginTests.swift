@@ -188,6 +188,37 @@ import Testing
     #expect(model.app(withID: secondID) != nil)
 }
 
+@MainActor @Test func manualSuspendVisibleAppAndReSelectWakesIt() async throws {
+    let dbURL = FileManager.default.temporaryDirectory.appending(path: "ib-aiweb-suspend-\(UUID().uuidString).sqlite")
+    let logoDir = FileManager.default.temporaryDirectory.appending(path: "ib-aiweb-suspend-logos-\(UUID().uuidString)")
+    defer {
+        try? FileManager.default.removeItem(at: dbURL)
+        try? FileManager.default.removeItem(at: logoDir)
+    }
+
+    let db = try AppDatabase(url: dbURL, migrations: [])
+    let settings = SettingsStore(database: db)
+    let web = WebSessionManager(settings: settings, startTimer: false, headlessForTesting: true)
+    let model = AIWebModel(settings: settings, webSessions: web, logoStore: AILogoStore(baseDirectory: logoDir))
+
+    let geminiID = "preset.gemini"
+    model.selectApp(geminiID)
+    let session = try #require(model.activeSession)
+    let token = UUID()
+    web.attachDisplay(sessionID: session.id, token: token)
+    #expect(session.state == .active)
+
+    // 可见态点击立即休眠后进入墓碑并延后自动唤醒
+    await model.suspendApp(id: geminiID)
+    #expect(session.state == .tombstoned)
+    #expect(session.deferAutoWake == true)
+
+    // 主动再次点击侧栏该 AI 项时立即唤醒
+    model.selectApp(geminiID)
+    #expect(session.state == .active)
+    #expect(session.deferAutoWake == false)
+}
+
 @Test func legacyAIWebAppDecodesWithoutOptionalFields() throws {
     let json = #"{"id":"a1","name":"Custom","url":"https://example.com"}"#
     let decoded = try JSONDecoder().decode(AIWebApp.self, from: Data(json.utf8))

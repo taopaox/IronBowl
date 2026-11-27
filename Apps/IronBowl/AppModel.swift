@@ -31,12 +31,61 @@ enum DockMode: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
+/// 菜单栏独立 Logo 左键点击行为。
+nonisolated enum MenuBarLogoAction: String, Codable, Sendable, CaseIterable, Identifiable {
+    case toggleHome
+    case openMainWindow
+    case showMainWindow
+    case unreadOrHome
+    case openReminders
+    case commandPalette
+    case openMenuPanel
+
+    var id: String { rawValue }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        if raw == "openHome" {
+            self = .showMainWindow
+            return
+        }
+        self = Self(rawValue: raw) ?? .toggleHome
+    }
+
+    var displayName: String {
+        switch self {
+        case .toggleHome: "打开 / 收起首页"
+        case .openMainWindow: "打开 / 收起主窗口"
+        case .showMainWindow: "仅打开主窗口"
+        case .unreadOrHome: "有未读看提醒，无未读进首页"
+        case .openReminders: "打开消息提醒"
+        case .commandPalette: "打开命令面板与搜索"
+        case .openMenuPanel: "弹出快捷面板"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .toggleHome: "左键秒开首页「今天」，已在前台首页时再点一次收起；右键弹出快捷面板。"
+        case .openMainWindow: "左键打开主窗口并保留上次页面，已在前台时再点一次收起；右键弹出快捷面板。"
+        case .showMainWindow: "左键直接打开并前置主窗口并保留当前页面状态，再次点击不会收起窗口；右键弹出快捷面板。"
+        case .unreadOrHome: "有未读消息时直接跳转「消息提醒」，无未读时打开或收起首页；右键弹出快捷面板。"
+        case .openReminders: "左键直接打开「消息提醒」中心；右键弹出快捷面板。"
+        case .commandPalette: "左键呼出全局命令面板与全文搜索（同 ⌃⌥⌘K）；右键弹出快捷面板。"
+        case .openMenuPanel: "左键弹出原状态栏快捷面板；右键直接打开 / 收起首页。"
+        }
+    }
+}
+
 enum AppKeys {
     static let appearance = AppSharedKeys.appearance
     static let fontScale = AppSharedKeys.fontScale
     static let enabledPlugins = SettingKey<[String]?>("app.enabledPlugins", default: nil)
     static let knownPlugins = SettingKey<[String]>("app.knownPlugins", default: [])
     static let menuBarItems = SettingKey<[String]>("app.menuBarItems", default: ["zentao.status"])
+    static let menuBarLogoClickAction = SettingKey<MenuBarLogoAction>("app.menuBar.logoClickAction", default: .toggleHome)
+    static let menuBarLogoShowUnreadBadge = SettingKey<Bool>("app.menuBar.logoShowUnreadBadge", default: true)
     static let dockMode = SettingKey<DockMode>("app.dockMode", default: .whenWindowOpen)
     static let lastPlugin = SettingKey<String>("app.lastPlugin", default: AppModel.homeID)
     static let commandPaletteShortcut = SettingKey<Bool>("app.commandPalette.globalShortcut", default: true)
@@ -76,6 +125,8 @@ final class AppModel {
     @ObservationIgnored private var clock: Timer?
     @ObservationIgnored private var backgroundTrimTask: Task<Void, Never>?
     @ObservationIgnored var openMainWindow: (() -> Void)?
+    @ObservationIgnored var hideMainWindow: (() -> Void)?
+    @ObservationIgnored var isMainWindowFrontmost: (() -> Bool)?
     @ObservationIgnored private var started = Set<String>()
 
     init() {
@@ -140,6 +191,9 @@ final class AppModel {
             webSessions?.activeWebProcessDescriptors() ?? []
         }
         selection = settings[AppKeys.lastPlugin]
+        if selection == FeishuPlugin.pluginID || selection == AIWebPlugin.pluginID {
+            webSessions.armColdLaunchDeferral()
+        }
         context = PluginContext(
             database: database, settings: settings, reminders: reminders,
             workCalendar: workCalendar, providers: providers, webSessions: webSessions,
@@ -243,6 +297,7 @@ final class AppModel {
     func plugin(_ id: String?) -> IronBowlPlugin? { plugins.first { $0.id == id } }
 
     func select(_ id: String) {
+        webSessions.cancelColdLaunchDeferral()
         guard selection != id else { return }
         selection = id
         settings.setDeferred(id, for: AppKeys.lastPlugin)
@@ -250,8 +305,65 @@ final class AppModel {
 
     func open(plugin id: String) {
         select(id)
+        showMainWindow()
+    }
+
+    func showMainWindow() {
         openMainWindow?()
-        NSApp.activate()
+    }
+
+    func toggleMainWindow(targetPluginID: String? = nil) {
+        let isFrontmost = isMainWindowFrontmost?() ?? false
+        if isFrontmost {
+            if let targetPluginID, selection != targetPluginID {
+                select(targetPluginID)
+                showMainWindow()
+            } else {
+                hideMainWindow?()
+            }
+        } else {
+            if let targetPluginID {
+                select(targetPluginID)
+            }
+            showMainWindow()
+        }
+    }
+
+    var menuBarLogoClickAction: MenuBarLogoAction {
+        get { settings[AppKeys.menuBarLogoClickAction] }
+        set { settings[AppKeys.menuBarLogoClickAction] = newValue }
+    }
+
+    var menuBarLogoShowUnreadBadge: Bool {
+        get { settings[AppKeys.menuBarLogoShowUnreadBadge] }
+        set { settings[AppKeys.menuBarLogoShowUnreadBadge] = newValue }
+    }
+
+    func performMenuBarLogoAction(_ action: MenuBarLogoAction, togglePopover: () -> Void) {
+        switch action {
+        case .toggleHome:
+            toggleMainWindow(targetPluginID: Self.homeID)
+        case .openMainWindow:
+            toggleMainWindow(targetPluginID: nil)
+        case .showMainWindow:
+            showMainWindow()
+        case .unreadOrHome:
+            if reminders.unreadCount > 0 {
+                open(plugin: Self.remindersID)
+            } else {
+                toggleMainWindow(targetPluginID: Self.homeID)
+            }
+        case .openReminders:
+            if (isMainWindowFrontmost?() ?? false) && selection == Self.remindersID {
+                hideMainWindow?()
+            } else {
+                open(plugin: Self.remindersID)
+            }
+        case .commandPalette:
+            commandPalette.toggle()
+        case .openMenuPanel:
+            togglePopover()
+        }
     }
 
     func openChat(inWorkspace path: String) {
@@ -313,7 +425,6 @@ final class AppModel {
     func openSettings(page: String? = nil) {
         if let page { settingsSelection = page }
         openSettingsWindow?()
-        NSApp.activate()
     }
 
     // MARK: 菜单栏
@@ -443,15 +554,21 @@ final class AppModel {
         case .never: regular = false
         case .whenWindowOpen: regular = isMainWindowOpen
         }
-        NSApp?.setActivationPolicy(regular ? .regular : .accessory)
+        let targetPolicy: NSApplication.ActivationPolicy = regular ? .regular : .accessory
+        if NSApp?.activationPolicy() != targetPolicy {
+            NSApp?.setActivationPolicy(targetPolicy)
+        }
     }
 
     func mainWindow(isOpen: Bool) {
+        let changed = (isMainWindowOpen != isOpen)
         isMainWindowOpen = isOpen
         backgroundTrimTask?.cancel()
         backgroundTrimTask = nil
+        if changed {
+            webSessions.setHostWindowOpen(isOpen)
+        }
         if !isOpen {
-            webSessions.detachAllDisplays()
             backgroundTrimTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(180))
                 guard let self, !Task.isCancelled, !self.isMainWindowOpen else { return }
@@ -459,13 +576,13 @@ final class AppModel {
             }
         }
         applyDockMode()
-        if isOpen { NSApp.activate() }
     }
 
     // MARK: 数据恢复后全量重载
 
     func reloadAllStoresAfterRestore() {
         settings.reload()
+        webSessions.setHostWindowOpen(isMainWindowOpen)
         applyAppearance()
         DS.fontScale = settings[AppKeys.fontScale]
         userProfile.reloadAvatar()

@@ -57,6 +57,21 @@ public final class FeishuModel {
         }
     }
 
+    public var homeNeverSuspend: Bool {
+        get { settings[FeishuKeys.homeNeverSuspend] }
+        set {
+            settings[FeishuKeys.homeNeverSuspend] = newValue
+            webSessions.setNeverSuspend(newValue, for: Self.homePageID)
+        }
+    }
+
+    public func isNeverSuspend(pageID: String) -> Bool {
+        if pageID == Self.homePageID {
+            return homeNeverSuspend
+        }
+        return pinnedPages.first { $0.id == pageID }?.neverSuspend ?? false
+    }
+
     public var pinnedPages: [FeishuPinnedPage] {
         get { settings[FeishuKeys.pinnedPages] }
         set { settings[FeishuKeys.pinnedPages] = newValue }
@@ -80,7 +95,7 @@ public final class FeishuModel {
             id: pageID,
             initialURL: targetURL,
             blockedSchemes: Self.blockedSchemes,
-            neverSuspend: pin?.neverSuspend ?? false,
+            neverSuspend: isNeverSuspend(pageID: pageID),
             displayName: pin?.title ?? "飞书知识库"
         )
     }
@@ -98,6 +113,7 @@ public final class FeishuModel {
     }
 
     public func selectHome() {
+        webSessions.allowAutoWake(id: Self.homePageID)
         guard activePageID != Self.homePageID else { return }
         activePageID = Self.homePageID
         settings[FeishuKeys.lastPageID] = Self.homePageID
@@ -108,6 +124,7 @@ public final class FeishuModel {
             selectHome()
             return
         }
+        webSessions.allowAutoWake(id: id)
         guard activePageID != id else { return }
         activePageID = id
         settings[FeishuKeys.lastPageID] = id
@@ -212,11 +229,20 @@ public final class FeishuModel {
     }
 
     public func setNeverSuspend(_ value: Bool, id: String) {
-        updatePin(id: id, title: "", neverSuspend: value)
+        if id == Self.homePageID {
+            homeNeverSuspend = value
+        } else {
+            updatePin(id: id, title: "", neverSuspend: value)
+        }
     }
 
     public func suspendPage(id: String) async {
         await webSessions.suspend(id: id, force: true)
+    }
+
+    public func suspendActivePage() async {
+        guard let id = activePageID else { return }
+        await suspendPage(id: id)
     }
 
     public func movePin(id: String, delta: Int) {

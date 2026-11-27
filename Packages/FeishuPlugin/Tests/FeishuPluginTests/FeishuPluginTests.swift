@@ -115,3 +115,38 @@ import Testing
     #expect(decoded.title == "旧文档")
     #expect(decoded.neverSuspend == false)
 }
+
+@MainActor @Test func homeNeverSuspendAndManualSuspendBehavior() async throws {
+    let dbURL = FileManager.default.temporaryDirectory.appending(path: "ib-feishu-home-suspend-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: dbURL) }
+
+    let db = try AppDatabase(url: dbURL, migrations: [])
+    let settings = SettingsStore(database: db)
+    let web = WebSessionManager(settings: settings, startTimer: false, headlessForTesting: true)
+    web.armColdLaunchDeferral()
+
+    let model = FeishuModel(settings: settings, webSessions: web)
+    #expect(model.homeNeverSuspend == false)
+
+    // 1. 冷启动默认进入墓碑待唤醒态，被动 attachDisplay 不自动加载
+    let homeSession = try #require(model.activeSession)
+    #expect(homeSession.state == .tombstoned)
+    let token = UUID()
+    web.attachDisplay(sessionID: FeishuModel.homePageID, token: token)
+    #expect(homeSession.state == .tombstoned)
+
+    // 2. 主动点击侧栏主页入口后立即唤醒
+    model.selectHome()
+    #expect(homeSession.state == .active)
+
+    // 3. 切换主页免休眠会同步写入设置与当前会话
+    model.setNeverSuspend(true, id: FeishuModel.homePageID)
+    #expect(model.homeNeverSuspend == true)
+    #expect(model.isNeverSuspend(pageID: FeishuModel.homePageID) == true)
+    #expect(homeSession.neverSuspend == true)
+
+    // 4. 在可见态点立即休眠，即使免休眠也会强制进入墓碑且不自动唤醒
+    await model.suspendActivePage()
+    #expect(homeSession.state == .tombstoned)
+    #expect(homeSession.deferAutoWake == true)
+}

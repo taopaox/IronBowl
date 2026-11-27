@@ -39,8 +39,23 @@ public final class FeishuPlugin: IronBowlPlugin {
         model?.isSuspended(pageID: FeishuModel.homePageID) ?? false
     }
 
+    public var isSidebarWebNeverSuspend: Bool {
+        model?.isNeverSuspend(pageID: FeishuModel.homePageID) ?? false
+    }
+
     public func onSidebarCloseWeb() {
         model?.closePage(id: FeishuModel.homePageID)
+    }
+
+    public func onSidebarSuspendWeb() {
+        guard let model else { return }
+        Task { await model.suspendPage(id: FeishuModel.homePageID) }
+    }
+
+    public func onSidebarToggleNeverSuspend() {
+        guard let model else { return }
+        let current = model.isNeverSuspend(pageID: FeishuModel.homePageID)
+        model.setNeverSuspend(!current, id: FeishuModel.homePageID)
     }
 
     public func closeWebSession(id: String) -> Bool {

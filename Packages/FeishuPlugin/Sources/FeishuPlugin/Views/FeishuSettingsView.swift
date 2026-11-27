@@ -32,6 +32,9 @@ struct FeishuSettingsView: View {
                     .buttonStyle(.dsGhost)
                 }
             }
+            DSRow("主页免休眠", description: "开启后切走或关闭主窗口时，飞书主页不会自动释放内存。") {
+                DSToggle(isOn: Binding(get: { model.homeNeverSuspend }, set: { model.homeNeverSuspend = $0 }))
+            }
         }
         .onAppear { homeURLInput = model.homeURL }
 

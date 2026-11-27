@@ -289,6 +289,16 @@ struct AIWebMainView: View {
                     .frame(width: 1, height: DS.s(16))
 
                 Button {
+                    Task { await model.suspendApp(id: app.id) }
+                } label: {
+                    Image(systemName: "moon.zzz")
+                }
+                .buttonStyle(.dsGhost)
+                .disabled(session.isTombstoned)
+                .help(session.isTombstoned ? "当前页面已处于休眠状态" : "立即休眠释放内存")
+                .accessibilityLabel("立即休眠")
+
+                Button {
                     model.closeApp(id: app.id)
                 } label: {
                     Image(systemName: "xmark")

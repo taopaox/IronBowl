@@ -112,3 +112,64 @@ import Testing
     }
     #expect(hasOrangeIconPixel)
 }
+
+@MainActor @Test func menuBarCardRendererSupportsIconlessDashboardMode() throws {
+    let icon = NSImage(size: NSSize(width: 40, height: 40), flipped: false) { rect in
+        NSColor.systemOrange.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7).fill()
+        return true
+    }
+    let segments: [MenuBarCardSegment] = [
+        .stacked(top: "距下班 · 64%", bottom: "3小时16分", topTone: .amber),
+        .inline(text: "●", tone: .rose),
+    ]
+    let withIcon = MenuBarCardRenderer.renderImage(segments: segments, iconImage: icon, showIcon: true, isDark: true, scale: 2)
+    let withoutIcon = MenuBarCardRenderer.renderImage(segments: segments, iconImage: icon, showIcon: false, isDark: true, scale: 2)
+
+    #expect(!withoutIcon.isTemplate)
+    #expect(withoutIcon.size.height == MenuBarCardRenderer.barHeight)
+    #expect(withoutIcon.size.width < withIcon.size.width)
+
+    let emptyWithoutIcon = MenuBarCardRenderer.renderImage(segments: [], iconImage: icon, showIcon: false, isDark: true, scale: 2)
+    #expect(emptyWithoutIcon.size.height == MenuBarCardRenderer.barHeight)
+    #expect(emptyWithoutIcon.size.width == 1)
+}
+
+@MainActor @Test func menuBarCardRendererDrawsLogoWithUnreadBadge() throws {
+    let icon = NSImage(size: NSSize(width: 40, height: 40), flipped: false) { rect in
+        NSColor.systemBlue.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7).fill()
+        return true
+    }
+
+    let zeroBadge = MenuBarCardRenderer.renderLogoBadgeImage(iconImage: icon, unreadCount: 0, isDark: true, scale: 2)
+    let smallBadge = MenuBarCardRenderer.renderLogoBadgeImage(iconImage: icon, unreadCount: 5, isDark: true, scale: 2)
+    let overflowBadge = MenuBarCardRenderer.renderLogoBadgeImage(iconImage: icon, unreadCount: 120, isDark: false, scale: 2)
+
+    #expect(!zeroBadge.isTemplate)
+    #expect(!smallBadge.isTemplate)
+    #expect(!overflowBadge.isTemplate)
+    #expect(zeroBadge.size.height == MenuBarCardRenderer.barHeight)
+    #expect(smallBadge.size.height == MenuBarCardRenderer.barHeight)
+    #expect(overflowBadge.size.height == MenuBarCardRenderer.barHeight)
+    #expect(smallBadge.size.width >= zeroBadge.size.width)
+    #expect(overflowBadge.size.width > smallBadge.size.width)
+
+    let zeroRep = try #require(zeroBadge.representations.first as? NSBitmapImageRep)
+    let smallRep = try #require(smallBadge.representations.first as? NSBitmapImageRep)
+
+    func containsRedBadgePixel(in rep: NSBitmapImageRep) -> Bool {
+        for y in 0..<rep.pixelsHigh {
+            for x in (rep.pixelsWide / 2)..<rep.pixelsWide {
+                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), color.alphaComponent > 0.7 else { continue }
+                if color.redComponent > 0.8, color.greenComponent < 0.4, color.blueComponent < 0.4 {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    #expect(!containsRedBadgePixel(in: zeroRep))
+    #expect(containsRedBadgePixel(in: smallRep))
+}

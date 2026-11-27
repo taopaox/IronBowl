@@ -85,7 +85,9 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `AppKeys` | `app.fontScale` | `1.0` | 全局字体缩放档位（`0.9...1.4`） |
 | `AppKeys` | `app.enabledPlugins` | `nil` | 已启用插件 ID 列表（`nil` 表示全启用） |
 | `AppKeys` | `app.knownPlugins` | `[]` | 已知插件 ID 列表（用于升级自动发现新插件） |
-| `AppKeys` | `app.menuBarItems` | `["zentao.status"]` | 菜单栏图标后拼接显示的条目及顺序 |
+| `AppKeys` | `app.menuBarItems` | `["zentao.status"]` | 菜单栏右侧信息仪表卡拼接显示的条目及顺序 |
+| `AppKeys` | `app.menuBar.logoClickAction` | `.toggleHome` | 菜单栏独立 Logo 左键点击行为（`toggleHome` / `openMainWindow` / `showMainWindow` / `unreadOrHome` / `openReminders` / `commandPalette` / `openMenuPanel`） |
+| `AppKeys` | `app.menuBar.logoShowUnreadBadge` | `true` | 是否在菜单栏独立 Logo 右下角显示未读提醒数字角标 |
 | `AppKeys` | `app.dockMode` | `.whenWindowOpen` | 程序坞图标策略（`always` / `whenWindowOpen` / `never`） |
 | `AppKeys` | `app.lastPlugin` | `"home"` | 上次停留在主窗口的页面 ID |
 | `AppKeys` | `app.commandPalette.globalShortcut` | `true` | 启用全局 `⌃⌥⌘K` 命令面板与全文搜索快捷键 |
@@ -98,14 +100,15 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `AIProviderStore` | `ai.providers` / `ai.default` | `[agy, codex]` / `.agy` | AI CLI 配置与默认提供者 |
 | `ChatKeys` | `chat.defaultWorkspace` / `chat.detailLevel` / `chat.sidebarCollapsed` / `chat.lastThreadID` / `chat.lastModelByProvider` / `chat.workbenchBridgeEnabled` | `""` / `.all` / `false` / `nil` / `[:]` / `true` | 首页对话默认工作目录、输出详略级别、对话栏折叠、上次选中对话 ID、记忆模型及工作台 `ironbowl-cli` 直连开关 |
 | `WebKeys` | `web.tombstone.enabled` | `true` | 是否开启后台网页墓碑休眠 |
-| `WebKeys` | `web.tombstone.idleMinutes` | `15` | 后台闲置休眠分钟数（0 表示不按时长） |
-| `WebKeys` | `web.tombstone.maxLiveCount` | `4` | 最多同时保活网页数（0 表示不限） |
+| `WebKeys` | `web.tombstone.idleMinutes` | `5` | 后台闲置休眠分钟数（0 表示不按时长） |
+| `WebKeys` | `web.tombstone.windowCloseSeconds` | `60` | 主窗口关闭后快速休眠秒数（0 表示跟随后台闲置时长） |
+| `WebKeys` | `web.tombstone.maxLiveCount` | `2` | 最多同时保活网页数（0 表示不限） |
 | `SchedulerKeys` | `scheduler.seededIDs` | `[]` | 已初始化写入过的内置定时任务 ID 列表（防用户删除后重建） |
 | `LogKeys` | `zentao.*` / `git.*` / `scan.*` / `log.*` / `reminder.*` / `zentao.watch.*` | 见 [禅道日志文档](../plugins/zentao-log.md) | 禅道账号、Git 扫描、AI 提示词、工时提醒与新指派 Bug/任务巡检配置 |
 | `LogKeys.quickLogShortcut` | `log.quickLogShortcut` | `true` | 启用日报插件的全局快捷记日志组合键 ⌃⌥⌘L |
 | `ReportKeys` | `report.*` | 见 [周报月报文档](../plugins/report.md) | 周报/月报提示词、风格、草稿与工时开关及上次周期模式 |
 | `CalendarKeys` | `calendar.*` / `weather.*` / `calendar.events.*` | 见 [万年历文档](../plugins/calendar.md) | 周起始日、天气源、城市、菜单栏日历、弹层样式及系统/钉钉日程同步开关 |
-| `FeishuKeys` | `feishu.*` | 见 [飞书文档](../plugins/feishu.md) | 飞书主页、固定网页列表与上次打开页 |
+| `FeishuKeys` | `feishu.homeURL` / `feishu.homeNeverSuspend` / `feishu.pinnedPages` / `feishu.lastPageID` | 见 [飞书文档](../plugins/feishu.md) | 飞书主页、主页免休眠开关、固定网页列表与上次打开页 |
 | `AIWebKeys` | `aiweb.apps` / `aiweb.activeAppID` | `nil` / `nil` | AI 目录应用列表与当前选中 AI |
 | `ClipboardKeys` | `clipboard.enabled` / `clipboard.maxCount` | `true` / `200` | 剪贴板历史监听开关与非片段历史保留条数上限 |
 | `WorkspaceKeys` | `workspace.*` | 见 [代码仓库文档](../plugins/workspace.md) | 默认外部编辑器/终端、收藏置顶仓库与额外纳管仓库路径 |

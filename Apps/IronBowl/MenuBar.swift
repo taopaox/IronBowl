@@ -1,29 +1,178 @@
 import AppKit
 import IronBowlKit
+import Observation
 import SwiftUI
 
-/// 菜单栏上的双行微缩仪表卡。
-struct MenuBarLabel: View {
+/// 菜单栏独立 Logo 状态栏项：右下角显示未读提醒数，支持自定义左键点击动作与右键快捷面板。
+@MainActor
+final class LogoStatusItemController: NSObject, NSPopoverDelegate {
     private static let cachedMenuBarIcon: NSImage? = NSImage(named: "MenuBarIcon")
 
+    private let app: AppModel
+    private var statusItem: NSStatusItem?
+    private var popover: NSPopover?
+    private var appearanceObservation: NSKeyValueObservation?
+    private var isStopped = false
+
+    init(app: AppModel) {
+        self.app = app
+        super.init()
+    }
+
+    func start() {
+        guard statusItem == nil else { return }
+        isStopped = false
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.autosaveName = "IronBowlLogoStatusItem"
+        if let button = item.button {
+            button.target = self
+            button.action = #selector(handleClick(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            button.imagePosition = .imageOnly
+            appearanceObservation = button.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+                Task { @MainActor [weak self] in
+                    self?.renderButton()
+                }
+            }
+        }
+        statusItem = item
+        observeAndRender()
+    }
+
+    func stop() {
+        isStopped = true
+        closePopover()
+        appearanceObservation?.invalidate()
+        appearanceObservation = nil
+        if let statusItem {
+            NSStatusBar.system.removeStatusItem(statusItem)
+            self.statusItem = nil
+        }
+    }
+
+    private func observeAndRender() {
+        guard !isStopped else { return }
+        withObservationTracking {
+            _ = app.reminders.unreadCount
+            _ = app.menuBarLogoShowUnreadBadge
+            _ = app.menuBarLogoClickAction
+            _ = app.appearance
+            renderButton()
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.observeAndRender()
+            }
+        }
+    }
+
+    private func renderButton() {
+        guard let button = statusItem?.button else { return }
+        let isDark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let unread = app.reminders.unreadCount
+        let badgeCount = app.menuBarLogoShowUnreadBadge ? unread : 0
+        button.image = MenuBarCardRenderer.renderLogoBadgeImage(
+            iconImage: Self.cachedMenuBarIcon,
+            unreadCount: badgeCount,
+            isDark: isDark
+        )
+        let primary = app.menuBarLogoClickAction
+        let secondaryTitle = primary == .openMenuPanel ? "打开 / 收起首页" : "打开快捷面板"
+        let unreadLine = unread > 0 ? "未读提醒 \(unread) 条\n" : ""
+        button.toolTip = "\(AppBrand.name)\n\(unreadLine)左键：\(primary.displayName)\n右键 / ⌥+左键：\(secondaryTitle)"
+    }
+
+    @objc private func handleClick(_ sender: NSStatusBarButton) {
+        let event = NSApp.currentEvent
+        let isRightOrOption = event?.type == .rightMouseUp
+            || (event?.type == .leftMouseUp && event?.modifierFlags.contains(.control) == true)
+            || event?.modifierFlags.contains(.option) == true
+
+        MenuBarPopoverController.dismiss()
+
+        let primary = app.menuBarLogoClickAction
+        if isRightOrOption {
+            if primary == .openMenuPanel {
+                closePopover()
+                app.performMenuBarLogoAction(.toggleHome, togglePopover: {})
+            } else {
+                togglePopover()
+            }
+            return
+        }
+
+        if primary == .openMenuPanel {
+            togglePopover()
+        } else {
+            closePopover()
+            app.performMenuBarLogoAction(primary) { [weak self] in
+                self?.togglePopover()
+            }
+        }
+    }
+
+    func togglePopover() {
+        if let popover, popover.isShown {
+            closePopover()
+            return
+        }
+        guard let button = statusItem?.button else { return }
+        let popover = ensurePopover()
+        popover.appearance = NSApp.appearance
+        NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
+    func closePopover() {
+        if let popover, popover.isShown {
+            popover.performClose(nil)
+        }
+        clearButtonHighlight()
+    }
+
+    private func ensurePopover() -> NSPopover {
+        if let popover { return popover }
+        let p = NSPopover()
+        p.behavior = .transient
+        p.animates = true
+        p.delegate = self
+        let panelView = MenuPanel(app: app)
+            .environment(\.dismissMenuBarPopover, MenuBarPopoverDismissAction { [weak self] in
+                self?.closePopover()
+            })
+        let hosting = NSHostingController(rootView: panelView)
+        hosting.sizingOptions = [.preferredContentSize]
+        p.contentViewController = hosting
+        popover = p
+        return p
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        clearButtonHighlight()
+    }
+
+    private func clearButtonHighlight() {
+        guard let button = statusItem?.button else { return }
+        if button.isHighlighted {
+            button.highlight(false)
+        }
+        if button.state != .off {
+            button.state = .off
+        }
+    }
+}
+
+/// 菜单栏右侧的双行微缩仪表卡（不绘制重复 Logo）。
+struct MenuBarLabel: View {
     let app: AppModel
-    @Environment(\.openWindow) private var openWindow
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         // 注意：这里不能用 TimelineView，会让状态栏按钮不停重绘。时间刷新靠 AppModel.now 的定时器。
         Image(nsImage: MenuBarCardRenderer.renderImage(
             segments: app.menuBarCardSegments,
-            iconImage: Self.cachedMenuBarIcon,
+            showIcon: false,
             isDark: colorScheme == .dark
         ))
-            .onAppear {
-                // 菜单栏标签启动时就会渲染，这里拿到 openWindow 给全局用，并确保 NSApp 就绪后应用外观和 Dock 策略。
-                app.openMainWindow = { openWindow(id: "main") }
-                app.openSettingsWindow = { openWindow(id: "settings") }
-                app.applyDockMode()
-                app.applyAppearance()
-            }
     }
 }
 

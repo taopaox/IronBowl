@@ -594,7 +594,8 @@ private struct PopoverYearDropdown: View {
                 proxy.scrollTo(model.year, anchor: .center)
             }
         }
-        .frame(width: DS.s(108), height: DS.s(204))
+        .frame(width: DS.s(128), height: DS.s(204))
+        .clipShape(.rect(cornerRadius: DS.radius))
         .background(palette.dropdownBackground, in: .rect(cornerRadius: DS.radius))
         .overlay {
             RoundedRectangle(cornerRadius: DS.radius)
@@ -777,13 +778,15 @@ private struct PopoverDropdownRow<Leading: View>: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                leading
-                Text(verbatim: title)
-                    .font(DS.font(12.5, selected ? .semibold : .regular))
-                    .foregroundStyle(selected ? palette.dropdownSelectedText : palette.dropdownText)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
+            HStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    leading
+                    Text(verbatim: title)
+                        .font(DS.font(12.5, selected ? .semibold : .regular))
+                        .foregroundStyle(selected ? palette.dropdownSelectedText : palette.dropdownText)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 6)
                 if selected {
                     Image(systemName: "checkmark")
                         .font(DS.font(11, .semibold))

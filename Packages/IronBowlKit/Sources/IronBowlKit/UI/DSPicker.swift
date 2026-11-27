@@ -334,14 +334,18 @@ private final class DSPickerPopupController {
         let hasSubtitles = options.contains { ($0.subtitle?.isEmpty == false) }
         let titleFont = NSFont.systemFont(ofSize: 14 * DS.fontScale, weight: .semibold)
         let subtitleFont = NSFont.systemFont(ofSize: 12.5 * DS.fontScale, weight: .regular)
+        let scrollerReserve: CGFloat = NSScroller.preferredScrollerStyle == .legacy
+            ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+            : 0
+        let titleOverhead = (hasSubtitles ? 24 : 20) + 12 + 8 + ceil(16 * DS.fontScale) + 6 + scrollerReserve
 
         var maxMeasured: CGFloat = 0
         for option in options {
             let titleWidth = (option.title as NSString).size(withAttributes: [.font: titleFont]).width
-            maxMeasured = max(maxMeasured, titleWidth + 68)
+            maxMeasured = max(maxMeasured, titleWidth + titleOverhead)
             if let subtitle = option.subtitle, !subtitle.isEmpty {
                 let subWidth = (subtitle as NSString).size(withAttributes: [.font: subtitleFont]).width
-                maxMeasured = max(maxMeasured, subWidth + 36)
+                maxMeasured = max(maxMeasured, subWidth + 36 + scrollerReserve)
             }
         }
 
@@ -505,7 +509,7 @@ private struct DSPickerMenuRow<Value: Hashable>: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: hasSubtitle ? .top : .center, spacing: 12) {
+            HStack(alignment: hasSubtitle ? .top : .center, spacing: 0) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(verbatim: option.title)
                         .font(DS.font(14, isSelected ? .semibold : .regular))

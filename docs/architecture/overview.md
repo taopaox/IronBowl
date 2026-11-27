@@ -51,7 +51,7 @@ flowchart LR
 | :--- | :--- | :--- |
 | `Apps/IronBowl` | macOS App (`com.taopaox.ironbowl`) | 组装全部插件，提供主窗口、首页、设置窗口、菜单栏面板与 Dock/开机自启控制 |
 | `Apps/Calendar` | macOS App (`com.taopaox.ironbowl.calendar`) | 只依赖 `IronBowlKit` + `CalendarPlugin`，提供轻量独立菜单栏万年历与开机自启设置，与主应用共享同一数据库 |
-| `Packages/IronBowlKit` | Swift Package | 提供插件协议、数据库、强类型设置、开机自启控制器（`LaunchAtLoginController`）、工作日历、AI 执行器、网页墓碑、定时任务调度器（`TaskScheduler`）、系统资源监控（`SystemMonitor`）、提醒中心与 `DS*` 设计系统 |
+| `Packages/IronBowlKit` | Swift Package | 提供插件协议、数据库、强类型设置、开机自启控制器（`LaunchAtLoginController`）、工作日历、AI 执行器、网页墓碑、定时任务调度器（`TaskScheduler`）、系统资源监控（`SystemMonitor`）、跨模块全文检索（`WorkspaceSearchEngine`）、提醒中心与 `DS*` 设计系统 |
 | `Packages/ZentaoLogPlugin` | Swift Package | Git 仓库扫描、AI 工作日志与加班拆条生成、禅道 JSON 接口客户端、工时提醒与定时自动提交动作 |
 | `Packages/CalendarPlugin` | Swift Package | 公历/农历/24 节气/节日历法、Open-Meteo 与和风天气、月历主视图与 5 套配色弹层 |
 | `Packages/FeishuPlugin` | Swift Package | 内嵌飞书网页浏览、上传下载、自定义主页与固定网页到主窗口侧边栏 |
@@ -78,7 +78,7 @@ flowchart LR
   - `menuBarItems`：暴露给菜单栏和「设置 → 通用 → 菜单栏显示」的可选信息项。
   - `sidebarPinnedItems`：显示在主窗口侧边栏「固定网页」分区（支持重命名、排序、休眠与右键菜单）。
   - `sidebarChildren`：配合 `isSidebarDirectory == true` 在侧栏插件项下方缩进展示可折叠子项。
-  - `quickActions` / `homeCards` / `handleHomeInput(_:)`：注入首页「今天」的快捷标签、概览卡片与一句话输入处理链。
+  - `quickActions` / `homeCards` / `paletteCommands` / `handleHomeInput(_:)`：注入首页「今天」的快捷标签、概览卡片、全局 `⌘K` 命令面板子命令（如飞书固定页、AI 目录站点、本地仓库快捷启动）与一句话输入处理链。
 
 ### `PluginContext` 共享服务
 

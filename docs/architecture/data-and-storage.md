@@ -86,6 +86,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `AppKeys` | `app.menuBarItems` | `["zentao.status"]` | 菜单栏图标后拼接显示的条目及顺序 |
 | `AppKeys` | `app.dockMode` | `.whenWindowOpen` | 程序坞图标策略（`always` / `whenWindowOpen` / `never`） |
 | `AppKeys` | `app.lastPlugin` | `"home"` | 上次停留在主窗口的页面 ID |
+| `AppKeys` | `app.commandPalette.globalShortcut` | `true` | 启用全局 `⌃⌥⌘K` 命令面板与全文搜索快捷键 |
 | `UserProfileKeys` | `user.displayName` / `user.slogan` / `user.avatarFilename` | `""` / `""` / `nil` | 左下角自定义显示姓名、个人标语与自定义头像 PNG 文件名 |
 | `WorkCalendar` | `work.weekdays` | `[2,3,4,5,6]` | 每周工作日（周一至周五） |
 | `WorkCalendar` | `work.start` / `work.end` | `"09:00"` / `"18:00"` | 上下班时间 |

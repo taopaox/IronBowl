@@ -50,6 +50,8 @@ public protocol IronBowlPlugin: AnyObject {
     var homeCards: [HomeCard] { get }
     /// 首页输入框的内容交给插件处理；处理了返回给用户看的结果，不处理返回 nil。
     func handleHomeInput(_ text: String) async -> String?
+    /// 供全局 ⌘K 命令面板展示的插件直达子命令。
+    var paletteCommands: [PaletteCommand] { get }
     /// 判断首页「今天」AI 对话是否应交由本插件按工作台业务规则处理。
     func canHandleChatIntent(_ text: String) -> Bool
     /// 按工作台业务规则处理首页对话意图，并通过 `onProgress` 实时上报执行步骤。
@@ -82,6 +84,7 @@ public extension IronBowlPlugin {
     var quickActions: [QuickAction] { [] }
     var homeCards: [HomeCard] { [] }
     func handleHomeInput(_ text: String) async -> String? { nil }
+    var paletteCommands: [PaletteCommand] { [] }
     func canHandleChatIntent(_ text: String) -> Bool { false }
     func handleChatIntent(
         _ text: String,
@@ -247,6 +250,35 @@ public struct QuickAction: Identifiable {
         self.id = id
         self.title = title
         self.systemImage = systemImage
+        self.action = action
+    }
+}
+
+/// 全局 ⌘K 命令面板中的插件动作项。
+public struct PaletteCommand: Identifiable {
+    public let id: String
+    public let title: String
+    public let subtitle: String?
+    public let keywords: [String]
+    public let systemImage: String
+    public let badge: String?
+    public let action: () -> Void
+
+    public init(
+        id: String,
+        title: String,
+        subtitle: String? = nil,
+        keywords: [String] = [],
+        systemImage: String,
+        badge: String? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.keywords = keywords
+        self.systemImage = systemImage
+        self.badge = badge
         self.action = action
     }
 }

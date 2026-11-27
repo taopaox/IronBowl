@@ -126,7 +126,35 @@ struct Sidebar: View {
                 DSSloganView(style: .sidebar)
             }
             .padding(.horizontal, 18)
-            .padding(.bottom, 14)
+            .padding(.bottom, 10)
+
+            Button {
+                app.commandPalette.show()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(DS.font(12))
+                        .foregroundStyle(DS.textTertiary)
+                    Text("搜索或命令…")
+                        .font(DS.font(12.5))
+                        .foregroundStyle(DS.textSecondary)
+                    Spacer(minLength: 0)
+                    Text("⌘K")
+                        .font(DS.font(10.5, .medium))
+                        .foregroundStyle(DS.textTertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(DS.card, in: .rect(cornerRadius: 4))
+                }
+                .padding(.horizontal, 9)
+                .frame(height: DS.s(28))
+                .background(DS.selected, in: .rect(cornerRadius: DS.controlRadius))
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help("打开全局命令面板与全文搜索 (⌘K / ⌃⌥⌘K)")
+            .padding(.horizontal, 10)
+            .padding(.bottom, 8)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {

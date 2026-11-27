@@ -34,6 +34,12 @@ struct IronBowlApp: App {
             CommandGroup(replacing: .appSettings) {
                 SettingsCommand(app: app)
             }
+            CommandGroup(after: .textEditing) {
+                Button("命令面板与全局搜索…") {
+                    app.commandPalette.toggle()
+                }
+                .keyboardShortcut("k", modifiers: .command)
+            }
         }
 
         Window("设置", id: "settings") {

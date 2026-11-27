@@ -39,6 +39,7 @@ enum AppKeys {
     static let menuBarItems = SettingKey<[String]>("app.menuBarItems", default: ["zentao.status"])
     static let dockMode = SettingKey<DockMode>("app.dockMode", default: .whenWindowOpen)
     static let lastPlugin = SettingKey<String>("app.lastPlugin", default: AppModel.homeID)
+    static let commandPaletteShortcut = SettingKey<Bool>("app.commandPalette.globalShortcut", default: true)
 }
 
 /// 应用级状态：共享服务 + 插件列表。
@@ -62,6 +63,7 @@ final class AppModel {
     let launchAtLogin = LaunchAtLoginController()
     let plugins: [IronBowlPlugin]
     var context: PluginContext!
+    var commandPalette: CommandPaletteController!
 
     var selection: String?
     var isMainWindowOpen = false
@@ -146,6 +148,8 @@ final class AppModel {
         )
         context.clipboard.startMonitoring()
         syncPlugins()
+        commandPalette = CommandPaletteController(app: self)
+        commandPalette.syncShortcut()
         applyDockMode()
         applyAppearance()
         DS.fontScale = settings[AppKeys.fontScale]

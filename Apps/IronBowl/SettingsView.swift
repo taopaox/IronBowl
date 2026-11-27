@@ -171,6 +171,24 @@ struct GeneralSettings: View {
                     options: DockMode.allCases.map { DSPickerOption($0, title: $0.displayName, subtitle: $0.detail) }
                 )
             }
+            DSRow(
+                "全局命令面板快捷键",
+                description: app.commandPalette.shortcutError ?? "在任意应用中按 ⌃⌥⌘K（窗口内按 ⌘K）呼出命令面板与全局历史搜索。"
+            ) {
+                HStack(spacing: 8) {
+                    Button("立即打开") {
+                        app.commandPalette.show()
+                    }
+                    .buttonStyle(.dsSecondary)
+                    DSToggle(isOn: Binding(
+                        get: { s[AppKeys.commandPaletteShortcut] },
+                        set: { val in
+                            s[AppKeys.commandPaletteShortcut] = val
+                            app.commandPalette.syncShortcut()
+                        }
+                    ))
+                }
+            }
         }
         DSSection("菜单栏显示", footer: "饭碗图标一直显示；打开的信息按顺序跟在后面，用箭头调整顺序。") {
             MenuBarItemsEditor(app: app)

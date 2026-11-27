@@ -55,6 +55,34 @@ public final class WorkspacePlugin: IronBowlPlugin {
         ]
     }
 
+    public var paletteCommands: [PaletteCommand] {
+        guard let model else { return [] }
+        return model.repos.flatMap { repo in
+            [
+                PaletteCommand(
+                    id: "workspace.editor.\(repo.path)",
+                    title: "在编辑器打开 \(repo.name)",
+                    subtitle: [repo.mappedProjectName, repo.branch, repo.path].compactMap { $0 }.joined(separator: " · "),
+                    keywords: ["repo", "git", "code", "编辑器", repo.name, repo.branch, repo.mappedProjectName ?? ""],
+                    systemImage: "chevron.left.forwardslash.chevron.right",
+                    badge: "代码仓库"
+                ) {
+                    model.openInEditor(repo.path)
+                },
+                PaletteCommand(
+                    id: "workspace.chat.\(repo.path)",
+                    title: "在 \(repo.name) 发起 AI 对话",
+                    subtitle: repo.path,
+                    keywords: ["chat", "ai", "对话", repo.name, repo.mappedProjectName ?? ""],
+                    systemImage: "sparkles",
+                    badge: "工作区对话"
+                ) {
+                    model.openChat(in: repo.path)
+                },
+            ]
+        }
+    }
+
     public var homeCards: [HomeCard] {
         guard let model else { return [] }
         return [

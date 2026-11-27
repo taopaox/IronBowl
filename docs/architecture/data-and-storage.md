@@ -13,12 +13,15 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `~/Library/Application Support/IronBowl/logs/` | 日志目录（`AppPaths.logsDirectory`） |
 | `~/Library/Application Support/IronBowl/logs/zentao.log` | 禅道 HTTP 请求/响应调试日志（不含密码，超过 2MB 自动清空轮转） |
 | `~/Library/Application Support/IronBowl/ai-logos/` | AI 目录插件上传/抓取的本地 PNG Logo 与远程图标缓存（`AILogoStore`） |
+| `~/Library/Application Support/IronBowl/user-avatars/` | 用户自定义左下角头像/Logo 归一化 PNG 文件（`AppPaths.userAvatarsDirectory`、`UserProfileStore`） |
+| `~/Library/Application Support/IronBowl/backups/` | 一键恢复备份前自动留存的安全库快照 `pre-restore-*.sqlite`（保留最近 5 份，`DataBackupService`） |
+| `~/Library/Application Support/IronBowl/bin/ironbowl-cli` | 首页 AI 对话工作台本地 CLI 工具桥接脚本（`WorkbenchBridgeCLI`） |
 
 ## 数据库与迁移（`AppDatabase`）
 
 `AppDatabase` 使用 GRDB `DatabasePool` 打开数据库，启用 `config.foreignKeysEnabled = true`，并在启动时按序执行 `coreMigrations + pluginMigrations`。
 
-### 核心迁移（`core.v1` ~ `core.v7`）
+### 核心迁移（`core.v1` ~ `core.v11`）
 
 | 迁移版本 | 表名 | 主键 | 字段 | 用途 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -33,6 +36,10 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `core.v5` | `chatMessage` | `id` (TEXT) | `threadID`（外键级联删除+索引）, `role`, `content`, `status`, `providerKind`, `modelName`, `durationSeconds`, `usageJSON`, `activitiesJSON`, `rawEventsJSON`, `cardsJSON`, `errorMessage`, `createdAt`（索引）, `updatedAt` | 对话消息正文、命令/工具执行明细、原始 JSONL 事件与插入的功能卡片快照 |
 | `core.v6` | `chatThread` | `id` (TEXT) | 新增列 `model` (TEXT, NOT NULL, DEFAULT `''`) | 按对话持久化各自选用的模型 ID |
 | `core.v7` | `reminderHistory` | `id` (自增 INT) | `reminderID`（索引）, `title`, `message`, `systemImage`, `source`（索引）, `style`, `deliveryStatus`, `deliveryDetail`, `isRead`（索引）, `readAt`, `handledActionTitle`, `handledAt`, `targetPluginID`, `targetSettingsPage`, `createdAt`（索引） | `ReminderCenter` 触发的历史桌面/系统提醒记录、投递结果、已读与操作状态 |
+| `core.v8` | `todoItem` | `id` (TEXT) | `title`, `notes`, `dueDate`（索引）, `remindAt`, `remindedAt`, `priority`, `estimatedHours`, `isCompleted`（索引）, `completedAt`, `loggedDate`, `zentaoObjectType`, `zentaoObjectID`, `createdAt`, `updatedAt`（索引） | 跨工作台、万年历与禅道日报共享的待办与备忘数据 |
+| `core.v9` | `scratchpadNote` | `id` (TEXT) | `title`, `content`, `colorTag`, `isPinned`, `createdAt`, `updatedAt`（索引） | 随手便签与剪贴板暂存板内容 |
+| `core.v10` | `attendanceDailyRecord` | `date` (TEXT, `yyyy-MM-dd`) | `clockIn`, `clockOut`, `onDutyResult`, `offDutyResult`, `source`, `fetchedAt` | 每日完整上下班打卡与异常状态（自动迁入既有 `attendanceClockIn` 记录） |
+| `core.v11` | `clipboardHistory` | `id` (TEXT) | `content`, `contentHash`（索引）, `kind`, `sourceApp`, `charCount`, `copyCount`, `isSnippet`（索引）, `snippetTitle`, `copiedAt`（索引） | 剪贴板历史流与永久保留的常用片段（Snippets） |
 
 ### 禅道日志插件迁移（`LogMigrations`）
 
@@ -54,6 +61,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | :--- | :--- | :--- | :--- | :--- |
 | `report.v1` | `weeklyReport` | `weekStart` (TEXT) | `weekEnd`, `title`, `content`, `extraNotes`, `style`, `providerName`, `totalHours`, `generatedAt`, `updatedAt`（索引） | 按周（周一日期 `yyyy-MM-dd`）持久化已生成或手动编辑的周报内容 |
 | `report.v2` | `monthlyReport` | `monthKey` (TEXT) | `periodStart`, `periodEnd`, `title`, `content`, `extraNotes`, `style`, `providerName`, `totalHours`, `generatedAt`, `updatedAt`（索引） | 按自然月（`yyyy-MM`）持久化已生成或手动编辑的月报内容 |
+| `report.v3` | `reviewReport` | `periodKey` (TEXT) | `scopeKind`, `periodStart`, `periodEnd`, `title`, `content`, `extraNotes`, `style`, `providerName`, `totalHours`, `overtimeHours`, `commitCount`, `generatedAt`, `updatedAt`（索引） | 按季度/半年度/全年持久化述职总结报告 |
 
 > 独立版万年历（`Apps/Calendar`）在启动时只传入 `CalendarPlugin.migrations`（当前为空），若库中已有其他插件的数据表也不会冲突；若首次由独立版万年历建库，之后主应用打开时会补跑新增的插件迁移。
 
@@ -62,10 +70,11 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 定义于 [`SettingsStore.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/Core/SettingsStore.swift)：
 
 - **强类型键**：`SettingKey<Value: Codable & Sendable>(_ name: String, default: Value)`。
+- **单键级观察与内存解码缓存**：内部按 `key.name` 维护独立的 `@Observable` 信号（`SettingKeySignal`）及强类型解码缓存（`DecodedBox<Value>`，兼容 `Optional` 空值缓存）；修改某个键只会触发订阅该键的视图增量刷新，且热路径读取不再重复执行 `JSONDecoder`。
 - **JSON 包装**：写入时使用内部 `Wrapper(v: newValue)` 编码，使得顶层 `String`、`Int`、`Double`、`Bool`、`Optional` 也能统一合法序列化为 JSON。
-- **去重防循环**：写入 `settings[key] = newValue` 时若 JSON 字符串与内存缓存一致，则直接返回不写库也不触发通知，避免 SwiftUI `Binding` 回写导致死循环。
+- **去重防循环与延迟落盘**：写入 `settings[key] = newValue` 时若 JSON 字符串与内存缓存一致，则直接返回不写库也不触发通知，避免 SwiftUI `Binding` 回写导致死循环。高频导航状态键（如 `app.lastPlugin`）通过 `setDeferred(_:for:)` 立即更新内存并在 300ms 防抖后批量落盘（导出备份前及应用退出时通过 `flushDeferredWrites()` 立即刷盘）。
 - **跨进程通知**：
-  - `SettingsStore` 写入数据库后会通过 `DistributedNotificationCenter` 发送 `com.taopaox.ironbowl.settingsDidChange`，附带 `"\(pid)|\(database.path)"`；另一进程收到且匹配同一数据库路径时自动 `reload()` 并回调 `onExternalChange`（同步外观与字号）。
+  - `SettingsStore` 写入数据库后会通过 `DistributedNotificationCenter` 非阻塞合并发送 `com.taopaox.ironbowl.settingsDidChange`，附带 `"\(pid)|\(database.path)"`；另一进程收到且匹配同一数据库路径时仅针对发生变更的键执行 `reload()` 失效并回调 `onExternalChange`（同步外观与字号）。
   - `WorkCalendar` 修改节假日缓存或手动标记后会发送 `com.taopaox.ironbowl.holidaysDidChange`，另一进程收到后自动重载节假日表。
 
 ## 全部 `SettingKey` 清单
@@ -79,20 +88,25 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `AppKeys` | `app.menuBarItems` | `["zentao.status"]` | 菜单栏图标后拼接显示的条目及顺序 |
 | `AppKeys` | `app.dockMode` | `.whenWindowOpen` | 程序坞图标策略（`always` / `whenWindowOpen` / `never`） |
 | `AppKeys` | `app.lastPlugin` | `"home"` | 上次停留在主窗口的页面 ID |
+| `AppKeys` | `app.commandPalette.globalShortcut` | `true` | 启用全局 `⌃⌥⌘K` 命令面板与全文搜索快捷键 |
+| `UserProfileKeys` | `user.displayName` / `user.slogan` / `user.avatarFilename` | `""` / `""` / `nil` | 左下角自定义显示姓名、个人标语与自定义头像 PNG 文件名 |
 | `WorkCalendar` | `work.weekdays` | `[2,3,4,5,6]` | 每周工作日（周一至周五） |
 | `WorkCalendar` | `work.start` / `work.end` | `"09:00"` / `"18:00"` | 上下班时间 |
 | `WorkCalendar` | `work.lunchMinutes` | `60` | 午休分钟数 |
 | `WorkCalendar` | `holiday.source` / `holiday.frequency` | `.holidayCNjsDelivr` / `.yearly` | 节假日数据源与更新频率 |
 | `WorkCalendar` | `holiday.lastFetch` | `nil` | 上次成功拉取节假日的时间 |
 | `AIProviderStore` | `ai.providers` / `ai.default` | `[agy, codex]` / `.agy` | AI CLI 配置与默认提供者 |
-| `ChatKeys` | `chat.defaultWorkspace` / `chat.detailLevel` / `chat.sidebarCollapsed` / `chat.lastThreadID` / `chat.lastModelByProvider` | `""` / `.all` / `false` / `nil` / `[:]` | 首页对话默认工作目录、输出详略级别、对话栏折叠、上次选中对话 ID 及各提供商记忆模型 |
+| `ChatKeys` | `chat.defaultWorkspace` / `chat.detailLevel` / `chat.sidebarCollapsed` / `chat.lastThreadID` / `chat.lastModelByProvider` / `chat.workbenchBridgeEnabled` | `""` / `.all` / `false` / `nil` / `[:]` / `true` | 首页对话默认工作目录、输出详略级别、对话栏折叠、上次选中对话 ID、记忆模型及工作台 `ironbowl-cli` 直连开关 |
 | `WebKeys` | `web.tombstone.enabled` | `true` | 是否开启后台网页墓碑休眠 |
 | `WebKeys` | `web.tombstone.idleMinutes` | `15` | 后台闲置休眠分钟数（0 表示不按时长） |
 | `WebKeys` | `web.tombstone.maxLiveCount` | `4` | 最多同时保活网页数（0 表示不限） |
 | `SchedulerKeys` | `scheduler.seededIDs` | `[]` | 已初始化写入过的内置定时任务 ID 列表（防用户删除后重建） |
-| `LogKeys` | `zentao.*` / `git.*` / `scan.*` / `log.*` / `reminder.*` | 见 [禅道日志文档](../plugins/zentao-log.md) | 禅道账号、Git 扫描、AI 提示词与工时提醒配置 |
+| `LogKeys` | `zentao.*` / `git.*` / `scan.*` / `log.*` / `reminder.*` / `zentao.watch.*` | 见 [禅道日志文档](../plugins/zentao-log.md) | 禅道账号、Git 扫描、AI 提示词、工时提醒与新指派 Bug/任务巡检配置 |
 | `LogKeys.quickLogShortcut` | `log.quickLogShortcut` | `true` | 启用日报插件的全局快捷记日志组合键 ⌃⌥⌘L |
 | `ReportKeys` | `report.*` | 见 [周报月报文档](../plugins/report.md) | 周报/月报提示词、风格、草稿与工时开关及上次周期模式 |
-| `CalendarKeys` | `calendar.*` / `weather.*` | 见 [万年历文档](../plugins/calendar.md) | 周起始日、天气源、城市、菜单栏日历与弹层样式 |
+| `CalendarKeys` | `calendar.*` / `weather.*` / `calendar.events.*` | 见 [万年历文档](../plugins/calendar.md) | 周起始日、天气源、城市、菜单栏日历、弹层样式及系统/钉钉日程同步开关 |
 | `FeishuKeys` | `feishu.*` | 见 [飞书文档](../plugins/feishu.md) | 飞书主页、固定网页列表与上次打开页 |
 | `AIWebKeys` | `aiweb.apps` / `aiweb.activeAppID` | `nil` / `nil` | AI 目录应用列表与当前选中 AI |
+| `ClipboardKeys` | `clipboard.enabled` / `clipboard.maxCount` | `true` / `200` | 剪贴板历史监听开关与非片段历史保留条数上限 |
+| `WorkspaceKeys` | `workspace.*` | 见 [代码仓库文档](../plugins/workspace.md) | 默认外部编辑器/终端、收藏置顶仓库与额外纳管仓库路径 |
+| `DevToolsKeys` | `devtools.watchedPorts` / `devtools.devDirectories` | `[3000, 5173, 8000, 8080, 8888]` / `[]` | 端口管家常用关注端口列表与自定义开发目录列表 |

@@ -118,6 +118,23 @@ public final class FeishuPlugin: IronBowlPlugin {
         ]
     }
 
+    public var paletteCommands: [PaletteCommand] {
+        guard let model else { return [] }
+        return model.pinnedPages.map { page in
+            PaletteCommand(
+                id: "feishu.pin.\(page.id)",
+                title: page.title,
+                subtitle: page.url,
+                keywords: ["feishu", "飞书", page.title, page.url],
+                systemImage: page.systemImage,
+                badge: "飞书固定页"
+            ) {
+                model.selectPage(page.id)
+                model.openPlugin(Self.pluginID)
+            }
+        }
+    }
+
     public var homeCards: [HomeCard] {
         guard let model else { return [] }
         return [

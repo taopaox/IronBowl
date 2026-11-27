@@ -4,6 +4,8 @@ import SwiftUI
 
 /// 菜单栏上的双行微缩仪表卡。
 struct MenuBarLabel: View {
+    private static let cachedMenuBarIcon: NSImage? = NSImage(named: "MenuBarIcon")
+
     let app: AppModel
     @Environment(\.openWindow) private var openWindow
     @Environment(\.colorScheme) private var colorScheme
@@ -12,7 +14,7 @@ struct MenuBarLabel: View {
         // 注意：这里不能用 TimelineView，会让状态栏按钮不停重绘。时间刷新靠 AppModel.now 的定时器。
         Image(nsImage: MenuBarCardRenderer.renderImage(
             segments: app.menuBarCardSegments,
-            iconImage: NSImage(named: "MenuBarIcon"),
+            iconImage: Self.cachedMenuBarIcon,
             isDark: colorScheme == .dark
         ))
             .onAppear {
@@ -305,45 +307,52 @@ private struct MenuWorkHeroCard: View {
         let end = cal.effectiveWorkEnd(on: now)
         let hasClockIn = cal.clockIn(on: now) != nil
 
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 6) {
-                    Image(systemName: info.isWorkday ? "briefcase.fill" : "cup.and.saucer.fill")
-                        .font(DS.font(11.5))
-                        .foregroundStyle(info.isWorkday ? (ot > 0 ? .purple : DS.brand) : DS.toggle)
-                    Text(info.isWorkday ? "今天上班" : (info.name ?? "今天休息"))
-                        .font(DS.font(12, .medium))
-                        .foregroundStyle(DS.textSecondary)
-                        .lineLimit(1)
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: action) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 6) {
+                        Image(systemName: info.isWorkday ? "briefcase.fill" : "cup.and.saucer.fill")
+                            .font(DS.font(11.5))
+                            .foregroundStyle(info.isWorkday ? (ot > 0 ? .purple : DS.brand) : DS.toggle)
+                        Text(info.isWorkday ? "今天上班" : (info.name ?? "今天休息"))
+                            .font(DS.font(12, .medium))
+                            .foregroundStyle(DS.textSecondary)
+                            .lineLimit(1)
 
-                    Spacer(minLength: 4)
+                        Spacer(minLength: 4)
 
-                    if ot > 0 {
-                        Tag("加班 +\(WorkCalendar.hoursText(ot))h", color: .purple)
-                    } else if info.isWorkday && hasClockIn {
-                        Tag("已打卡", color: DS.success)
+                        if ot > 0 {
+                            Tag("加班 +\(WorkCalendar.hoursText(ot))h", color: .purple)
+                        } else if info.isWorkday && hasClockIn {
+                            Tag("已打卡", color: DS.success)
+                        }
+                    }
+
+                    if info.isWorkday {
+                        workdayHeroContent(cal: cal, end: end, ot: ot)
+                        workdayTimeFooter(cal: cal, ot: ot)
+                    } else {
+                        offDayHeroContent(cal: cal, ot: ot)
                     }
                 }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(hovering ? DS.hover.opacity(0.6) : .clear)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .help(info.isWorkday ? cal.scheduleText(on: now) : (info.name ?? "今天休息"))
 
-                if info.isWorkday {
-                    workdayHeroContent(cal: cal, end: end, ot: ot)
-                    workdayTimeFooter(cal: cal, ot: ot)
-                } else {
-                    offDayHeroContent(cal: cal, ot: ot)
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DS.card, in: .rect(cornerRadius: 12))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(hovering ? DS.borderStrong : DS.border)
-            }
-            .contentShape(.rect)
+            MenuOvertimeQuickBar(workCalendar: cal, date: now)
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(info.isWorkday ? cal.scheduleText(on: now) : (info.name ?? "今天休息"))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DS.card, in: .rect(cornerRadius: 12))
+        .clipShape(.rect(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(hovering ? DS.borderStrong : DS.border)
+        }
     }
 
     @ViewBuilder
@@ -439,6 +448,150 @@ private struct MenuWorkHeroCard: View {
             }
         }
         .frame(height: 5)
+    }
+}
+
+/// 今日加班时长快捷调整条：预设切换（+1h~+4h）、±0.5h 微调与一键清除，点击后保持菜单栏面板展开以便实时观察下班时间变化。
+private struct MenuOvertimeQuickBar: View {
+    let workCalendar: WorkCalendar
+    let date: Date
+    private let presets: [Double] = [1, 2, 3, 4]
+
+    var body: some View {
+        let ot = workCalendar.overtimeHours(on: date)
+
+        HStack(spacing: 4) {
+            Text("加班")
+                .font(DS.font(11.5, .medium))
+                .foregroundStyle(DS.textSecondary)
+                .fixedSize()
+
+            ForEach(presets, id: \.self) { h in
+                MenuOvertimePresetPill(
+                    hours: h,
+                    active: abs(ot - h) < 0.01
+                ) {
+                    workCalendar.toggleOvertimeHours(h, on: date)
+                }
+            }
+
+            Spacer(minLength: 2)
+
+            HStack(spacing: 0) {
+                MenuOvertimeIconButton(
+                    systemImage: "minus",
+                    label: "减少 0.5 小时加班",
+                    help: "减少 0.5 小时",
+                    disabled: ot <= 0
+                ) {
+                    workCalendar.adjustOvertimeHours(by: -WorkCalendar.overtimeStepHours, on: date)
+                }
+
+                Rectangle()
+                    .fill(DS.border)
+                    .frame(width: 1, height: DS.s(12))
+
+                MenuOvertimeIconButton(
+                    systemImage: "plus",
+                    label: "增加 0.5 小时加班",
+                    help: "增加 0.5 小时",
+                    disabled: ot >= WorkCalendar.maxOvertimeHours
+                ) {
+                    workCalendar.adjustOvertimeHours(by: WorkCalendar.overtimeStepHours, on: date)
+                }
+            }
+            .background(DS.well, in: .rect(cornerRadius: 6))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(DS.border)
+            }
+
+            if ot > 0 {
+                MenuOvertimeIconButton(
+                    systemImage: "xmark",
+                    label: "清除今日加班",
+                    help: "清除今日加班",
+                    disabled: false,
+                    background: DS.well,
+                    border: DS.border,
+                    cornerRadius: 6
+                ) {
+                    workCalendar.setOvertimeHours(0, on: date)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8.5)
+        .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
+    }
+}
+
+private struct MenuOvertimePresetPill: View {
+    let hours: Double
+    let active: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let label = WorkCalendar.hoursText(hours)
+        Button(action: action) {
+            Text("+\(label)h")
+                .font(DS.font(11, active ? .semibold : .medium).monospacedDigit())
+                .foregroundStyle(active ? Color.purple : (hovering ? DS.text : DS.textSecondary))
+                .padding(.horizontal, 6.5)
+                .frame(height: DS.s(22))
+                .background(
+                    active ? Color.purple.opacity(0.14) : (hovering ? DS.hover : DS.well),
+                    in: .capsule
+                )
+                .overlay {
+                    Capsule().strokeBorder(
+                        active ? Color.purple.opacity(0.45) : (hovering ? DS.borderStrong : DS.border)
+                    )
+                }
+                .fixedSize()
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(active ? "取消今日加班" : "设为今日加班 \(label) 小时")
+    }
+}
+
+private struct MenuOvertimeIconButton: View {
+    let systemImage: String
+    let label: String
+    let help: String
+    let disabled: Bool
+    var background: Color = .clear
+    var border: Color? = nil
+    var cornerRadius: CGFloat = 0
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(DS.font(10.5, .semibold))
+                .foregroundStyle(disabled ? DS.textTertiary : (hovering ? DS.text : DS.textSecondary))
+                .frame(width: DS.s(22), height: DS.s(22))
+                .background(
+                    hovering && !disabled ? DS.hover : background,
+                    in: .rect(cornerRadius: cornerRadius)
+                )
+                .overlay {
+                    if let border {
+                        RoundedRectangle(cornerRadius: cornerRadius)
+                            .strokeBorder(hovering && !disabled ? DS.borderStrong : border)
+                    }
+                }
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .onHover { hovering = $0 }
+        .accessibilityLabel(label)
+        .help(help)
     }
 }
 

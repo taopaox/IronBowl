@@ -34,7 +34,11 @@ final class LogModel {
     // 当前日期与数据
     var date: Date = Calendar.current.startOfDay(for: Date())
     var activities: [RepoActivity] = []
+    var repoStatuses: [RepoWorkspaceStatus] = []
+    var dirtyRepoStatuses: [RepoWorkspaceStatus] { repoStatuses.filter(\.needsAttention) }
     var tasks: [ZentaoTask] = []
+    var bugs: [ZentaoBug] = []
+    var openBugs: [ZentaoBug] { bugs.filter(\.isOpen) }
     var drafts: [DraftEntry] = [] {
         didSet {
             if !isSwitchingDate {
@@ -54,6 +58,7 @@ final class LogModel {
     var message: String?
     var errorMessage: String?
     var lastScan: Date?
+    var showAssignedSheet = false
     /// 今天已经提交过（本地记录或禅道已记录）。
     var todaySubmitted = false
     var todayCommitCount: Int?
@@ -66,6 +71,7 @@ final class LogModel {
 
     @ObservationIgnored private var client: ZentaoClient?
     @ObservationIgnored private var clientKey = ""
+    @ObservationIgnored nonisolated(unsafe) private var externalDraftObserver: NSObjectProtocol?
 
     init(context: PluginContext) {
         self.context = context
@@ -76,6 +82,23 @@ final class LogModel {
         reloadLocalPending()
         loadDraftsForCurrentDate()
         refreshTodaySubmitted()
+        externalDraftObserver = NotificationCenter.default.addObserver(
+            forName: ZentaoLogPlugin.externalDraftAddedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.reloadLocalPending()
+                self.loadDraftsForCurrentDate()
+            }
+        }
+    }
+
+    deinit {
+        if let externalDraftObserver {
+            NotificationCenter.default.removeObserver(externalDraftObserver)
+        }
     }
 
     var dateString: String { WorkCalendar.dayString(date) }
@@ -261,7 +284,12 @@ final class LogModel {
         isScanning = true
         defer { isScanning = false }
         let targetDate = date
-        guard let acts = await scanActivities(for: targetDate) else { return }
+        let activeRepos = activeReposList()
+        async let actsTask = scanActivities(for: targetDate, repos: activeRepos)
+        async let statusTask = GitScanner.workspaceStatus(repos: activeRepos)
+        let (acts, statuses) = await (actsTask, statusTask)
+        repoStatuses = statuses
+        guard let acts else { return }
         if Calendar.current.isDate(date, inSameDayAs: targetDate) {
             activities = acts
             lastScan = Date()
@@ -271,24 +299,31 @@ final class LogModel {
         }
     }
 
-    private func scanActivities(for day: Date) async -> [RepoActivity]? {
+    private func activeReposList() -> [String] {
+        let excluded = Set(mappings.values.filter(\.excluded).map(\.repoPath))
+        return repos().filter { !excluded.contains($0) }
+    }
+
+    private func scanActivities(for day: Date, repos: [String]? = nil) async -> [RepoActivity]? {
         let email = await authorEmail()
         guard !email.isEmpty else {
             errorMessage = "没有提交作者邮箱，请在设置里填写"
             return nil
         }
-        let excluded = Set(mappings.values.filter(\.excluded).map(\.repoPath))
-        let repos = repos().filter { !excluded.contains($0) }
-        return await GitScanner.activity(repos: repos, authorEmail: email, day: day)
+        let targetRepos = repos ?? activeReposList()
+        return await GitScanner.activity(repos: targetRepos, authorEmail: email, day: day)
     }
 
-    /// 只为菜单栏统计今天的提交数。
+    /// 只为菜单栏统计今天的提交数，并刷新本地工作区巡检状态。
     func scanTodayCount() async {
+        let activeRepos = activeReposList()
+        async let statusTask = GitScanner.workspaceStatus(repos: activeRepos)
         let email = await authorEmail()
-        guard !email.isEmpty else { return }
-        let excluded = Set(mappings.values.filter(\.excluded).map(\.repoPath))
-        let acts = await GitScanner.activity(repos: repos().filter { !excluded.contains($0) }, authorEmail: email, day: Date())
-        todayCommitCount = acts.reduce(0) { $0 + $1.commits.count }
+        if !email.isEmpty {
+            let acts = await GitScanner.activity(repos: activeRepos, authorEmail: email, day: Date())
+            todayCommitCount = acts.reduce(0) { $0 + $1.commits.count }
+        }
+        repoStatuses = await statusTask
     }
 
     func loadTasks() async {
@@ -302,8 +337,17 @@ final class LogModel {
         }
     }
 
+    /// 供后台巡检静默拉取最新指派给我的任务与 Bug（失败由调用方处理，不污染日报页错误横幅）。
+    func fetchAssignedSilently() async throws {
+        try await fetchTasksThrowing()
+    }
+
     private func fetchTasksThrowing() async throws {
-        tasks = try await zentao().myTasks()
+        let z = try zentao()
+        async let fetchedTasks = z.myTasks()
+        async let fetchedBugs = (try? z.myBugs()) ?? []
+        tasks = try await fetchedTasks
+        bugs = await fetchedBugs
         if settings[LogKeys.fallbackTaskID] == nil,
            let misc = openTasks.first(where: { $0.name.contains("杂项") }) {
             settings[LogKeys.fallbackTaskID] = misc.id
@@ -567,6 +611,80 @@ final class LogModel {
         drafts.append(DraftEntry(taskID: taskID, hours: hours, left: 0, work: work.isEmpty ? "加班处理工作" : work,
                                  isFallback: taskID == settings[LogKeys.fallbackTaskID], isOvertime: true, isManual: true))
         recomputeLefts()
+    }
+
+    // MARK: 我的禅道速览操作
+
+    func addDraftFromAssignedTask(_ task: ZentaoTask) {
+        let fallback = settings[LogKeys.fallbackTaskID]
+        drafts.append(DraftEntry(
+            taskID: task.id,
+            taskTitle: task.name,
+            hours: 1,
+            left: max(0, task.left - 1),
+            work: "1. 推进「\(task.name)」相关工作",
+            isFallback: task.id == fallback,
+            isManual: true
+        ))
+        recomputeLefts()
+        message = "已将任务 #\(task.id) 加入 \(dateString) 草稿"
+    }
+
+    func addDraftFromAssignedBug(_ bug: ZentaoBug) {
+        let matchedTaskID = openTasks.first(where: { $0.projectID == bug.projectID && bug.projectID > 0 })?.id
+            ?? settings[LogKeys.fallbackTaskID]
+        drafts.append(DraftEntry(
+            taskID: matchedTaskID,
+            hours: 1,
+            left: 0,
+            work: "1. 修复问题 #\(bug.id)：\(bug.title)",
+            isFallback: matchedTaskID == settings[LogKeys.fallbackTaskID],
+            isManual: true
+        ))
+        recomputeLefts()
+        message = "已将 Bug #\(bug.id) 加入 \(dateString) 草稿"
+    }
+
+    @discardableResult
+    func addTodoFromTask(_ task: ZentaoTask) -> Bool {
+        if context.todos.items.contains(where: { !$0.isCompleted && $0.zentaoObjectType == "task" && $0.zentaoObjectID == task.id }) {
+            return false
+        }
+        let item = context.todos.add(
+            title: "#\(task.id) \(task.name)",
+            notes: task.projectName,
+            dueDate: dateString,
+            priority: .important,
+            estimatedHours: max(0.5, min(8, task.left > 0 ? task.left : 1)),
+            zentaoObjectType: "task",
+            zentaoObjectID: task.id
+        )
+        return item != nil
+    }
+
+    @discardableResult
+    func addTodoFromBug(_ bug: ZentaoBug) -> Bool {
+        if context.todos.items.contains(where: { !$0.isCompleted && $0.zentaoObjectType == "bug" && $0.zentaoObjectID == bug.id }) {
+            return false
+        }
+        let priority: TodoPriority = bug.severity <= 2 ? .urgent : .important
+        let item = context.todos.add(
+            title: "修复 Bug #\(bug.id)：\(bug.title)",
+            notes: bug.productName,
+            dueDate: dateString,
+            priority: priority,
+            estimatedHours: 1,
+            zentaoObjectType: "bug",
+            zentaoObjectID: bug.id
+        )
+        return item != nil
+    }
+
+    func zentaoItemWebURL(type: String, id: Int) -> URL? {
+        var base = settings[LogKeys.baseURL].trimmingCharacters(in: .whitespacesAndNewlines)
+        while base.hasSuffix("/") { base.removeLast() }
+        guard !base.isEmpty else { return nil }
+        return URL(string: "\(base)/\(type)-view-\(id).html")
     }
 
     func recomputeLefts() {
@@ -922,6 +1040,41 @@ final class LogModel {
         guard setPending(entries, for: key) else { return false }
         if dateString == key { loadDraftsForCurrentDate() }
         return true
+    }
+
+    // MARK: 待办联动
+
+    func todosForCurrentDate() -> [TodoItem] {
+        context.todos.items(forDateString: dateString)
+    }
+
+    @discardableResult
+    func importTodoToDraft(_ item: TodoItem, on targetDate: Date? = nil) -> Bool {
+        let day = targetDate ?? date
+        let ds = WorkCalendar.dayString(day)
+        let trimmedNotes = item.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let work = trimmedNotes.isEmpty ? "1. \(item.title)" : "1. \(item.title)（\(trimmedNotes)）"
+        let linkedTaskID = (item.zentaoObjectType == "task" ? item.zentaoObjectID : nil) ?? settings[LogKeys.fallbackTaskID]
+        guard appendQuickLog(work: work, hours: max(0.5, item.estimatedHours), taskID: linkedTaskID, on: day) else {
+            return false
+        }
+        context.todos.markLogged(id: item.id, dateString: ds)
+        message = "已将「\(item.title)」带入 \(ds) 草稿"
+        return true
+    }
+
+    func importAllCompletedTodosToDrafts() {
+        let candidates = todosForCurrentDate().filter { $0.isCompleted && $0.loggedDate == nil }
+        guard !candidates.isEmpty else { return }
+        var imported = 0
+        for item in candidates {
+            if importTodoToDraft(item, on: date) {
+                imported += 1
+            }
+        }
+        if imported > 0 {
+            message = "已将 \(imported) 条已完成待办带入今日草稿"
+        }
     }
 
     // MARK: 映射

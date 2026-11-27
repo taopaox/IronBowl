@@ -23,9 +23,65 @@ public nonisolated enum ReportMarkdownBlock: Sendable, Identifiable, Equatable {
     }
 }
 
+private nonisolated final class ReportMarkdownCache: @unchecked Sendable {
+    static let shared = ReportMarkdownCache()
+
+    private let lock = NSLock()
+    private let maxBlocksEntries = 64
+    private let maxInlineEntries = 512
+
+    private var blocksCache: [String: [ReportMarkdownBlock]] = [:]
+    private var blocksOrder: [String] = []
+    private var inlineCache: [String: AttributedString] = [:]
+    private var inlineOrder: [String] = []
+
+    func blocks(for markdown: String) -> [ReportMarkdownBlock]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return blocksCache[markdown]
+    }
+
+    func storeBlocks(_ blocks: [ReportMarkdownBlock], for markdown: String) {
+        guard markdown.utf8.count <= 200_000 else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        if blocksCache[markdown] == nil {
+            if blocksOrder.count >= maxBlocksEntries, let evicted = blocksOrder.first {
+                blocksOrder.removeFirst()
+                blocksCache.removeValue(forKey: evicted)
+            }
+            blocksOrder.append(markdown)
+        }
+        blocksCache[markdown] = blocks
+    }
+
+    func inline(for text: String) -> AttributedString? {
+        lock.lock()
+        defer { lock.unlock() }
+        return inlineCache[text]
+    }
+
+    func storeInline(_ attributed: AttributedString, for text: String) {
+        guard text.utf8.count <= 32_000 else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        if inlineCache[text] == nil {
+            if inlineOrder.count >= maxInlineEntries, let evicted = inlineOrder.first {
+                inlineOrder.removeFirst()
+                inlineCache.removeValue(forKey: evicted)
+            }
+            inlineOrder.append(text)
+        }
+        inlineCache[text] = attributed
+    }
+}
+
 /// 面向中文与嵌套列表的轻量 Markdown 解析器（解决 CommonMark 标点相邻 `**加粗**` 失效问题）。
 public nonisolated enum ReportMarkdown {
     public static func parseBlocks(_ markdown: String) -> [ReportMarkdownBlock] {
+        if let cached = ReportMarkdownCache.shared.blocks(for: markdown) {
+            return cached
+        }
         let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         var out: [ReportMarkdownBlock] = []
         var paragraphBuffer: [String] = []
@@ -124,11 +180,21 @@ public nonisolated enum ReportMarkdown {
         }
         flushQuote()
         flushParagraph()
+        ReportMarkdownCache.shared.storeBlocks(out, for: markdown)
         return out
     }
 
     /// 解析行内 Markdown（支持 `**加粗**`、`*斜体*`、`` `代码` ``、`~~删除线~~`、`[链接](url)`，无中文标点边界限制）。
     public static func attributedInline(_ text: String) -> AttributedString {
+        if let cached = ReportMarkdownCache.shared.inline(for: text) {
+            return cached
+        }
+        let parsed = parseAttributedInline(text)
+        ReportMarkdownCache.shared.storeInline(parsed, for: text)
+        return parsed
+    }
+
+    private static func parseAttributedInline(_ text: String) -> AttributedString {
         var result = AttributedString()
         var plainBuffer = ""
         var index = text.startIndex

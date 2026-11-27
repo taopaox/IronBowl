@@ -39,13 +39,28 @@ public nonisolated enum JournalKeys {
 /// 跨「日报」与「周报/月报」共享的荧光笔重点标记。
 public nonisolated enum JournalHighlight {
     public static let maxStoredCount = 200
+    @MainActor private static var cachedHighlightSet: (raw: [String], set: Set<String>)?
 
     public static func key(date: String, work: String) -> String {
-        let normalized = work
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-        guard !date.isEmpty, !normalized.isEmpty else { return "" }
+        guard !date.isEmpty else { return "" }
+        var normalized = ""
+        normalized.reserveCapacity(work.count)
+        var inSpace = true
+        for scalar in work.unicodeScalars {
+            if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                if !inSpace {
+                    normalized.append(" ")
+                    inSpace = true
+                }
+            } else {
+                normalized.unicodeScalars.append(scalar)
+                inSpace = false
+            }
+        }
+        if normalized.last == " " {
+            normalized.removeLast()
+        }
+        guard !normalized.isEmpty else { return "" }
         return "\(date)|\(normalized)"
     }
 
@@ -53,7 +68,13 @@ public nonisolated enum JournalHighlight {
     public static func isHighlighted(date: String, work: String, in settings: SettingsStore) -> Bool {
         let k = key(date: date, work: work)
         guard !k.isEmpty else { return false }
-        return settings[JournalKeys.highlightedItems].contains(k)
+        let raw = settings[JournalKeys.highlightedItems]
+        if let cached = cachedHighlightSet, cached.raw == raw {
+            return cached.set.contains(k)
+        }
+        let set = Set(raw)
+        cachedHighlightSet = (raw, set)
+        return set.contains(k)
     }
 
     @MainActor
@@ -69,140 +90,146 @@ public nonisolated enum JournalHighlight {
                 list.removeFirst(list.count - maxStoredCount)
             }
         }
+        cachedHighlightSet = (list, Set(list))
         settings[JournalKeys.highlightedItems] = list
     }
 }
 
 // MARK: - 手账调色板（自适应浅色 / 深色模式）
 
-public struct JournalPalette: Sendable {
+public struct JournalPalette: Sendable, Equatable {
     public let preset: JournalPaperPreset
+    public let desk: Color
+    public let cover: Color
+    public let paper: Color
+    public let paperAlt: Color
+    public let paperCard: Color
+    public let spine: Color
+    public let paperLine: Color
+    public let paperGrid: Color
+    public let border: Color
+    public let borderStrong: Color
+    public let ink: Color
+    public let inkSecondary: Color
+    public let inkTertiary: Color
+    public let stampRed: Color
+    public let stampGreen: Color
+    public let stampAmber: Color
+    public let stampPurple: Color
+    public let stampBlue: Color
+    public let stickyFill: Color
+    public let stickyBorder: Color
+    public let highlightFill: Color
+
+    private static let sharedStampRed = Color(light: jHex(0xC83E37), dark: jHex(0xEF6F68))
+    private static let sharedStampGreen = Color(light: jHex(0x18794E), dark: jHex(0x4ADE80))
+    private static let sharedStampAmber = Color(light: jHex(0xB45309), dark: jHex(0xFBBF24))
+    private static let sharedStampPurple = Color(light: jHex(0x6D28D9), dark: jHex(0xC084FC))
+    private static let sharedStampBlue = Color(light: jHex(0x2B59C3), dark: jHex(0x7AA2F7))
+    private static let sharedStickyFill = Color(light: jHex(0xFEF7CD), dark: jHex(0x332C19))
+    private static let sharedStickyBorder = Color(light: jHex(0xEADB89), dark: jHex(0x5C4D26))
+    private static let sharedHighlightFill = Color(light: jHex(0xFEF08A, 0.72), dark: jHex(0xFACC15, 0.24))
+
+    private static let warmPalette = JournalPalette(
+        preset: .warm,
+        desk: Color(light: jHex(0xE8E1D3), dark: jHex(0x141210)),
+        cover: Color(light: jHex(0x8C6244), dark: jHex(0x3D2E22)),
+        paper: Color(light: jHex(0xFBF7EF), dark: jHex(0x211E1B)),
+        paperAlt: Color(light: jHex(0xF5EFE3), dark: jHex(0x282420)),
+        paperCard: Color(light: jHex(0xFFFDF9), dark: jHex(0x2A2622)),
+        spine: Color(light: jHex(0xE4D8C4), dark: jHex(0x1A1714)),
+        paperLine: Color(light: jHex(0xA28E72, 0.20), dark: jHex(0xFFE0B4, 0.08)),
+        paperGrid: Color(light: jHex(0xA28E72, 0.08), dark: jHex(0xFFE0B4, 0.035)),
+        border: Color(light: jHex(0x58442E, 0.14), dark: jHex(0xFFE4C4, 0.11)),
+        borderStrong: Color(light: jHex(0x58442E, 0.24), dark: jHex(0xFFE4C4, 0.22)),
+        ink: Color(light: jHex(0x2B231D), dark: jHex(0xEFE7DC)),
+        inkSecondary: Color(light: jHex(0x66584B), dark: jHex(0xB9AB99)),
+        inkTertiary: Color(light: jHex(0x99897A), dark: jHex(0x827566)),
+        stampRed: sharedStampRed,
+        stampGreen: sharedStampGreen,
+        stampAmber: sharedStampAmber,
+        stampPurple: sharedStampPurple,
+        stampBlue: sharedStampBlue,
+        stickyFill: sharedStickyFill,
+        stickyBorder: sharedStickyBorder,
+        highlightFill: sharedHighlightFill
+    )
+
+    private static let cleanPalette = JournalPalette(
+        preset: .clean,
+        desk: Color(light: jHex(0xECEBE7), dark: jHex(0x141413)),
+        cover: Color(light: jHex(0x6E6B64), dark: jHex(0x2F2E2B)),
+        paper: Color(light: jHex(0xFCFBF8), dark: jHex(0x1D1C1A)),
+        paperAlt: Color(light: jHex(0xF5F4EF), dark: jHex(0x232220)),
+        paperCard: Color(light: jHex(0xFFFFFF), dark: jHex(0x252422)),
+        spine: Color(light: jHex(0xE3E2DC), dark: jHex(0x191817)),
+        paperLine: Color(light: jHex(0x787872, 0.13), dark: jHex(0xFFFFFF, 0.06)),
+        paperGrid: Color(light: jHex(0x787872, 0.05), dark: jHex(0xFFFFFF, 0.03)),
+        border: Color(light: jHex(0x000000, 0.09), dark: jHex(0xFFFFFF, 0.10)),
+        borderStrong: Color(light: jHex(0x000000, 0.17), dark: jHex(0xFFFFFF, 0.19)),
+        ink: Color(light: jHex(0x1F1F1D), dark: jHex(0xF1F0EC)),
+        inkSecondary: Color(light: jHex(0x5C5C57), dark: jHex(0xACACA5)),
+        inkTertiary: Color(light: jHex(0x8F8F88), dark: jHex(0x7A7A73)),
+        stampRed: sharedStampRed,
+        stampGreen: sharedStampGreen,
+        stampAmber: sharedStampAmber,
+        stampPurple: sharedStampPurple,
+        stampBlue: sharedStampBlue,
+        stickyFill: sharedStickyFill,
+        stickyBorder: sharedStickyBorder,
+        highlightFill: sharedHighlightFill
+    )
+
+    private init(
+        preset: JournalPaperPreset,
+        desk: Color,
+        cover: Color,
+        paper: Color,
+        paperAlt: Color,
+        paperCard: Color,
+        spine: Color,
+        paperLine: Color,
+        paperGrid: Color,
+        border: Color,
+        borderStrong: Color,
+        ink: Color,
+        inkSecondary: Color,
+        inkTertiary: Color,
+        stampRed: Color,
+        stampGreen: Color,
+        stampAmber: Color,
+        stampPurple: Color,
+        stampBlue: Color,
+        stickyFill: Color,
+        stickyBorder: Color,
+        highlightFill: Color
+    ) {
+        self.preset = preset
+        self.desk = desk
+        self.cover = cover
+        self.paper = paper
+        self.paperAlt = paperAlt
+        self.paperCard = paperCard
+        self.spine = spine
+        self.paperLine = paperLine
+        self.paperGrid = paperGrid
+        self.border = border
+        self.borderStrong = borderStrong
+        self.ink = ink
+        self.inkSecondary = inkSecondary
+        self.inkTertiary = inkTertiary
+        self.stampRed = stampRed
+        self.stampGreen = stampGreen
+        self.stampAmber = stampAmber
+        self.stampPurple = stampPurple
+        self.stampBlue = stampBlue
+        self.stickyFill = stickyFill
+        self.stickyBorder = stickyBorder
+        self.highlightFill = highlightFill
+    }
 
     public init(preset: JournalPaperPreset) {
-        self.preset = preset
-    }
-
-    public var desk: Color {
-        switch preset {
-        case .warm: Color(light: jHex(0xE8E1D3), dark: jHex(0x141210))
-        case .clean: Color(light: jHex(0xECEBE7), dark: jHex(0x141413))
-        }
-    }
-
-    public var cover: Color {
-        switch preset {
-        case .warm: Color(light: jHex(0x8C6244), dark: jHex(0x3D2E22))
-        case .clean: Color(light: jHex(0x6E6B64), dark: jHex(0x2F2E2B))
-        }
-    }
-
-    public var paper: Color {
-        switch preset {
-        case .warm: Color(light: jHex(0xFBF7EF), dark: jHex(0x211E1B))
-        case .clean: Color(light: jHex(0xFCFBF8), dark: jHex(0x1D1C1A))
-        }
-    }
-
-    public var paperAlt: Color {
-        switch preset {
-        case .warm: Color(light: jHex(0xF5EFE3), dark: jHex(0x282420))
-        case .clean: Color(light: jHex(0xF5F4EF), dark: jHex(0x232220))
-        }
-    }
-
-    public var paperCard: Color {
-        switch preset {
-        case .warm: Color(light: jHex(0xFFFDF9), dark: jHex(0x2A2622))
-        case .clean: Color(light: jHex(0xFFFFFF), dark: jHex(0x252422))
-        }
-    }
-
-    public var spine: Color {
-        switch preset {
-        case .warm: Color(light: jHex(0xE4D8C4), dark: jHex(0x1A1714))
-        case .clean: Color(light: jHex(0xE3E2DC), dark: jHex(0x191817))
-        }
-    }
-
-    public var paperLine: Color {
-        switch preset {
-        case .warm: Color(light: jHex(0xA28E72, 0.20), dark: jHex(0xFFE0B4, 0.08))
-        case .clean: Color(light: jHex(0x787872, 0.13), dark: jHex(0xFFFFFF, 0.06))
-        }
-    }
-
-    public var paperGrid: Color {
-        switch preset {
-        case .warm: Color(light: jHex(0xA28E72, 0.08), dark: jHex(0xFFE0B4, 0.035))
-        case .clean: Color(light: jHex(0x787872, 0.05), dark: jHex(0xFFFFFF, 0.03))
-        }
-    }
-
-    public var border: Color {
-        switch preset {
-        case .warm: Color(light: jHex(0x58442E, 0.14), dark: jHex(0xFFE4C4, 0.11))
-        case .clean: Color(light: jHex(0x000000, 0.09), dark: jHex(0xFFFFFF, 0.10))
-        }
-    }
-
-    public var borderStrong: Color {
-        switch preset {
-        case .warm: Color(light: jHex(0x58442E, 0.24), dark: jHex(0xFFE4C4, 0.22))
-        case .clean: Color(light: jHex(0x000000, 0.17), dark: jHex(0xFFFFFF, 0.19))
-        }
-    }
-
-    public var ink: Color {
-        switch preset {
-        case .warm: Color(light: jHex(0x2B231D), dark: jHex(0xEFE7DC))
-        case .clean: Color(light: jHex(0x1F1F1D), dark: jHex(0xF1F0EC))
-        }
-    }
-
-    public var inkSecondary: Color {
-        switch preset {
-        case .warm: Color(light: jHex(0x66584B), dark: jHex(0xB9AB99))
-        case .clean: Color(light: jHex(0x5C5C57), dark: jHex(0xACACA5))
-        }
-    }
-
-    public var inkTertiary: Color {
-        switch preset {
-        case .warm: Color(light: jHex(0x99897A), dark: jHex(0x827566))
-        case .clean: Color(light: jHex(0x8F8F88), dark: jHex(0x7A7A73))
-        }
-    }
-
-    public var stampRed: Color {
-        Color(light: jHex(0xC83E37), dark: jHex(0xEF6F68))
-    }
-
-    public var stampGreen: Color {
-        Color(light: jHex(0x18794E), dark: jHex(0x4ADE80))
-    }
-
-    public var stampAmber: Color {
-        Color(light: jHex(0xB45309), dark: jHex(0xFBBF24))
-    }
-
-    public var stampPurple: Color {
-        Color(light: jHex(0x6D28D9), dark: jHex(0xC084FC))
-    }
-
-    public var stampBlue: Color {
-        Color(light: jHex(0x2B59C3), dark: jHex(0x7AA2F7))
-    }
-
-    public var stickyFill: Color {
-        Color(light: jHex(0xFEF7CD), dark: jHex(0x332C19))
-    }
-
-    public var stickyBorder: Color {
-        Color(light: jHex(0xEADB89), dark: jHex(0x5C4D26))
-    }
-
-    public var highlightFill: Color {
-        Color(light: jHex(0xFEF08A, 0.72), dark: jHex(0xFACC15, 0.24))
+        self = preset == .warm ? Self.warmPalette : Self.cleanPalette
     }
 
     public static func serif(_ size: CGFloat, _ weight: Font.Weight = .bold) -> Font {
@@ -357,8 +384,11 @@ public struct JournalSpreadShell<HeaderActions: View, LeftPage: View, RightPage:
                         }
                         .clipShape(.rect(cornerRadius: 10))
                         .padding(5)
-                        .background(p.cover, in: .rect(cornerRadius: 14))
-                        .shadow(color: .black.opacity(0.14), radius: 14, y: 6)
+                        .background {
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(p.cover)
+                                .shadow(color: .black.opacity(0.14), radius: 14, y: 6)
+                        }
 
                         if onSelectChapter != nil || (showHistoryTab && onOpenHistory != nil) {
                             JournalIndexTabs(
@@ -662,6 +692,7 @@ private struct JournalGridBackground: View {
             }
             ctx.stroke(path, with: .color(lineColor), lineWidth: 1)
         }
+        .drawingGroup()
         .allowsHitTesting(false)
     }
 }
@@ -681,6 +712,7 @@ private struct JournalRuledBackground: View {
             }
             ctx.stroke(path, with: .color(lineColor), lineWidth: 1)
         }
+        .drawingGroup()
         .allowsHitTesting(false)
     }
 }
@@ -829,7 +861,11 @@ public struct JournalPaperCard<Content: View>: View {
                 .padding(padding)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(highlighted ? palette.stickyFill : palette.paperCard)
+        .background {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(highlighted ? palette.stickyFill : palette.paperCard)
+                .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+        }
         .clipShape(.rect(cornerRadius: 10))
         .overlay {
             RoundedRectangle(cornerRadius: 10)
@@ -845,7 +881,6 @@ public struct JournalPaperCard<Content: View>: View {
                     .padding(.trailing, 10)
             }
         }
-        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
     }
 }
 
@@ -862,15 +897,16 @@ public struct JournalStickyNote<Content: View>: View {
         content
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                palette.stickyFill,
-                in: UnevenRoundedRectangle(
+            .background {
+                UnevenRoundedRectangle(
                     topLeadingRadius: 4,
                     bottomLeadingRadius: 12,
                     bottomTrailingRadius: 12,
                     topTrailingRadius: 12
                 )
-            )
+                .fill(palette.stickyFill)
+                .shadow(color: .black.opacity(0.06), radius: 5, x: 1, y: 3)
+            }
             .overlay {
                 UnevenRoundedRectangle(
                     topLeadingRadius: 4,
@@ -880,7 +916,6 @@ public struct JournalStickyNote<Content: View>: View {
                 )
                 .strokeBorder(palette.stickyBorder)
             }
-            .shadow(color: .black.opacity(0.06), radius: 5, x: 1, y: 3)
             .rotationEffect(.degrees(-0.35))
     }
 }

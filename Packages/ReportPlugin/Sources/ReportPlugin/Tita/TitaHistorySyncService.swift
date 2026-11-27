@@ -24,6 +24,7 @@ public nonisolated enum TitaHistorySyncService {
             tenantID: tenantID,
             userID: userID
         )
+        defer { client.invalidate() }
 
         if tenantID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || userID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -164,7 +165,8 @@ public nonisolated enum TitaHistorySyncService {
                 providerName: providerName,
                 totalHours: existing?.totalHours ?? 0,
                 generatedAt: existing?.generatedAt ?? timestamp,
-                updatedAt: timestamp
+                updatedAt: timestamp,
+                monthlyOKR: existing?.monthlyOKR ?? ""
             )
             store.saveMonthly(record)
             if existing == nil {

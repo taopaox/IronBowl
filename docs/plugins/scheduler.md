@@ -19,7 +19,7 @@
    - 每条任务支持「立即运行」手动试跑、编辑配置、删除（带确认）及独立启停开关；开启常驻不消失的打卡提醒任务会显示「常驻不消失」标签。
    - 若某任务绑定的业务插件被停用，页面会高亮「对应插件未启用」提示并引导前往「设置 → 通用」。
 3. **动态动作表单与下班前预览**：
-   - 在 `TaskEditorSheet` 中根据选中动作（如 `zentao.autoSubmitLog`、`core.clockOutReminder`、`core.reminder`、`core.shell`）自动渲染开关、下拉选择器、单行/多行文本输入框与步进器。
+   - 在 `TaskEditorSheet` 中根据选中动作（如 `zentao.autoSubmitLog`、`report.autoGenerateWeekly`、`report.autoGenerateMonthly`、`core.clockOutReminder`、`core.reminder`、`core.shell`）自动渲染开关、下拉选择器、单行/多行文本输入框与步进器。
    - 周期选择「下班前（工作日）」时提供提前分钟数步进器与今日实际下班参考触发时间预览；内置提醒类动作自动隐藏冗余的通知时机选项。
 4. **执行记录审计**：
    - 支持按状态（全部 / 成功 / 跳过 / 失败）与任务筛选，展示触发来源（定时触发 / 错过补执行 / 手动运行）、执行耗时、结果摘要与可展开/复制的完整详细日志。

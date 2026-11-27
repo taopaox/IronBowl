@@ -119,6 +119,23 @@ public final class AIWebPlugin: IronBowlPlugin {
         ]
     }
 
+    public var paletteCommands: [PaletteCommand] {
+        guard let model else { return [] }
+        return model.apps.map { app in
+            PaletteCommand(
+                id: "aiweb.app.\(app.id)",
+                title: "打开 \(app.name)",
+                subtitle: app.url,
+                keywords: ["ai", app.name, app.url],
+                systemImage: app.logo.defaultSymbolFallback,
+                badge: "AI 网页"
+            ) {
+                model.selectApp(app.id)
+                model.openPlugin(Self.pluginID)
+            }
+        }
+    }
+
     public var homeCards: [HomeCard] {
         guard let model else { return [] }
         return [

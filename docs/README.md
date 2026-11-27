@@ -27,7 +27,11 @@ docs/
 │   ├── feishu.md                     # 飞书知识库插件（内嵌网页与固定网页）
 │   ├── ai-web.md                     # AI 网页目录插件（20 个预设、Logo 与侧栏目录）
 │   ├── scheduler.md                  # 定时任务插件（任务管理、编辑器与执行记录）
-│   └── report.md                     # 周报月报插件（周/月日报查询、AI 汇总与导出）
+│   ├── report.md                     # 周报月报与述职插件（周/月日报汇总、季度年报、牛马账本）
+│   ├── todo.md                       # 待办与备忘插件（与万年历、禅道日报及提醒中心联动）
+│   ├── scratchpad.md                 # 随手便签插件（剪贴板历史、常用片段、Markdown 与 JSON）
+│   ├── workspace.md                  # 本地仓库工作台插件（分支状态巡检、编辑器与 AI 启动）
+│   └── devtools.md                   # 研发工具箱插件（本地端口管家与离线编解码/JWT/Diff）
 ├── apps/                             # 可执行应用宿主
 │   ├── ironbowl.md                   # 饭碗主工作台应用（Apps/IronBowl）
 │   └── standalone-calendar.md        # 独立版万年历应用（Apps/Calendar）
@@ -54,7 +58,11 @@ docs/
 | 知识库集成 | [飞书知识库](./plugins/feishu.md) | 方案拦截、上传下载、固定网页到工作台侧边栏 |
 | AI 网页聚合 | [AI 目录](./plugins/ai-web.md) | 侧栏可折叠目录、20 个预设、本地/远程 Logo 管理 |
 | 自动化任务 | [定时任务](./plugins/scheduler.md) | 任务列表、动态动作参数编辑器、执行日志审计与菜单栏倒计时 |
-| 周报与月报 | [周报与月报](./plugins/report.md) | 独立「周报」「月报」菜单：按周/月查询禅道与本地每日日报、AI 提炼、预览导出及直连 Tita 同步历史/存草稿/提交 |
+| 周报、月报、账本与述职 | [周报、月报与账本](./plugins/report.md) | 独立「周报」「月报」「牛马账本」「季度/年报」菜单：周/月日报汇总、直连 Tita、工时打卡看板与述职/年度报告 |
+| 待办与备忘 | [待办与备忘](./plugins/todo.md) | 跨万年历与禅道日报共享的待办日程、逾期统计、定时提醒与一键转入日报草稿 |
+| 随手便签 | [随手便签](./plugins/scratchpad.md) | 全局 `⌃⌥⌘N` 悬浮便签、剪贴板历史监听、常用片段库、JSON 美化/压缩及转待办/转日报 |
+| 本地仓库工作台 | [代码仓库](./plugins/workspace.md) | 汇总本地 Git 仓库分支、未提交/未推送状态与关联项目，一键启动编辑器/终端/AI 对话 |
+| 研发工具箱 | [研发工具](./plugins/devtools.md) | 本地 TCP 监听端口查看与安全 Kill、时间戳/JWT/编解码/哈希与文本 Diff |
 | 宿主应用 | [工作台主应用](./apps/ironbowl.md) · [独立版万年历](./apps/standalone-calendar.md) | 窗口、菜单栏、程序坞策略、开机自启与双应用数据共享 |
 | 开发与测试 | [开发与测试指南](./development/getting-started.md) · [插件开发指南](./development/plugin-guide.md) | XcodeGen、`xcodebuild`、`swift test` 与新插件接入步骤 |
 
@@ -63,4 +71,5 @@ docs/
 - **共享数据库**：`~/Library/Application Support/IronBowl/ironbowl.sqlite`
 - **应用日志目录**：`~/Library/Application Support/IronBowl/logs/`（含禅道接口调试日志 `zentao.log`、Tita 接口调试日志 `tita.log`）
 - **AI 图标目录**：`~/Library/Application Support/IronBowl/ai-logos/`
+- **个人头像目录**：`~/Library/Application Support/IronBowl/user-avatars/`
 - **默认 Debug 构建产物**：`build/DerivedData/Build/Products/Debug/IronBowl.app` 与 `IronBowlCalendar.app`

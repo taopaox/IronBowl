@@ -514,7 +514,7 @@ import Testing
     #expect(monthlyPlugin.sidebarSection == "汇报")
 
     let combinedMigrations = weeklyPlugin.migrations + monthlyPlugin.migrations
-    #expect(Set(combinedMigrations.map(\.identifier)).count == 2)
+    #expect(Set(combinedMigrations.map(\.identifier)).count == 3)
 
     let db = try AppDatabase(url: url, migrations: ZentaoLogPlugin().migrations + combinedMigrations)
     let settings = SettingsStore(database: db)
@@ -684,12 +684,44 @@ import Testing
     #expect(stdMapped[1].contains("联调延迟"))
     #expect(stdMapped[3].contains("推进任务 B"))
 
-    // HTML 转换验证
+    // ProseMirror EditorState JSON 转换与双向往返验证
     let converted = TitaRichTextConverter.convert(markdown: mapped[0])
-    #expect(converted.richText.contains("<strong>饭碗</strong>"))
-    #expect(converted.richText.contains("<ol><li class=\"tita-rich-editor-li\"><p style=\"text-align:left\">完成 <strong>Tita</strong> 对接 <code>API</code> 开发</p></li>"))
+    #expect(!converted.richText.contains("<p"))
+    #expect(!converted.richText.contains("<ul"))
+    #expect(!converted.richText.contains("<ol"))
+
+    let jsonData = try #require(converted.richText.data(using: .utf8))
+    let stateObj = try #require((try JSONSerialization.jsonObject(with: jsonData)) as? [String: Any])
+    let docObj = try #require(stateObj["doc"] as? [String: Any])
+    #expect(docObj["type"] as? String == "doc")
+    let selectionObj = try #require(stateObj["selection"] as? [String: Any])
+    #expect(selectionObj["type"] as? String == "text")
+    let contentNodes = try #require(docObj["content"] as? [[String: Any]])
+    #expect(contentNodes.first?["type"] as? String == "paragraph")
+    #expect(contentNodes.contains { ($0["type"] as? String) == "orderedList" })
+
+    // 确认无空文本节点
+    let roundtripMd = TitaProseMirrorParser.toMarkdown(richContent: converted.richText)
+    #expect(roundtripMd.contains("**饭碗**"))
+    #expect(roundtripMd.contains("1. 完成 **Tita** 对接 API 开发"))
+    #expect(roundtripMd.contains("2. 支持自动拆分"))
+
+    // 列表首行时 selection 从 3 开始，空内容时生成单段落合法 JSON
+    let bulletConverted = TitaRichTextConverter.convert(markdown: "- 第一条\n- 第二条")
+    let bulletState = try #require((try JSONSerialization.jsonObject(with: Data(bulletConverted.richText.utf8))) as? [String: Any])
+    #expect((bulletState["selection"] as? [String: Any])?["anchor"] as? Int == 3)
+    #expect(TitaProseMirrorParser.toMarkdown(richContent: bulletConverted.richText).contains("- 第一条"))
+
+    let emptyConverted = TitaRichTextConverter.convert(markdown: "   ")
+    let emptyState = try #require((try JSONSerialization.jsonObject(with: Data(emptyConverted.richText.utf8))) as? [String: Any])
+    let emptyDoc = try #require(emptyState["doc"] as? [String: Any])
+    let emptyContent = try #require(emptyDoc["content"] as? [[String: Any]])
+    #expect(emptyContent.count == 1)
+    #expect(emptyContent[0]["type"] as? String == "paragraph")
+    #expect(emptyContent[0]["content"] == nil)
+
     #expect(converted.plainText.contains("完成 Tita 对接 API 开发"))
-    #expect(TitaRichTextConverter.plainTextFromHTML(converted.richText).contains("饭碗"))
+    #expect(TitaRichTextConverter.plainTextFromHTML("<p style=\"text-align:left\"><strong>饭碗</strong></p>").contains("饭碗"))
 
     // 风格兜底测试 (.tita)
     let week = WeekRange.fromStartDateString("2026-11-23")!
@@ -1100,4 +1132,611 @@ import Testing
     #expect(ReportChatHandler.match("修复周报页面的 bug", periodKind: .weekly) == nil)
     #expect(ReportChatHandler.match("ReportPlugin 代码里周报怎么生成的", periodKind: .weekly) == nil)
     #expect(ReportChatHandler.match("分析一下月报测试文件", periodKind: .monthly) == nil)
+}
+
+@Test func workLedgerComputesMonthlyAndYearlyStatsCorrectly() {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = .current
+
+    let d1 = cal.date(from: DateComponents(year: 2026, month: 11, day: 2))!
+    let d2 = cal.date(from: DateComponents(year: 2026, month: 11, day: 3))!
+    let d3 = cal.date(from: DateComponents(year: 2026, month: 11, day: 7))! // 周六加班
+
+    let ds1 = WorkCalendar.dayString(d1)
+    let ds2 = WorkCalendar.dayString(d2)
+    let ds3 = WorkCalendar.dayString(d3)
+
+    let ci1 = cal.date(from: DateComponents(year: 2026, month: 11, day: 2, hour: 8, minute: 40))!
+    let ci2 = cal.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 9, minute: 10))!
+
+    let itemsByDate: [String: [DailyLogItem]] = [
+        ds1: [
+            DailyLogItem(id: "1", date: ds1, taskID: 1, taskTitle: "核心开发", projectID: 10, projectName: "饭碗", hours: 6, work: "开发", isOvertime: false, isDraft: false),
+            DailyLogItem(id: "2", date: ds1, taskID: 2, taskTitle: "支撑", projectID: 20, projectName: "底座", hours: 2, work: "修bug", isOvertime: false, isDraft: false),
+        ],
+        ds2: [
+            DailyLogItem(id: "3", date: ds2, taskID: 1, taskTitle: "核心开发", projectID: 10, projectName: "饭碗", hours: 8, work: "开发", isOvertime: false, isDraft: false),
+            DailyLogItem(id: "4", date: ds2, taskID: 1, taskTitle: "核心开发", projectID: 10, projectName: "饭碗", hours: 2.5, work: "加班发版", isOvertime: true, isDraft: false),
+        ],
+    ]
+
+    let summary = WorkLedgerSummary.computeSummary(
+        year: 2026,
+        dates: [d1, d2, d3],
+        workdayFlags: [ds1: true, ds2: true, ds3: false],
+        itemsByDate: itemsByDate,
+        clockInsByDate: [ds1: ci1, ds2: ci2],
+        plannedOvertimeByDate: [ds3: 3.0],
+        offWorkTextByDate: [ds1: "17:40", ds2: "20:40"]
+    )
+
+    #expect(summary.normalHours == 16)
+    #expect(summary.overtimeHours == 5.5) // 2.5 (d2) + 3.0 (d3 planned)
+    #expect(summary.totalHours == 21.5)
+    #expect(summary.overtimeDaysCount == 2)
+    #expect(summary.loggedDaysCount == 2)
+    #expect(summary.expectedWorkdaysCount == 2)
+    #expect(summary.clockInDaysCount == 2)
+    #expect(summary.averageClockInText == "08:55")
+    #expect(summary.earliestClockInText?.contains("08:40") == true)
+    #expect(summary.latestOffWorkText?.contains("20:40") == true)
+    #expect(summary.projectBreakdown.count == 2)
+    #expect(summary.projectBreakdown[0].projectName == "饭碗")
+    #expect(summary.projectBreakdown[0].hours == 16.5)
+
+    let novBucket = summary.monthlyBuckets.first { $0.month == 11 }
+    #expect(novBucket?.normalHours == 16)
+    #expect(novBucket?.overtimeHours == 5.5)
+}
+
+@MainActor @Test func workLedgerPluginMetadataAndHomeCard() throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "ledger-plugin-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let db = try AppDatabase(url: url, migrations: LogMigrations.all + ReportMigrations.all)
+    let settings = SettingsStore(database: db)
+    let ctx = PluginContext(
+        database: db,
+        settings: settings,
+        reminders: ReminderCenter(),
+        workCalendar: WorkCalendar(database: db, settings: settings),
+        providers: AIProviderStore(settings: settings),
+        openPlugin: { _ in },
+        openSettings: { _ in }
+    )
+    let plugin = WorkLedgerPlugin()
+    #expect(plugin.id == "report.stats")
+    #expect(plugin.title == "牛马账本")
+    #expect(plugin.sidebarSection == "汇报")
+    plugin.start(context: ctx)
+    #expect(plugin.homeCards.count == 1)
+    #expect(plugin.homeCards[0].value() == "0h")
+    plugin.stop()
+}
+
+@Test func titaClientParsingIgnoresNonPositiveTemplateIDsAndResolvesFallbacks() throws {
+    // 1. summary/status 返回 tempId=0 或负数或缺失时应解析为 nil，正整数与数字字符串正常保留
+    let zeroStatus = TitaClient.parseStatus(
+        ["summaryStatus": 3, "summaryId": "880017_804751550_26_5_123", "tempId": 0],
+        summaryType: .weekly,
+        summaryDate: "2026-11-04"
+    )
+    #expect(zeroStatus.state == .unSubmit)
+    #expect(zeroStatus.templateID == nil)
+
+    let negativeStatus = TitaClient.parseStatus(
+        ["summaryStatus": 0, "summaryId": "", "tempId": -1],
+        summaryType: .weekly,
+        summaryDate: "2026-11-04"
+    )
+    #expect(negativeStatus.templateID == nil)
+
+    let missingStatus = TitaClient.parseStatus(
+        ["summaryStatus": 1, "summaryId": "abc"],
+        summaryType: .monthly,
+        summaryDate: "2026-11-01"
+    )
+    #expect(missingStatus.templateID == nil)
+
+    let validStatus = TitaClient.parseStatus(
+        ["summaryStatus": 1, "summaryId": "abc", "tempId": "1006"],
+        summaryType: .weekly,
+        summaryDate: "2026-11-04"
+    )
+    #expect(validStatus.templateID == 1006)
+
+    // 2. summary/selectTemplates 过滤 id <= 0 的非法模板
+    let parsedTemplates = TitaClient.parseTemplates([
+        ["id": 0, "name": "无效占位模板"],
+        ["templateId": -5, "templateName": "负数模板"],
+        [
+            "id": 1006,
+            "name": " 周报 ",
+            "summaryTemplateModules": [
+                ["moduleName": "下一步工作计划", "moduleType": "richtext", "moduleObjType": 0, "sortIndex": 6],
+                ["moduleName": "工作总结（亮点与成功经验）", "moduleType": "richtext", "moduleObjType": 0, "sortIndex": 3],
+                ["moduleName": "心情", "moduleType": "select", "moduleObjType": 1, "sortIndex": 1],
+            ],
+        ],
+    ])
+    #expect(parsedTemplates.count == 1)
+    #expect(parsedTemplates[0].templateID == 1006)
+    #expect(parsedTemplates[0].name == "周报")
+    #expect(parsedTemplates[0].richtextModuleNames == ["工作总结（亮点与成功经验）", "下一步工作计划"])
+
+    // 3. summary/detail 返回 summaryTemplateId=0 时回退默认模板 ID
+    let weeklyDetail = try TitaClient.parseDetail(
+        ["dailyId": "feed-1", "summaryType": 26, "dailyDate": "2026-11-04", "summaryTemplateId": 0, "details": []],
+        fallbackType: .weekly,
+        fallbackDate: "2026-11-04"
+    )
+    #expect(weeklyDetail.templateID == 1006)
+
+    let monthlyDetail = try TitaClient.parseDetail(
+        ["dailyId": "feed-2", "summaryType": 27, "dailyDate": "2026-11-01", "summaryTemplateId": 0, "details": []],
+        fallbackType: .monthly,
+        fallbackDate: "2026-11-01"
+    )
+    #expect(monthlyDetail.templateID == 1007)
+
+    // 4. WeeklyReportModel 模板 ID 决策永不返回 0
+    #expect(WeeklyReportModel.resolveTitaTemplateID(
+        detailTemplateID: nil,
+        statusTemplateID: 0,
+        savedTemplateID: 0,
+        matchedTemplateID: nil,
+        summaryType: .weekly
+    ) == 1006)
+    #expect(WeeklyReportModel.resolveTitaTemplateID(
+        detailTemplateID: nil,
+        statusTemplateID: 0,
+        savedTemplateID: 0,
+        matchedTemplateID: nil,
+        summaryType: .monthly
+    ) == 1007)
+    #expect(WeeklyReportModel.resolveTitaTemplateID(
+        detailTemplateID: nil,
+        statusTemplateID: 0,
+        savedTemplateID: 1006,
+        matchedTemplateID: 2048,
+        summaryType: .weekly
+    ) == 2048)
+    #expect(WeeklyReportModel.resolveTitaTemplateID(
+        detailTemplateID: 3001,
+        statusTemplateID: 1006,
+        savedTemplateID: 1006,
+        matchedTemplateID: 2048,
+        summaryType: .weekly
+    ) == 3001)
+}
+
+@Test func titaClientTransportRetryAndErrorMappingRules() {
+    // 1. TLS 握手/建连阶段失败：GET 与 POST 均安全重试
+    #expect(TitaClient.shouldRetryTransportError(URLError(.secureConnectionFailed), method: "GET", path: "/api/v1/1/2/summary/status"))
+    #expect(TitaClient.shouldRetryTransportError(URLError(.secureConnectionFailed), method: "POST", path: "/api/v1/1/2/summary/submit/abc/1"))
+    #expect(TitaClient.shouldRetryTransportError(URLError(.cannotConnectToHost), method: "POST", path: "/api/v1/1/2/summary/create/2026-11-04/26/1006"))
+
+    // 2. 超时/断连：仅幂等请求重试，不重试正式提交与创建
+    #expect(TitaClient.shouldRetryTransportError(URLError(.timedOut), method: "GET", path: "/api/v1/1/2/summary/selectTemplates"))
+    #expect(TitaClient.shouldRetryTransportError(URLError(.networkConnectionLost), method: "POST", path: "/api/v1/1/2/summary/detail"))
+    #expect(TitaClient.shouldRetryTransportError(URLError(.timedOut), method: "POST", path: "/api/v1/1/2/summary/richtext/update"))
+    #expect(!TitaClient.shouldRetryTransportError(URLError(.timedOut), method: "POST", path: "/api/v1/1/2/summary/submit/abc/1"))
+    #expect(!TitaClient.shouldRetryTransportError(URLError(.networkConnectionLost), method: "POST", path: "/api/v1/1/2/summary/create/2026-11-04/26/1006"))
+
+    // 3. 证书校验失败与取消错误不重试
+    #expect(!TitaClient.shouldRetryTransportError(URLError(.serverCertificateUntrusted), method: "GET", path: "/api/v1/1/2/summary/status"))
+    #expect(!TitaClient.shouldRetryTransportError(URLError(.cancelled), method: "GET", path: "/api/v1/1/2/summary/status"))
+    #expect(!TitaClient.shouldRetryTransportError(CancellationError(), method: "GET", path: "/api/v1/1/2/summary/status"))
+
+    // 4. TLS 错误映射为可读网络提示
+    let mapped = TitaClient.mapTransportError(URLError(.secureConnectionFailed)) as? TitaError
+    #expect(mapped != nil)
+    #expect(mapped?.localizedDescription.contains("TLS") == true)
+    #expect(mapped?.localizedDescription.contains("tita.net") == true)
+
+    let untouched = TitaClient.mapTransportError(URLError(.timedOut)) as? URLError
+    #expect(untouched?.code == .timedOut)
+}
+
+@Test func titaClientParseDetailExtractsCleanMarkdownFromProseMirrorAndTitaNewlines() throws {
+    let proseMirrorJSON = #"{"doc":{"type":"doc","content":[{"type":"orderedList","attrs":{"order":1},"content":[{"type":"listItem","content":[{"type":"paragraph","attrs":{"textAlign":"left"},"content":[{"type":"text","marks":[{"type":"strong"}],"text":"重点工作："},{"type":"text","text":"完成联调"}]}]}]}]},"selection":{"type":"text","anchor":3,"head":3}}"#
+    let detail = try TitaClient.parseDetail(
+        [
+            "dailyId": "feed-pm",
+            "summaryType": 26,
+            "dailyDate": "2026-11-03",
+            "summaryTemplateId": 1006,
+            "details": [
+                [
+                    "moduleId": 11,
+                    "moduleName": "亮点",
+                    "moduleType": "richtext",
+                    "moduleObjType": 0,
+                    "sortIndex": 1,
+                    "isDelete": false,
+                    "objectData": [
+                        "text": "#tita-n#重点工作：完成联调",
+                        "richText": proseMirrorJSON,
+                    ],
+                ],
+                [
+                    "moduleId": 12,
+                    "moduleName": "问题",
+                    "moduleType": "richtext",
+                    "moduleObjType": 0,
+                    "sortIndex": 2,
+                    "isDelete": false,
+                    "objectData": [
+                        "text": "#tita-n#第一行#tita-n#第二行",
+                        "richText": "",
+                    ],
+                ],
+            ],
+        ],
+        fallbackType: .weekly,
+        fallbackDate: "2026-11-03"
+    )
+    #expect(detail.richtextModules.count == 2)
+    #expect(detail.richtextModules[0].plainText == "1. **重点工作：**完成联调")
+    #expect(!detail.richtextModules[0].plainText.contains("#tita-n#"))
+    #expect(detail.richtextModules[1].plainText == "第一行\n第二行")
+}
+
+@Test func workLedgerSummaryComputesStayHoursAndAnomalies() {
+    let cal = Calendar(identifier: .gregorian)
+    let d1 = cal.date(from: DateComponents(year: 2026, month: 11, day: 24))!
+    let d2 = cal.date(from: DateComponents(year: 2026, month: 11, day: 25))!
+    let ci1 = cal.date(from: DateComponents(year: 2026, month: 11, day: 24, hour: 8, minute: 55))!
+    let co1 = cal.date(from: DateComponents(year: 2026, month: 11, day: 24, hour: 18, minute: 10))!
+
+    let summary = WorkLedgerSummary.computeSummary(
+        year: 2026,
+        dates: [d1, d2],
+        workdayFlags: ["2026-11-24": true, "2026-11-25": true],
+        itemsByDate: [
+            "2026-11-24": [DailyLogItem(id: "1", date: "2026-11-24", taskID: 1, taskTitle: "A", projectID: 1, projectName: "饭碗", hours: 8, work: "开发", isOvertime: false, isDraft: false)],
+        ],
+        clockInsByDate: ["2026-11-24": ci1],
+        clockOutsByDate: ["2026-11-24": co1],
+        stayHoursByDate: ["2026-11-24": 8.25],
+        anomaliesByDate: ["2026-11-25": ["缺上班卡", "缺下班卡"]],
+        plannedOvertimeByDate: [:]
+    )
+
+    #expect(summary.clockOutDaysCount == 1)
+    #expect(abs(summary.actualStayHours - 8.25) < 0.01)
+    #expect(summary.anomalyDays.count == 1)
+    #expect(summary.anomalyDays[0].dateString == "2026-11-25")
+    #expect(summary.anomalyDays[0].reasons == "缺上班卡、缺下班卡")
+    #expect(summary.dailyCells[0].clockOutText == "18:10")
+}
+
+@MainActor @Test func reportPluginRegistersScheduledAutoGenerateActionsAndProtectsExistingDrafts() async throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "report-sched-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let migrations = ZentaoLogPlugin().migrations + ReportMigrations.all
+    let db = try AppDatabase(url: url, migrations: migrations)
+    let settings = SettingsStore(database: db)
+    let workCalendar = WorkCalendar(database: db, settings: settings)
+    let context = PluginContext(
+        database: db,
+        settings: settings,
+        reminders: ReminderCenter(database: db),
+        workCalendar: workCalendar,
+        providers: AIProviderStore(settings: settings),
+        openPlugin: { _ in },
+        openSettings: { _ in }
+    )
+
+    let weeklyPlugin = ReportPlugin()
+    let monthlyPlugin = MonthlyReportPlugin()
+    weeklyPlugin.start(context: context)
+    monthlyPlugin.start(context: context)
+    defer {
+        weeklyPlugin.stop()
+        monthlyPlugin.stop()
+    }
+
+    #expect(context.scheduler.action(id: ReportPlugin.autoGenerateActionID) != nil)
+    #expect(context.scheduler.action(id: MonthlyReportPlugin.autoGenerateActionID) != nil)
+    #expect(context.scheduler.tasks.contains { $0.id == ReportPlugin.defaultAutoGenerateTaskID })
+
+    // 1. 本周无任何日报时，自动跳过
+    await context.scheduler.runNow(taskID: ReportPlugin.defaultAutoGenerateTaskID)
+    #expect(context.scheduler.recentRuns.first?.status == .skipped)
+
+    // 2. 写入本周日志后运行，自动规则汇总生成周报
+    let logStore = LogStore(db: db)
+    let week = WeekRange.containing(Date())
+    logStore.add(Submission(id: nil, date: week.dayStrings[0], taskID: 1, hours: 8, left: 0, work: "1. 完成定时期末汇总", isOvertime: false, submittedAt: Date()))
+
+    await context.scheduler.runNow(taskID: ReportPlugin.defaultAutoGenerateTaskID)
+    #expect(context.scheduler.recentRuns.first?.status == .succeeded)
+    #expect(weeklyPlugin.model?.hasCurrentWeekReport == true)
+    #expect(weeklyPlugin.model?.reportContent.contains("完成定时期末汇总") == true)
+
+    // 3. 手动修改后再次不带覆盖标志运行，应保留既有内容
+    weeklyPlugin.model?.reportContent = "手工精修周报内容"
+    weeklyPlugin.model?.saveEditsIfNeeded()
+    await context.scheduler.runNow(taskID: ReportPlugin.defaultAutoGenerateTaskID)
+    #expect(weeklyPlugin.model?.reportContent == "手工精修周报内容")
+}
+
+@MainActor @Test func reviewRangeAnnualReviewGeneratorAndStoreWorkEndToEnd() async throws {
+    let cal = Calendar(identifier: .gregorian)
+    let nov = cal.date(from: DateComponents(year: 2026, month: 11, day: 27))!
+
+    let q4 = ReviewRange.containing(nov, scopeKind: .quarterly)
+    #expect(q4.periodKey == "2026-Q4")
+    #expect(q4.title == "2026年第4季度")
+    #expect(q4.months == [10, 11, 12])
+    #expect(q4.shifted(by: 1).periodKey == "2027-Q1")
+    #expect(q4.shifted(by: -1).periodKey == "2026-Q3")
+    #expect(ReviewRange.fromPeriodKey("2026-Q4") == q4)
+
+    let h2 = ReviewRange.containing(nov, scopeKind: .halfYearly)
+    #expect(h2.periodKey == "2026-H2")
+    #expect(h2.months == [7, 8, 9, 10, 11, 12])
+    #expect(ReviewRange.fromPeriodKey("2026-H2") == h2)
+
+    let y = ReviewRange.containing(nov, scopeKind: .yearly)
+    #expect(y.periodKey == "2026")
+    #expect(y.monthKeys.count == 12)
+    #expect(y.startDateString == "2026-01-01")
+    #expect(y.endDateString == "2026-12-31")
+    #expect(ReviewRange.fromPeriodKey("2026") == y)
+
+    let url = FileManager.default.temporaryDirectory.appending(path: "review-store-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let migrations = ZentaoLogPlugin().migrations + ReportMigrations.all
+    let db = try AppDatabase(url: url, migrations: migrations)
+    let settings = SettingsStore(database: db)
+    let store = ReportStore(db: db)
+
+    let m1 = MonthlyReportRecord(
+        monthKey: "2026-11",
+        periodStart: "2026-11-01",
+        periodEnd: "2026-11-30",
+        title: "2026年11月月报",
+        content: "## 本月重点成果\n\n1. 完成饭碗架构升级",
+        extraNotes: "",
+        style: WeeklyReportStyle.standard.rawValue,
+        providerName: "本地规则汇总",
+        totalHours: 160,
+        generatedAt: Date(),
+        updatedAt: Date()
+    )
+    store.saveMonthly(m1)
+    #expect(store.monthlyReports(matchingMonthKeys: y.monthKeys).count == 1)
+
+    let ledger = WorkLedgerSummary.computeSummary(
+        year: 2026,
+        dates: [nov],
+        workdayFlags: ["2026-11-27": true],
+        itemsByDate: [
+            "2026-11-27": [DailyLogItem(id: "1", date: "2026-11-27", taskID: 1, taskTitle: "述职", projectID: 1, projectName: "饭碗", hours: 10, work: "开发年报", isOvertime: true, isDraft: false)],
+        ],
+        clockInsByDate: [:],
+        plannedOvertimeByDate: ["2026-11-27": 2]
+    )
+    let git = GitPeriodStats(
+        commitCount: 42,
+        activeRepoCount: 2,
+        addedLines: 3200,
+        deletedLines: 450,
+        topRepos: [GitRepoCommitCount(name: "IronBowl", commits: 40)],
+        busiestMonth: "2026-11"
+    )
+    let input = AnnualReviewInput(
+        range: y,
+        style: .performanceSTAR,
+        ledgerSummary: ledger,
+        monthlyReports: [m1],
+        gitStats: git,
+        extraNotes: "主导完成年度重构",
+        promptTemplate: AnnualReviewGenerator.defaultPrompt
+    )
+    let out = await AnnualReviewGenerator.generate(input, provider: nil)
+    #expect(!out.usedAI)
+    #expect(out.content.contains("## 量化工作概览"))
+    #expect(out.content.contains("42 次"))
+    #expect(out.content.contains("完成饭碗架构升级"))
+    #expect(out.content.contains("主导完成年度重构"))
+
+    let reviewRec = ReviewReportRecord(
+        periodKey: y.periodKey,
+        scopeKind: y.scopeKind.rawValue,
+        periodStart: y.startDateString,
+        periodEnd: y.endDateString,
+        title: out.title,
+        content: out.content,
+        extraNotes: "主导完成年度重构",
+        style: AnnualReviewStyle.performanceSTAR.rawValue,
+        providerName: "本地规则汇总",
+        totalHours: ledger.totalHours,
+        overtimeHours: ledger.overtimeHours,
+        commitCount: git.commitCount,
+        generatedAt: Date(),
+        updatedAt: Date()
+    )
+    store.saveReview(reviewRec)
+    #expect(store.reviewReport(forPeriodKey: "2026")?.commitCount == 42)
+    #expect(store.recentReviews().count == 1)
+
+    let context = PluginContext(
+        database: db,
+        settings: settings,
+        reminders: ReminderCenter(database: db),
+        workCalendar: WorkCalendar(database: db, settings: settings),
+        providers: AIProviderStore(settings: settings),
+        openPlugin: { _ in },
+        openSettings: { _ in }
+    )
+    let plugin = AnnualReviewPlugin()
+    plugin.start(context: context)
+    #expect(plugin.canHandleChatIntent("生成今年年报"))
+    #expect(!plugin.canHandleChatIntent("年报代码怎么报错了"))
+    plugin.stop()
+}
+
+@MainActor @Test func monthlyOKRGitStatsMapperMoodAndFeishuDocServiceWorkEndToEnd() async throws {
+    // 1. MonthlyReportRecord.monthlyOKR 持久化迁移 report.v4
+    let url = FileManager.default.temporaryDirectory.appending(path: "report-okr-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let db = try AppDatabase(url: url, migrations: ReportMigrations.all)
+    let store = ReportStore(db: db)
+
+    let record = MonthlyReportRecord(
+        monthKey: "2026-11",
+        periodStart: "2026-11-01",
+        periodEnd: "2026-11-30",
+        title: "2026年11月工作月报",
+        content: "## 一、当月OKR完成情况\n\n1. O1 完成 100%",
+        extraNotes: "补充",
+        style: WeeklyReportStyle.standard.rawValue,
+        providerName: "本地规则汇总",
+        totalHours: 168,
+        generatedAt: Date(),
+        updatedAt: Date(),
+        monthlyOKR: "O1: 完成核心项目交付（100%）"
+    )
+    store.saveMonthly(record)
+    #expect(store.monthlyReport(forMonthKey: "2026-11")?.monthlyOKR == "O1: 完成核心项目交付（100%）")
+
+    // 2. 月报提示词注入 {{monthlyOKR}} 与 {{gitStats}} 及本地兜底
+    let nov = MonthRange.fromMonthKey("2026-11")!
+    let gitStats = GitMonthlyStats(
+        totalReposScanned: 5,
+        activeRepoCount: 3,
+        inactiveRepoCount: 2,
+        totalCommits: 40,
+        mergeCommits: 6,
+        netCommits: 34,
+        addedLines: 2200,
+        deletedLines: 450,
+        topContributor: "沈昆（34 次）",
+        peakDay: "2026-11-20",
+        peakDayCommits: 8,
+        repoDistribution: [GitRepoCommitCount(name: "app-web", commits: 25)],
+        bugFixCommits: 9,
+        apiIntegrationCommits: 7,
+        deployConfigCommits: 4
+    )
+    let input = MonthlyReportInput(
+        month: nov,
+        days: [],
+        weeklySummaries: [],
+        extraNotes: "无",
+        style: .standard,
+        includeHours: true,
+        promptTemplate: WeeklyReportGenerator.defaultMonthlyPrompt,
+        monthlyOKR: "O1: 完成核心交付",
+        gitStats: gitStats,
+        includeGitStats: true
+    )
+    let prompt = WeeklyReportGenerator.prompt(input)
+    #expect(prompt.contains("O1: 完成核心交付"))
+    #expect(prompt.contains("剔除合并后净提交 34 次"))
+    #expect(prompt.contains("Bug 修复 9 次"))
+
+    let fallback = WeeklyReportGenerator.fallbackReport(input)
+    #expect(fallback.content.contains("## 一、当月OKR完成情况"))
+    #expect(fallback.content.contains("## 附：Git 数据概览"))
+    #expect(fallback.content.contains("剔除合并后净提交 34 次"))
+
+    // 3. TitaContentMapper 映射公司规范五段式月报到 Tita 4 模块
+    let companyMonthlyMD = """
+    ## 一、当月OKR完成情况
+
+    1. O1 完成度 100%。
+
+    ## 二、当月亮点工作
+
+    1. 完成 3 个核心模块上线，接口联调耗时下降 30%。
+
+    ## 三、当月存在的问题及改进措施 / 建议
+
+    ### 存在的问题
+    1. 跨端适配回归耗时偏长，根因是缺少真机自动化校验。
+
+    ### 改进措施 / 建议
+    1. 上线前增加多端构建校验脚本并冻结接口契约。
+
+    ## 四、下一个月工作重点
+
+    1. 完成 2 期版本上线与性能优化 20%。
+
+    ## 附：Git 数据概览
+
+    - 总提交 40 次，净提交 34 次。
+    """
+    let mapped = TitaContentMapper.map(markdown: companyMonthlyMD, toModules: TitaContentMapper.defaultModuleNames)
+    #expect(mapped.count == 4)
+    #expect(mapped[0].contains("O1 完成度 100%"))
+    #expect(mapped[0].contains("完成 3 个核心模块上线"))
+    #expect(mapped[0].contains("总提交 40 次"))
+    #expect(mapped[1].contains("缺少真机自动化校验"))
+    #expect(mapped[2].contains("冻结接口契约"))
+    #expect(mapped[3].contains("性能优化 20%"))
+
+    // 4. TitaReportDetail.currentMood 解析 selectedValues JSON
+    let detailWithMood = TitaReportDetail(
+        dailyID: "d1",
+        summaryDate: "2026-11-01",
+        summaryType: .monthly,
+        submitState: .onTime,
+        templateID: 1007,
+        delayDate: nil,
+        modules: [
+            TitaReportModule(moduleId: 1, moduleName: "心情", moduleType: "select", moduleObjType: 1, sortIndex: 1, isDelete: false, plainText: "", richTextHTML: "", rawObjectDataJSON: "{\"selectedValues\":[2],\"selectedValues2\":null}"),
+        ]
+    )
+    #expect(detailWithMood.currentMood == .fighting)
+
+    // 5. FeishuDocService 纯解析测试
+    let auth = try FeishuDocService.parseAuthStatus(#"""
+    {
+      "identities": {
+        "user": {
+          "status": "missing",
+          "available": false,
+          "userName": "沈昆",
+          "tokenStatus": "expired",
+          "hint": "run: lark-cli auth login --help"
+        }
+      }
+    }
+    """#)
+    #expect(!auth.isAvailable)
+    #expect(auth.userName == "沈昆")
+    #expect(auth.tokenStatus == "expired")
+
+    let login = try FeishuDocService.parseDeviceLogin(#"""
+    {
+      "device_code": "dev-123",
+      "expires_in": 600,
+      "verification_url": "https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=f1&user_code=XK3S-WT5E"
+    }
+    """#)
+    #expect(login.deviceCode == "dev-123")
+    #expect(login.userCode == "XK3S-WT5E")
+    #expect(login.verificationURL.contains("flow_id=f1"))
+
+    let doc = try FeishuDocService.parseFetchedDoc(#"""
+    {"ok":true,"data":{"title":"2026年11月月报","content":"# 2026年11月月报\n\n正文"}}
+    """#, docURL: "https://example.feishu.cn/wiki/w1")
+    #expect(doc.title == "2026年11月月报")
+    #expect(doc.markdown.contains("正文"))
+
+    let node = FeishuDocService.parseWikiNodeInfo(#"""
+    {"ok":true,"data":{"node":{"space_id":"7001","node_token":"wikcnParent","obj_token":"docxParent","obj_type":"docx","title":"11月月报"}}}
+    """#)
+    #expect(node?.spaceID == "7001")
+    #expect(node?.nodeToken == "wikcnParent")
+
+    let children = FeishuDocService.parseWikiChildNodes(#"""
+    {"ok":true,"data":{"items":[{"space_id":"7001","node_token":"wikcnW1","obj_token":"docxW1","obj_type":"docx","title":"第1周周报"},{"space_id":"7001","node_token":"wikcnSheet","obj_token":"sht1","obj_type":"sheet","title":"表格忽略"}]}}
+    """#)
+    #expect(children.count == 1)
+    #expect(children[0].title == "第1周周报")
 }

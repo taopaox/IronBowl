@@ -485,7 +485,7 @@ struct TitaSubmitSheet: View {
     @State private var isAuthError = false
     @State private var actionError: String?
 
-    @State private var templateID: Int = 1006
+    @State private var templateID: Int
     @State private var remoteState: TitaSubmitState = .none
     @State private var delayDate: String?
     @State private var mood: TitaMood = .unset
@@ -493,6 +493,11 @@ struct TitaSubmitSheet: View {
 
     @State private var confirmSubmit = false
     @State private var showWebLogin = false
+
+    init(model: WeeklyReportModel) {
+        self._model = Bindable(model)
+        self._templateID = State(initialValue: model.activeTitaTemplateID)
+    }
 
     private var hasAnyRemoteContent: Bool {
         modules.contains { !$0.existingRemoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }

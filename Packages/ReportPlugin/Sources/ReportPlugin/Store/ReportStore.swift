@@ -60,13 +60,13 @@ public nonisolated enum WeeklyReportStyle: String, Codable, Sendable, CaseIterab
     public var monthlyPromptInstruction: String {
         switch self {
         case .standard:
-            "采用「标准月报」结构，包含 `## 本月重点成果`（跨周整合同类工作、提炼阶段性交付与里程碑）、`## 问题与风险`（若无明确阻塞可简写暂无）和 `## 下月工作计划`。"
+            "采用公司月报规范五段结构输出，严格使用以下二级标题：`## 一、当月OKR完成情况`（逐条对照本月 OKR 用量化数据说明完成进度百分比或实际数值，未完成项说明偏差原因）、`## 二、当月亮点工作`（提炼最具代表性与产出价值的成果，每项附带项目/工时/提交/效率等关键数据支撑，避免流水账）、`## 三、当月存在的问题及改进措施 / 建议`（分「存在的问题」与「改进措施 / 建议」写清具体问题、根因和可落地动作，杜绝“加强学习/提高重视”等空话）、`## 四、下一个月工作重点`（对齐下月目标列出核心任务与预期量化指标）、`## 附：Git 数据概览`（仅在提供了 Git 提交统计时简明列出关键量化数据，不要编造数字）。"
         case .byProject:
-            "采用「按项目汇总」结构，按禅道项目（未关联项目归入其他工作）分小节梳理本月核心产出与关键进度，并在文末汇总本月工时分布。"
+            "采用「按项目汇总」结构，按禅道项目（未关联项目归入其他工作）分小节梳理本月核心产出与关键进度，结合本月 OKR 与 Git 提交数据突出量化成果，并在文末汇总本月工时与代码分布。"
         case .concise:
-            "采用「精简要点」结构，提炼本月核心成果清单与工时结论，条理紧凑、便于直接在飞书/钉钉汇报或同步。"
+            "采用「精简要点」结构，提炼本月 OKR 完成度、核心成果清单与工时/Git 数据结论，条理紧凑、便于直接在飞书/钉钉汇报或同步。"
         case .tita:
-            "采用「Tita 模板」结构，严格使用以下四个二级标题输出：`## 亮点与成功经验`（跨周整合同类工作并提炼本月关键交付与里程碑，若需附带工时请在末尾简明列出）、`## 问题与不足`（若无明确阻塞可写暂无）、`## 改进思考与行动`（总结复盘与后续优化举措）、`## 下一步工作计划`。"
+            "采用「Tita 模板」结构，严格使用以下四个二级标题输出：`## 亮点与成功经验`（融合本月 OKR 量化达成情况、跨周重点交付成果以及工时/Git 关键数据支撑，避免流水账）、`## 问题与不足`（明确列出本月实际遇到的具体问题并分析根本原因，无明确阻塞可写暂无）、`## 改进思考与行动`（针对上述问题提出可落地的改进措施或建议，杜绝“加强学习/提高重视”等空话）、`## 下一步工作计划`（对齐下月目标与 OKR，列出核心工作重点并预估关键产出或量化指标）。"
         }
     }
 }
@@ -78,6 +78,7 @@ enum ReportKeys {
     static let style = SettingKey<WeeklyReportStyle>("report.style", default: .standard)
     static let includeDrafts = SettingKey<Bool>("report.includeDrafts", default: true)
     static let includeHours = SettingKey<Bool>("report.includeHours", default: true)
+    static let includeGitStats = SettingKey<Bool>("report.monthly.includeGitStats", default: true)
     static let lastPeriodKind = SettingKey<ReportPeriodKind>("report.lastPeriodKind", default: .weekly)
     static let titaBaseURL = SettingKey<String>("report.tita.baseURL", default: "https://www.tita.net")
     static let titaCookie = SettingKey<String>("report.tita.cookie", default: "")
@@ -87,6 +88,10 @@ enum ReportKeys {
     static let titaWeeklyTemplateID = SettingKey<Int>("report.tita.weeklyTemplateID", default: 1006)
     static let titaMonthlyTemplateID = SettingKey<Int>("report.tita.monthlyTemplateID", default: 1007)
     static let titaDefaultMood = SettingKey<Int>("report.tita.defaultMood", default: 0)
+    static let feishuCLIPath = SettingKey<String>("report.feishu.cliPath", default: "")
+    static let feishuMonthlyDocURL = SettingKey<String>("report.feishu.monthlyDocURL", default: "")
+    static let annualStyle = SettingKey<AnnualReviewStyle>("report.annual.style", default: .performanceSTAR)
+    static let annualPrompt = SettingKey<String>("report.annual.prompt", default: AnnualReviewGenerator.defaultPrompt)
 }
 
 /// 按周保存的周报持久化记录。
@@ -120,6 +125,28 @@ nonisolated struct MonthlyReportRecord: Sendable, Hashable, Codable, Identifiabl
     var style: String
     var providerName: String
     var totalHours: Double
+    var generatedAt: Date
+    var updatedAt: Date
+    var monthlyOKR: String = ""
+}
+
+/// 按季度 / 半年度 / 全年保存的述职总结记录。
+nonisolated struct ReviewReportRecord: Sendable, Hashable, Codable, Identifiable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "reviewReport"
+
+    var id: String { periodKey }
+    var periodKey: String
+    var scopeKind: String
+    var periodStart: String
+    var periodEnd: String
+    var title: String
+    var content: String
+    var extraNotes: String
+    var style: String
+    var providerName: String
+    var totalHours: Double
+    var overtimeHours: Double
+    var commitCount: Int
     var generatedAt: Date
     var updatedAt: Date
 }
@@ -159,7 +186,33 @@ public nonisolated enum ReportMigrations {
         try db.create(index: "idx_monthlyReport_updatedAt", on: "monthlyReport", columns: ["updatedAt"])
     }
 
-    public static let all: [DatabaseMigration] = [weekly, monthly]
+    public static let review = DatabaseMigration("report.v3") { db in
+        try db.create(table: "reviewReport") { t in
+            t.primaryKey("periodKey", .text)
+            t.column("scopeKind", .text).notNull()
+            t.column("periodStart", .text).notNull()
+            t.column("periodEnd", .text).notNull()
+            t.column("title", .text).notNull()
+            t.column("content", .text).notNull()
+            t.column("extraNotes", .text).notNull().defaults(to: "")
+            t.column("style", .text).notNull()
+            t.column("providerName", .text).notNull().defaults(to: "")
+            t.column("totalHours", .double).notNull().defaults(to: 0)
+            t.column("overtimeHours", .double).notNull().defaults(to: 0)
+            t.column("commitCount", .integer).notNull().defaults(to: 0)
+            t.column("generatedAt", .datetime).notNull()
+            t.column("updatedAt", .datetime).notNull()
+        }
+        try db.create(index: "idx_reviewReport_updatedAt", on: "reviewReport", columns: ["updatedAt"])
+    }
+
+    public static let monthlyOKR = DatabaseMigration("report.v4") { db in
+        try db.alter(table: "monthlyReport") { t in
+            t.add(column: "monthlyOKR", .text).notNull().defaults(to: "")
+        }
+    }
+
+    public static let all: [DatabaseMigration] = [weekly, monthly, review, monthlyOKR]
 }
 
 /// 周报/月报数据库读写。
@@ -225,6 +278,43 @@ nonisolated struct ReportStore {
         (try? db.pool.read { db in
             try MonthlyReportRecord
                 .order(Column("monthKey").desc)
+                .limit(limit)
+                .fetchAll(db)
+        }) ?? []
+    }
+
+    func monthlyReports(matchingMonthKeys monthKeys: [String]) -> [MonthlyReportRecord] {
+        guard !monthKeys.isEmpty else { return [] }
+        return (try? db.pool.read { db in
+            try MonthlyReportRecord
+                .filter(monthKeys.contains(Column("monthKey")))
+                .order(Column("monthKey").asc)
+                .fetchAll(db)
+        }) ?? []
+    }
+
+    func reviewReport(forPeriodKey periodKey: String) -> ReviewReportRecord? {
+        try? db.pool.read { db in
+            try ReviewReportRecord.filter(Column("periodKey") == periodKey).fetchOne(db)
+        }
+    }
+
+    func saveReview(_ record: ReviewReportRecord) {
+        try? db.pool.write { db in
+            try record.save(db)
+        }
+    }
+
+    func deleteReview(periodKey: String) {
+        _ = try? db.pool.write { db in
+            try ReviewReportRecord.filter(Column("periodKey") == periodKey).deleteAll(db)
+        }
+    }
+
+    func recentReviews(limit: Int = 40) -> [ReviewReportRecord] {
+        (try? db.pool.read { db in
+            try ReviewReportRecord
+                .order(Column("periodKey").desc)
                 .limit(limit)
                 .fetchAll(db)
         }) ?? []

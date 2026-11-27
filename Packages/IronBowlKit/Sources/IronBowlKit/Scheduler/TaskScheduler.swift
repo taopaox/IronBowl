@@ -428,6 +428,14 @@ public final class TaskScheduler {
         snoozeTimers.removeValue(forKey: taskID)?.invalidate()
     }
 
+    /// 检测到钉钉已打下班卡时，自动消除所有正在桌面上显示或延后中的下班打卡提醒。
+    public func dismissActiveClockOutReminders() {
+        for task in tasks where task.actionID == Self.coreClockOutReminderActionID {
+            cancelSnoozeReminder(taskID: task.id)
+            reminders.dismiss(id: "scheduler.clockout.\(task.id)")
+        }
+    }
+
     // MARK: - 任务管理
 
     public func saveTask(_ incoming: ScheduledTask, now: Date = Date()) {

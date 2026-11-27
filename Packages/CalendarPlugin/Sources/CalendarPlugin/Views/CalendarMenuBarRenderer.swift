@@ -10,6 +10,69 @@ enum CalendarAssets {
     }()
 }
 
+private nonisolated final class CalendarMenuBarImageCache: @unchecked Sendable {
+    struct StyledKey: Equatable {
+        let style: CalendarMenuBarStyle
+        let isDark: Bool
+        let scale: CGFloat
+        let logoID: ObjectIdentifier?
+        let snapshot: CalendarMenuBarSnapshot
+    }
+
+    struct SegmentKey: Equatable {
+        let isDark: Bool
+        let scale: CGFloat
+        let logoID: ObjectIdentifier?
+        let segments: [MenuBarSegment]
+    }
+
+    static let shared = CalendarMenuBarImageCache()
+
+    private let lock = NSLock()
+    private let maxStyledEntries = 24
+    private let maxSegmentEntries = 4
+    private var styledEntries: [(key: StyledKey, image: NSImage)] = []
+    private var segmentEntries: [(key: SegmentKey, image: NSImage)] = []
+
+    func styledImage(for key: StyledKey) -> NSImage? {
+        lock.lock()
+        defer { lock.unlock() }
+        return styledEntries.first { $0.key == key }?.image
+    }
+
+    func storeStyled(_ image: NSImage, for key: StyledKey) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let idx = styledEntries.firstIndex(where: { $0.key == key }) {
+            styledEntries[idx] = (key, image)
+            return
+        }
+        if styledEntries.count >= maxStyledEntries {
+            styledEntries.removeFirst()
+        }
+        styledEntries.append((key, image))
+    }
+
+    func segmentImage(for key: SegmentKey) -> NSImage? {
+        lock.lock()
+        defer { lock.unlock() }
+        return segmentEntries.first { $0.key == key }?.image
+    }
+
+    func storeSegment(_ image: NSImage, for key: SegmentKey) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let idx = segmentEntries.firstIndex(where: { $0.key == key }) {
+            segmentEntries[idx] = (key, image)
+            return
+        }
+        if segmentEntries.count >= maxSegmentEntries {
+            segmentEntries.removeFirst()
+        }
+        segmentEntries.append((key, image))
+    }
+}
+
 /// 菜单栏日历图像渲染器：支持 20 套可选视觉风格以及兼容旧版 `[MenuBarSegment]` 渲染接口，
 /// 离线绘制为固定高度 `22pt` 的 Retina `NSImage`，避免 `MenuBarExtra` 动态文本插值在 macOS 上截断或闪烁。
 public enum CalendarMenuBarRenderer {
@@ -373,10 +436,22 @@ public enum CalendarMenuBarRenderer {
     ) -> NSImage {
         let resolvedScale = max(1.0, scale ?? max(2.0, NSScreen.screens.map(\.backingScaleFactor).max() ?? 2.0))
         let resolvedLogo = logoImage ?? CalendarAssets.logoImage
+        let cacheKey = CalendarMenuBarImageCache.StyledKey(
+            style: style,
+            isDark: isDark,
+            scale: resolvedScale,
+            logoID: resolvedLogo.map(ObjectIdentifier.init),
+            snapshot: snapshot
+        )
+        if let cached = CalendarMenuBarImageCache.shared.styledImage(for: cacheKey) {
+            return cached
+        }
         let palette = Palette(isDark: isDark)
 
         guard snapshot.hasAnyContent else {
-            return renderFallbackSymbol(isDark: isDark, scale: resolvedScale)
+            let fallback = renderFallbackSymbol(isDark: isDark, scale: resolvedScale)
+            CalendarMenuBarImageCache.shared.storeStyled(fallback, for: cacheKey)
+            return fallback
         }
 
         let plan = buildPlan(
@@ -395,7 +470,7 @@ public enum CalendarMenuBarRenderer {
         let totalWidth = max(20, ceil(contentWidth + plan.paddingX * 2))
         let logicalSize = NSSize(width: totalWidth, height: barHeight)
 
-        return renderBitmap(logicalSize: logicalSize, scale: resolvedScale, isTemplate: plan.isTemplate) {
+        let image = renderBitmap(logicalSize: logicalSize, scale: resolvedScale, isTemplate: plan.isTemplate) {
             drawContainer(plan.container, atoms: plan.atoms, gap: plan.gap, paddingX: plan.paddingX, size: logicalSize)
 
             var x = plan.paddingX
@@ -405,6 +480,8 @@ public enum CalendarMenuBarRenderer {
                 x += atom.width
             }
         }
+        CalendarMenuBarImageCache.shared.storeStyled(image, for: cacheKey)
+        return image
     }
 
     // MARK: - 20 套风格布局生成器
@@ -1240,6 +1317,15 @@ public enum CalendarMenuBarRenderer {
         let effective = segments.isEmpty ? [MenuBarSegment.symbol("calendar")] : segments
         let resolvedScale = max(1.0, scale ?? max(2.0, NSScreen.screens.map(\.backingScaleFactor).max() ?? 2.0))
         let resolvedLogo = logoImage ?? CalendarAssets.logoImage
+        let cacheKey = CalendarMenuBarImageCache.SegmentKey(
+            isDark: isDark,
+            scale: resolvedScale,
+            logoID: resolvedLogo.map(ObjectIdentifier.init),
+            segments: effective
+        )
+        if let cached = CalendarMenuBarImageCache.shared.segmentImage(for: cacheKey) {
+            return cached
+        }
         let hasColorLogo = effective.contains(.logo) && resolvedLogo != nil
         let fontSize: CGFloat = 13
         let horizontalPadding: CGFloat = 1
@@ -1300,7 +1386,7 @@ public enum CalendarMenuBarRenderer {
         let totalWidth = max(18, ceil(contentWidth + horizontalPadding * 2))
         let logicalSize = NSSize(width: totalWidth, height: barHeight)
 
-        return renderBitmap(logicalSize: logicalSize, scale: resolvedScale, isTemplate: !hasColorLogo) {
+        let image = renderBitmap(logicalSize: logicalSize, scale: resolvedScale, isTemplate: !hasColorLogo) {
             var x = horizontalPadding
             for (index, item) in measured.enumerated() {
                 if index > 0 {
@@ -1332,6 +1418,8 @@ public enum CalendarMenuBarRenderer {
                 }
             }
         }
+        CalendarMenuBarImageCache.shared.storeSegment(image, for: cacheKey)
+        return image
     }
 
     private static func gap(after previous: MeasuredSegment, before next: MeasuredSegment) -> CGFloat {

@@ -66,6 +66,9 @@ nonisolated struct MonthlyReportInput: Sendable {
     var style: WeeklyReportStyle
     var includeHours: Bool
     var promptTemplate: String
+    var monthlyOKR: String = ""
+    var gitStats: GitMonthlyStats = .empty
+    var includeGitStats: Bool = true
 }
 
 nonisolated struct WeeklyReportOutput: Sendable {
@@ -100,17 +103,23 @@ nonisolated enum WeeklyReportGenerator {
     """
 
     static let defaultMonthlyPrompt = """
-    你是我的工作月报助手。请根据我 {{monthRange}} 的每日工作日报、本月已有周报参考以及补充说明，整理出一份结构清晰、语言精炼、突出阶段性成果的中文工作月报。
+    你是我的工作月报助手。请根据我 {{monthRange}} 的本月 OKR、每日工作日报、本月已有周报参考、本地 Git 提交统计以及补充说明，整理出一份以数据为导向、以解决问题为目标的中文工作月报。
 
     要求：
     1. {{styleInstruction}}
-    2. 对跨周持续推进的同一项目或功能进行聚合归纳，提炼关键成果、交付价值与里程碑，避免逐日流水账堆砌。
-    3. 仅基于下方提供的每日日报、已有周报与补充说明整理，不要编造未发生的工作内容或指标。
+    2. 杜绝流水账：对跨周持续推进的同一项目或功能进行聚合归纳，突出关键交付价值、里程碑与量化数据支撑（如完成项目数、工时投入、Git 提交数、Bug 修复数、效率提升等）。
+    3. 实事求是：严格依据下方提供的本月 OKR、每日日报、周报参考、Git 统计与补充说明整理，不要编造未发生的工作内容或指标；问题分析需写清具体根因与可落地的改进动作，避免“加强学习、提高重视”等空话。
     4. 工时要求：{{totalHours}}
     5. 正文使用干净的 Markdown 格式（二级标题 `##` / 三级标题 `###` 与列表），无需在正文顶部重复大标题。
 
     ## 周期
     {{monthRange}}
+
+    ## 本月 OKR
+    {{monthlyOKR}}
+
+    ## 本月 Git 提交统计
+    {{gitStats}}
 
     ## 本月每日日报
     {{dailyLogs}}
@@ -250,11 +259,18 @@ nonisolated enum WeeklyReportGenerator {
 
         let trimmedNotes = input.extraNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         let extraNotesText = trimmedNotes.isEmpty ? "无" : trimmedNotes
+        let trimmedOKR = input.monthlyOKR.trimmingCharacters(in: .whitespacesAndNewlines)
+        let monthlyOKRText = trimmedOKR.isEmpty ? "未填写本月 OKR" : trimmedOKR
+        let gitStatsText = input.includeGitStats
+            ? (input.gitStats.hasData ? input.gitStats.formattedMarkdown() : "本月暂未扫描到本地 Git 提交记录")
+            : "本次月报不附带 Git 提交统计"
 
         return input.promptTemplate
             .replacingOccurrences(of: "{{monthRange}}", with: monthRangeText)
             .replacingOccurrences(of: "{{totalHours}}", with: totalHoursText)
             .replacingOccurrences(of: "{{styleInstruction}}", with: input.style.monthlyPromptInstruction)
+            .replacingOccurrences(of: "{{monthlyOKR}}", with: monthlyOKRText)
+            .replacingOccurrences(of: "{{gitStats}}", with: gitStatsText)
             .replacingOccurrences(of: "{{dailyLogs}}", with: dailyLogsText)
             .replacingOccurrences(of: "{{weeklyReports}}", with: weeklyReportsText)
             .replacingOccurrences(of: "{{extraNotes}}", with: extraNotesText)
@@ -353,7 +369,9 @@ nonisolated enum WeeklyReportGenerator {
             extraNotes: input.extraNotes,
             style: input.style,
             includeHours: input.includeHours,
-            isMonthly: true
+            isMonthly: true,
+            monthlyOKR: input.monthlyOKR,
+            gitStats: input.includeGitStats ? input.gitStats : .empty
         )
     }
 
@@ -363,7 +381,9 @@ nonisolated enum WeeklyReportGenerator {
         extraNotes: String,
         style: WeeklyReportStyle,
         includeHours: Bool,
-        isMonthly: Bool
+        isMonthly: Bool,
+        monthlyOKR: String = "",
+        gitStats: GitMonthlyStats = .empty
     ) -> (title: String, content: String) {
         let periodLabel = isMonthly ? "本月" : "本周"
         let nextPeriodLabel = isMonthly ? "下月" : "下周"
@@ -408,11 +428,16 @@ nonisolated enum WeeklyReportGenerator {
         let overtimeHours = days.reduce(0.0) { $0 + $1.overtimeHours }
         let loggedDays = days.filter { !$0.isEmpty }.count
         let trimmedNotes = extraNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedOKR = monthlyOKR.trimmingCharacters(in: .whitespacesAndNewlines)
 
         var sections: [String] = []
 
         switch style {
         case .standard:
+            if isMonthly && !trimmedOKR.isEmpty {
+                sections.append("## 一、当月OKR完成情况\n\n\(trimmedOKR)")
+            }
+
             let workHeading = isMonthly ? "## 本月重点成果" : "## 本周完成工作"
             var workLines: [String] = [workHeading, ""]
             if buckets.isEmpty {
@@ -455,6 +480,9 @@ nonisolated enum WeeklyReportGenerator {
 
             sections.append("## 问题与风险\n\n- 暂无")
             sections.append("## \(nextPeriodLabel)工作计划\n\n1. 待补充")
+            if isMonthly && gitStats.hasData {
+                sections.append("## 附：Git 数据概览\n\n\(gitStats.formattedMarkdown())")
+            }
 
         case .byProject:
             if buckets.isEmpty {
@@ -512,6 +540,11 @@ nonisolated enum WeeklyReportGenerator {
 
         case .tita:
             var highlightLines: [String] = ["## 亮点与成功经验", ""]
+            if isMonthly && !trimmedOKR.isEmpty {
+                highlightLines.append("### 本月 OKR 对照")
+                highlightLines.append(trimmedOKR)
+                highlightLines.append("")
+            }
             if buckets.isEmpty {
                 highlightLines.append("- \(periodLabel)暂无已记录的每日日报")
             } else {
@@ -533,6 +566,11 @@ nonisolated enum WeeklyReportGenerator {
             if includeHours {
                 let otText = overtimeHours > 0 ? "，加班 \(WorkCalendar.hoursText(overtimeHours))h" : ""
                 highlightLines.append("- **\(periodLabel)工时**：共 \(WorkCalendar.hoursText(totalHours))h（正常 \(WorkCalendar.hoursText(normalHours))h\(otText)，记录 \(loggedDays) 天）")
+            }
+            if isMonthly && gitStats.hasData {
+                highlightLines.append("")
+                highlightLines.append("### Git 提交数据")
+                highlightLines.append(gitStats.formattedMarkdown())
             }
             sections.append(highlightLines.joined(separator: "\n").trimmingCharacters(in: .newlines))
             sections.append("## 问题与不足\n\n- 暂无")

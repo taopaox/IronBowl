@@ -16,6 +16,21 @@ public nonisolated struct ZentaoTask: Sendable, Identifiable, Hashable, Codable 
     }
 }
 
+public nonisolated struct ZentaoBug: Sendable, Identifiable, Hashable, Codable {
+    public let id: Int
+    public let title: String
+    public let severity: Int
+    public let priority: Int
+    public let status: String
+    public let projectID: Int
+    public let productName: String
+
+    public var isOpen: Bool { status == "active" }
+    public var statusText: String {
+        ["active": "未解决", "resolved": "已解决", "closed": "已关闭"][status] ?? status
+    }
+}
+
 /// 禅道里某任务的一条工时记录。
 public nonisolated struct ZentaoEstimate: Sendable, Hashable {
     public let taskID: Int
@@ -136,6 +151,38 @@ public actor ZentaoClient {
     /// 我近期完成过的任务（避免任务完成后从指派列表消失而查不到已写工时）。
     public func finishedTasks() async throws -> [ZentaoTask] {
         Self.parseTasks(try await getJSON("my-task-finishedBy-id_desc-0-100-1.json"))
+    }
+
+    /// 指派给我的 Bug（含已解决/已关闭，界面上可过滤）。
+    public func myBugs() async throws -> [ZentaoBug] {
+        Self.parseBugs(try await getJSON("my-bug-assignedTo-id_desc-0-500-1.json"))
+    }
+
+    static func parseBugs(_ obj: [String: Any]) -> [ZentaoBug] {
+        let raw: [[String: Any]]
+        if let arr = obj["bugs"] as? [[String: Any]] {
+            raw = arr
+        } else if let dict = obj["bugs"] as? [String: [String: Any]] {
+            raw = Array(dict.values)
+        } else {
+            raw = []
+        }
+        return raw.compactMap { b in
+            guard let id = Self.int(b["id"]), let title = b["title"] as? String else { return nil }
+            let projectID = Self.int(b["project"]) ?? Self.int(b["projectID"]) ?? 0
+            let productID = Self.int(b["product"]) ?? 0
+            let productName = (b["productName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedProduct = (productName?.isEmpty == false) ? productName! : (productID > 0 ? "产品 #\(productID)" : "未关联产品")
+            return ZentaoBug(
+                id: id,
+                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                severity: Self.int(b["severity"]) ?? 3,
+                priority: Self.int(b["pri"]) ?? Self.int(b["priority"]) ?? 3,
+                status: (b["status"] as? String) ?? "",
+                projectID: projectID,
+                productName: resolvedProduct
+            )
+        }
     }
 
     private static func parseTasks(_ obj: [String: Any]) -> [ZentaoTask] {

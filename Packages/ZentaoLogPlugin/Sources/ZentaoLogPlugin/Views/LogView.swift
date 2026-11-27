@@ -3,6 +3,7 @@ import SwiftUI
 
 struct LogView: View {
     @Bindable var model: LogModel
+    @Environment(\.isPageActive) private var isPageActive
     @State private var showOvertime = false
     @State private var confirmSubmit = false
     @State private var stampToken = 0
@@ -73,11 +74,14 @@ struct LogView: View {
             }
         }
         .task {
-            if model.lastScan == nil || model.settings[LogKeys.scanMode] != .manualOnly {
-                await model.refresh()
-            }
+            await refreshIfNeeded()
+        }
+        .onChange(of: isPageActive) { _, active in
+            guard active else { return }
+            Task { await refreshIfNeeded() }
         }
         .sheet(isPresented: $showOvertime) { OvertimeSheet(model: model) }
+        .sheet(isPresented: $model.showAssignedSheet) { ZentaoAssignedSheet(model: model) }
         .alert("盖章提交到禅道？", isPresented: $confirmSubmit) {
             Button("确认提交 \(model.pendingDrafts.count) 条") {
                 Task {
@@ -87,8 +91,21 @@ struct LogView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("\(model.dateString) 共 \(hoursText(model.pendingDrafts.reduce(0) { $0 + $1.hours })) 小时，将逐条写入禅道任务工时并回查确认。")
+            let base = "\(model.dateString) 共 \(hoursText(model.pendingDrafts.reduce(0) { $0 + $1.hours })) 小时，将逐条写入禅道任务工时并回查确认。"
+            if model.dirtyRepoStatuses.isEmpty {
+                Text(base)
+            } else {
+                Text(base + "\n\n⚠️ 注意：检测到 \(model.dirtyRepoStatuses.map(\.repoName).joined(separator: "、")) 仍有未提交或未 Push 的本地改动。")
+            }
         }
+    }
+
+    private func refreshIfNeeded() async {
+        guard model.settings[LogKeys.scanMode] != .manualOnly || model.lastScan == nil else { return }
+        if let lastScan = model.lastScan, Date().timeIntervalSince(lastScan) < 45 {
+            return
+        }
+        await model.refresh()
     }
 
     private var notConfigured: some View {
@@ -146,6 +163,10 @@ struct LogView: View {
             }
         )
         .help("选择生成草稿的 AI")
+
+        Button("我的禅道 (\(model.openTasks.count + model.openBugs.count))") { model.showAssignedSheet = true }
+            .buttonStyle(.journalSecondary(p))
+            .help("查看指派给我的未关任务和 Bug，支持一键转草稿/转待办/复制 Commit")
 
         Button("记加班") { showOvertime = true }
             .buttonStyle(.journalSecondary(p))
@@ -207,6 +228,17 @@ struct LogView: View {
 
         // 3. 工时刻度与加班卡
         JournalWorkHoursCard(model: model, palette: p)
+
+        // 3.5 当日待办与备忘联动
+        let dayTodos = model.todosForCurrentDate()
+        if !dayTodos.isEmpty {
+            JournalTodoCard(model: model, items: dayTodos, palette: p)
+        }
+
+        // 3.8 下班前未提交 / 未推送巡检
+        if !model.dirtyRepoStatuses.isEmpty {
+            JournalGitInspectionCard(statuses: model.dirtyRepoStatuses, palette: p)
+        }
 
         // 4. Git 提交小票
         let commitCount = model.activities.reduce(0) { $0 + $1.commits.count }
@@ -640,6 +672,132 @@ private struct JournalWorkHoursCard: View {
     }
 }
 
+// MARK: - 当日待办联动卡
+
+private struct JournalTodoCard: View {
+    let model: LogModel
+    let items: [TodoItem]
+    let palette: JournalPalette
+
+    var body: some View {
+        let readyCompletedCount = items.filter { $0.isCompleted && $0.loggedDate == nil }.count
+        JournalPaperCard(palette: palette, padding: 11) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "checklist")
+                        .font(DS.font(12, .bold))
+                        .foregroundStyle(palette.stampGreen)
+                    Text("当日待办（\(items.count)）")
+                        .font(DS.font(12.5, .bold))
+                        .foregroundStyle(palette.ink)
+                    Spacer()
+                    if readyCompletedCount > 0 {
+                        Button("一键带入已完(\(readyCompletedCount))") {
+                            model.importAllCompletedTodosToDrafts()
+                        }
+                        .buttonStyle(.plain)
+                        .font(DS.font(11, .semibold))
+                        .foregroundStyle(palette.stampGreen)
+                    }
+                }
+
+                ForEach(items) { item in
+                    HStack(alignment: .center, spacing: 6) {
+                        Button {
+                            model.context.todos.toggleCompleted(id: item.id)
+                        } label: {
+                            Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                                .font(DS.font(13))
+                                .foregroundStyle(item.isCompleted ? palette.stampGreen : palette.inkTertiary)
+                        }
+                        .buttonStyle(.plain)
+
+                        Text(item.title)
+                            .font(DS.font(12))
+                            .strikethrough(item.isCompleted)
+                            .foregroundStyle(item.isCompleted ? palette.inkSecondary : palette.ink)
+                            .lineLimit(2)
+
+                        Spacer(minLength: 4)
+
+                        if item.loggedDate != nil {
+                            Tag("已入草稿", color: palette.stampGreen)
+                        } else {
+                            Button("+ 记入草稿") {
+                                model.importTodoToDraft(item)
+                            }
+                            .buttonStyle(.plain)
+                            .font(DS.font(11, .semibold))
+                            .foregroundStyle(palette.stampRed)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(palette.stampRed.opacity(0.10), in: .rect(cornerRadius: 5))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 下班前 Git 仓库未提交/未推送巡检卡
+
+private struct JournalGitInspectionCard: View {
+    let statuses: [RepoWorkspaceStatus]
+    let palette: JournalPalette
+
+    var body: some View {
+        JournalPaperCard(palette: palette, accent: palette.stampAmber, padding: 11) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(DS.font(12, .bold))
+                        .foregroundStyle(palette.stampAmber)
+                    Text("下班前巡检：\(statuses.count) 个仓库有未落盘代码")
+                        .font(DS.font(12.5, .bold))
+                        .foregroundStyle(palette.ink)
+                    Spacer()
+                }
+
+                ForEach(statuses) { status in
+                    HStack(spacing: 6) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 5) {
+                                Text(status.repoName)
+                                    .font(DS.font(12, .semibold))
+                                    .foregroundStyle(palette.ink)
+                                Text(status.branch)
+                                    .font(DS.font(10.5))
+                                    .foregroundStyle(palette.inkTertiary)
+                            }
+                            HStack(spacing: 5) {
+                                if status.uncommittedCount > 0 {
+                                    Tag("未提交 \(status.uncommittedCount) 处", color: palette.stampAmber)
+                                }
+                                if status.unpushedCount > 0 {
+                                    Tag("未 Push \(status.unpushedCount) 个提交", color: palette.stampRed)
+                                }
+                            }
+                        }
+
+                        Spacer(minLength: 4)
+
+                        Button {
+                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: status.repoPath)])
+                        } label: {
+                            Image(systemName: "folder")
+                                .font(DS.font(11.5))
+                                .foregroundStyle(palette.inkSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("在访达中定位仓库：\(status.repoPath)")
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - 回形针 Git 提交小票
 
 private struct JournalCommitSlipCard: View {
@@ -935,5 +1093,206 @@ struct OvertimeSheet: View {
             hours = model.settings[LogKeys.overtimeDefaultHours]
             taskID = model.busiestTaskID
         }
+    }
+}
+
+private struct ZentaoAssignedSheet: View {
+    let model: LogModel
+    @Environment(\.dismiss) private var dismiss
+
+    enum Tab: String, CaseIterable, Hashable {
+        case tasks
+        case bugs
+    }
+
+    @State private var tab: Tab = .tasks
+    @State private var query = ""
+    @State private var toast: String?
+
+    private var filteredTasks: [ZentaoTask] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let list = model.openTasks
+        guard !q.isEmpty else { return list }
+        return list.filter {
+            $0.name.localizedCaseInsensitiveContains(q)
+                || $0.projectName.localizedCaseInsensitiveContains(q)
+                || "\($0.id)".contains(q)
+        }
+    }
+
+    private var filteredBugs: [ZentaoBug] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let list = model.openBugs
+        guard !q.isEmpty else { return list }
+        return list.filter {
+            $0.title.localizedCaseInsensitiveContains(q)
+                || $0.productName.localizedCaseInsensitiveContains(q)
+                || "\($0.id)".contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("我的禅道（指派给我）").font(DS.pageTitle)
+                    Text("直接将任务或 Bug 记入当日日报草稿、加入待办，或复制 Commit 前缀。").font(DS.caption).foregroundStyle(DS.textSecondary)
+                }
+                Spacer()
+                Button {
+                    Task { await model.loadTasks() }
+                } label: {
+                    if model.isLoadingTasks {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("刷新", systemImage: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.dsSecondary)
+                Button("关闭") { dismiss() }.buttonStyle(.dsSecondary)
+            }
+
+            HStack(spacing: 10) {
+                DSTabs(selection: $tab, options: [
+                    (.tasks, "任务 (\(model.openTasks.count))"),
+                    (.bugs, "Bug (\(model.openBugs.count))"),
+                ])
+                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(DS.textTertiary)
+                    TextField("搜索编号、标题或项目", text: $query).textFieldStyle(.plain)
+                }
+                .font(DS.body)
+                .padding(.horizontal, 10)
+                .frame(width: 240, height: DS.s(28))
+                .background(DS.card, in: .rect(cornerRadius: DS.controlRadius))
+                .overlay { RoundedRectangle(cornerRadius: DS.controlRadius).strokeBorder(DS.borderStrong) }
+            }
+
+            if let toast {
+                DSBanner(.success, toast)
+            }
+
+            ScrollView {
+                VStack(spacing: 8) {
+                    switch tab {
+                    case .tasks:
+                        if filteredTasks.isEmpty {
+                            emptyRow("没有进行中的禅道任务")
+                        } else {
+                            ForEach(filteredTasks) { task in
+                                DSCard(padding: 12) {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            HStack(spacing: 6) {
+                                                Tag("#\(task.id)", color: DS.brand)
+                                                Tag(task.statusText, color: DS.textSecondary)
+                                                Text(task.projectName).font(DS.caption).foregroundStyle(DS.textSecondary)
+                                            }
+                                            Text(task.name).font(DS.rowTitle)
+                                            Text("已消耗 \(hoursText(task.consumed))h · 剩余 \(hoursText(task.left))h")
+                                                .font(DS.caption.monospacedDigit())
+                                                .foregroundStyle(DS.textTertiary)
+                                        }
+                                        Spacer(minLength: 8)
+                                        VStack(alignment: .trailing, spacing: 6) {
+                                            HStack(spacing: 4) {
+                                                Button("+ 记入草稿") {
+                                                    model.addDraftFromAssignedTask(task)
+                                                    toast = "已加入任务 #\(task.id) 到今日草稿"
+                                                }
+                                                .buttonStyle(.dsSecondary)
+                                                Button("+ 转待办") {
+                                                    let added = model.addTodoFromTask(task)
+                                                    toast = added ? "已添加任务 #\(task.id) 到待办" : "该任务已在未完成待办中"
+                                                }
+                                                .buttonStyle(.dsSecondary)
+                                            }
+                                            HStack(spacing: 4) {
+                                                Button("复制 Commit") {
+                                                    copyText("feat: #\(task.id) \(task.name)")
+                                                    toast = "已复制 Commit 前缀"
+                                                }
+                                                .buttonStyle(.dsGhost)
+                                                if let url = model.zentaoItemWebURL(type: "task", id: task.id) {
+                                                    Button("打开网页") { NSWorkspace.shared.open(url) }
+                                                        .buttonStyle(.dsGhost)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                    case .bugs:
+                        if filteredBugs.isEmpty {
+                            emptyRow("当前没有指派给你的未解决 Bug")
+                        } else {
+                            ForEach(filteredBugs) { bug in
+                                DSCard(padding: 12) {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            HStack(spacing: 6) {
+                                                Tag("#\(bug.id)", color: DS.danger)
+                                                Tag("严重度 S\(bug.severity)", color: bug.severity <= 2 ? DS.danger : DS.warning)
+                                                Tag("P\(bug.priority)", color: DS.textSecondary)
+                                                Text(bug.productName).font(DS.caption).foregroundStyle(DS.textSecondary)
+                                            }
+                                            Text(bug.title).font(DS.rowTitle)
+                                        }
+                                        Spacer(minLength: 8)
+                                        VStack(alignment: .trailing, spacing: 6) {
+                                            HStack(spacing: 4) {
+                                                Button("+ 记入草稿") {
+                                                    model.addDraftFromAssignedBug(bug)
+                                                    toast = "已加入 Bug #\(bug.id) 到今日草稿"
+                                                }
+                                                .buttonStyle(.dsSecondary)
+                                                Button("+ 转待办") {
+                                                    let added = model.addTodoFromBug(bug)
+                                                    toast = added ? "已添加 Bug #\(bug.id) 到待办" : "该 Bug 已在未完成待办中"
+                                                }
+                                                .buttonStyle(.dsSecondary)
+                                            }
+                                            HStack(spacing: 4) {
+                                                Button("复制 Commit") {
+                                                    copyText("fix: #\(bug.id) \(bug.title)")
+                                                    toast = "已复制 Commit 前缀"
+                                                }
+                                                .buttonStyle(.dsGhost)
+                                                if let url = model.zentaoItemWebURL(type: "bug", id: bug.id) {
+                                                    Button("打开网页") { NSWorkspace.shared.open(url) }
+                                                        .buttonStyle(.dsGhost)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(height: 400)
+        }
+        .padding(22)
+        .frame(width: 720)
+        .background(DS.groupBackground)
+    }
+
+    private func emptyRow(_ title: String) -> some View {
+        DSCard {
+            Text(title)
+                .font(DS.body)
+                .foregroundStyle(DS.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 20)
+        }
+    }
+
+    private func copyText(_ s: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
     }
 }

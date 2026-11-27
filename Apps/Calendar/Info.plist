@@ -26,6 +26,10 @@
 	<true/>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>用于在万年历与工作台中展示当日会议与日程安排。</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>用于在万年历与工作台中展示当日会议与日程安排。</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>饭碗 IronBowl</string>
 	<key>SUEnableAutomaticChecks</key>

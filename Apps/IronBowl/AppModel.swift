@@ -1,12 +1,15 @@
 import AIWebPlugin
 import AppKit
 import CalendarPlugin
+import DevToolsPlugin
 import FeishuPlugin
 import IronBowlKit
 import Observation
 import ReportPlugin
 import SchedulerPlugin
 import SwiftUI
+import TodoPlugin
+import WorkspacePlugin
 import ZentaoLogPlugin
 
 enum DockMode: String, Codable, Sendable, CaseIterable, Identifiable {
@@ -36,6 +39,7 @@ enum AppKeys {
     static let menuBarItems = SettingKey<[String]>("app.menuBarItems", default: ["zentao.status"])
     static let dockMode = SettingKey<DockMode>("app.dockMode", default: .whenWindowOpen)
     static let lastPlugin = SettingKey<String>("app.lastPlugin", default: AppModel.homeID)
+    static let commandPaletteShortcut = SettingKey<Bool>("app.commandPalette.globalShortcut", default: true)
 }
 
 /// 应用级状态：共享服务 + 插件列表。
@@ -47,6 +51,7 @@ final class AppModel {
     nonisolated(unsafe) static weak var shared: AppModel?
     let database: AppDatabase
     let settings: SettingsStore
+    let userProfile: UserProfileStore
     let reminders: ReminderCenter
     let workCalendar: WorkCalendar
     let providers: AIProviderStore
@@ -58,12 +63,18 @@ final class AppModel {
     let launchAtLogin = LaunchAtLoginController()
     let plugins: [IronBowlPlugin]
     var context: PluginContext!
+    var commandPalette: CommandPaletteController!
 
     var selection: String?
     var isMainWindowOpen = false
+    /// 数据恢复后递增，触发原生页面保活容器销毁重建缓存页。
+    var pageDeckResetToken = 0
+    /// 主窗口关闭后闲置收缩后台页面缓存的触发令牌。
+    var pageDeckTrimToken = 0
     /// 菜单栏倒计时用的时钟，每 30 秒更新。
     var now = Date()
     @ObservationIgnored private var clock: Timer?
+    @ObservationIgnored private var backgroundTrimTask: Task<Void, Never>?
     @ObservationIgnored var openMainWindow: (() -> Void)?
     @ObservationIgnored private var started = Set<String>()
 
@@ -76,7 +87,12 @@ final class AppModel {
             SchedulerPlugin(),
             ReportPlugin(),
             MonthlyReportPlugin(),
-            ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist"),
+            WorkLedgerPlugin(),
+            AnnualReviewPlugin(),
+            TodoPlugin(),
+            ScratchpadPlugin(),
+            WorkspacePlugin(),
+            DevToolsPlugin(),
         ]
         self.plugins = plugins
         defer { AppModel.shared = self }
@@ -87,6 +103,7 @@ final class AppModel {
         }
         reminders = ReminderCenter(database: database)
         settings = SettingsStore(database: database)
+        userProfile = UserProfileStore(settings: settings)
         if let existingEnabled = settings[AppKeys.enabledPlugins] {
             let known = Set(settings[AppKeys.knownPlugins])
             var nextEnabled = Set(existingEnabled)
@@ -128,9 +145,27 @@ final class AppModel {
             workCalendar: workCalendar, providers: providers, webSessions: webSessions,
             scheduler: scheduler,
             openPlugin: { [weak self] id in self?.open(plugin: id) },
-            openSettings: { [weak self] page in self?.openSettings(page: page) }
+            openSettings: { [weak self] page in self?.openSettings(page: page) },
+            openChatInWorkspace: { [weak self] path in self?.openChat(inWorkspace: path) },
+            appendDailyLogDraft: { [database, settings] work, hours, date in
+                ZentaoLogPlugin.appendExternalDraft(work: work, hours: hours, on: date, database: database, settings: settings)
+            }
         )
+        context.clipboard.startMonitoring()
         syncPlugins()
+        commandPalette = CommandPaletteController(app: self)
+        commandPalette.syncShortcut()
+        chat.onTurnCompleted = { [weak self] in
+            guard let self else { return }
+            self.workCalendar.reload()
+            self.context.todos.reload()
+            self.context.scratchpad.reload()
+            self.context.clipboard.reload()
+            NotificationCenter.default.post(
+                name: ZentaoLogPlugin.externalDraftAddedNotification,
+                object: WorkCalendar.dayString(Date())
+            )
+        }
         applyDockMode()
         applyAppearance()
         DS.fontScale = settings[AppKeys.fontScale]
@@ -138,6 +173,7 @@ final class AppModel {
             guard let self else { return }
             self.applyAppearance()
             DS.fontScale = self.settings[AppKeys.fontScale]
+            self.userProfile.reloadAvatar()
             self.calendarModel?.syncExternalChanges()
             self.scheduler.recomputeNextRuns()
         }
@@ -146,6 +182,11 @@ final class AppModel {
         }
         workCalendar.onAttendanceIssue = { [weak self] issue in
             self?.showAttendanceIssue(issue)
+        }
+        workCalendar.onClockOutSynced = { [weak self] day, _ in
+            if Calendar.current.isDateInToday(day) {
+                self?.scheduler.dismissActiveClockOutReminders()
+            }
         }
         clock = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -156,6 +197,7 @@ final class AppModel {
         }
         clock?.tolerance = 5
         Task {
+            _ = try? WorkbenchBridgeCLI.ensureInstalled()
             await providers.autodetectMissingPaths()
             await providers.loadAllModels()
             await workCalendar.updateIfNeeded()
@@ -169,7 +211,10 @@ final class AppModel {
         Set(settings[AppKeys.enabledPlugins] ?? plugins.map(\.id))
     }
 
-    var enabledPlugins: [IronBowlPlugin] { plugins.filter { enabledIDs.contains($0.id) } }
+    var enabledPlugins: [IronBowlPlugin] {
+        let ids = enabledIDs
+        return plugins.filter { ids.contains($0.id) }
+    }
 
     func setEnabled(_ id: String, _ enabled: Bool) {
         var ids = enabledIDs
@@ -198,14 +243,29 @@ final class AppModel {
     func plugin(_ id: String?) -> IronBowlPlugin? { plugins.first { $0.id == id } }
 
     func select(_ id: String) {
+        guard selection != id else { return }
         selection = id
-        settings[AppKeys.lastPlugin] = id
+        settings.setDeferred(id, for: AppKeys.lastPlugin)
     }
 
     func open(plugin id: String) {
         select(id)
         openMainWindow?()
         NSApp.activate()
+    }
+
+    func openChat(inWorkspace path: String) {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        chat.defaultWorkspacePath = trimmed
+        if let thread = chat.selectedThread, (chat.messagesByThread[thread.id] ?? []).isEmpty {
+            chat.updateThread(thread.id, workspacePath: trimmed)
+        } else {
+            let folderName = URL(fileURLWithPath: trimmed).lastPathComponent
+            let title = folderName.isEmpty ? "工作区对话" : "\(folderName) 对话"
+            _ = chat.createThread(title: title, workspacePath: trimmed)
+        }
+        open(plugin: Self.homeID)
     }
 
     func closeWebSession(id: String) {
@@ -334,7 +394,11 @@ final class AppModel {
             text == "✓" ? .green : .rose
         case "zentao.hours":
             text.hasPrefix("已写") ? .green : .rose
-        case "calendar.weather":
+        case "zentao.bugs":
+            .rose
+        case "calendar.nextMeeting":
+            .amber
+        case "calendar.weather", "devtools.ports":
             .sky
         case "zentao.commits", "calendar.date", "calendar.lunar":
             .slate
@@ -384,10 +448,41 @@ final class AppModel {
 
     func mainWindow(isOpen: Bool) {
         isMainWindowOpen = isOpen
+        backgroundTrimTask?.cancel()
+        backgroundTrimTask = nil
         if !isOpen {
             webSessions.detachAllDisplays()
+            backgroundTrimTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(180))
+                guard let self, !Task.isCancelled, !self.isMainWindowOpen else { return }
+                self.pageDeckTrimToken &+= 1
+            }
         }
         applyDockMode()
         if isOpen { NSApp.activate() }
+    }
+
+    // MARK: 数据恢复后全量重载
+
+    func reloadAllStoresAfterRestore() {
+        settings.reload()
+        applyAppearance()
+        DS.fontScale = settings[AppKeys.fontScale]
+        userProfile.reloadAvatar()
+        workCalendar.reload()
+        context.todos.reload()
+        context.scratchpad.reload()
+        context.clipboard.reload()
+        reminders.reloadHistory()
+        scheduler.recomputeNextRuns()
+        chat.loadThreads()
+        calendarModel?.syncExternalChanges()
+        applyDockMode()
+        for p in plugins where started.contains(p.id) {
+            p.stop()
+            started.remove(p.id)
+        }
+        syncPlugins()
+        pageDeckResetToken &+= 1
     }
 }

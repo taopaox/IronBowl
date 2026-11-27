@@ -7,6 +7,37 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
     public static let pluginID = "zentao.log"
     public static let autoSubmitActionID = "zentao.autoSubmitLog"
     public static let defaultAutoSubmitTaskID = "builtin.zentao.dailyAutoSubmit"
+    public static let externalDraftAddedNotification = Notification.Name("com.taopaox.ironbowl.zentao.externalDraftAdded")
+
+    /// 从其他插件（如待办、随手便签）向指定日期的禅道日报草稿追加一条记录。
+    @discardableResult
+    public static func appendExternalDraft(
+        work: String,
+        hours: Double = 1.0,
+        taskID: Int? = nil,
+        on date: Date = Date(),
+        database: AppDatabase,
+        settings: SettingsStore
+    ) -> Bool {
+        let trimmed = work.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, hours.isFinite, hours > 0 else { return false }
+        let normalizedHours = max(0.5, (hours * 2).rounded() / 2)
+        let ds = WorkCalendar.dayString(date)
+        let store = LogStore(db: database)
+        let resolvedTaskID = taskID ?? settings[LogKeys.fallbackTaskID]
+        var entries = store.pendingDrafts(from: ds, to: ds)[ds] ?? []
+        entries.append(DraftEntry(
+            taskID: resolvedTaskID,
+            hours: normalizedHours,
+            left: 0,
+            work: trimmed,
+            isFallback: resolvedTaskID != nil && resolvedTaskID == settings[LogKeys.fallbackTaskID],
+            isManual: true
+        ))
+        guard store.savePendingDrafts(entries, for: ds) else { return false }
+        NotificationCenter.default.post(name: externalDraftAddedNotification, object: ds)
+        return true
+    }
     public let id = ZentaoLogPlugin.pluginID
     public let title = "禅道日志"
     public let sidebarTitle = "日报"
@@ -26,6 +57,7 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
 
     var model: LogModel?
     var scheduler: LogReminderScheduler?
+    var assignedWatcher: ZentaoAssignedWatcher?
     private var quickCapture: QuickLogCapture?
     private var pluginContext: PluginContext?
 
@@ -41,6 +73,9 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
         let scheduler = LogReminderScheduler(model: model)
         self.scheduler = scheduler
         scheduler.start()
+        let watcher = ZentaoAssignedWatcher(model: model)
+        self.assignedWatcher = watcher
+        watcher.start()
         registerScheduledActions(context: context, model: model)
     }
 
@@ -48,6 +83,8 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
         pluginContext?.scheduler.unregister(actionID: Self.autoSubmitActionID)
         quickCapture?.stop()
         quickCapture = nil
+        assignedWatcher?.stop()
+        assignedWatcher = nil
         pluginContext = nil
         scheduler?.stop()
         scheduler = nil
@@ -130,12 +167,12 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
     public static let settingsReposID = "zentao.repos"
 
     public var settingsPages: [SettingsPage] {
-        guard let model, let scheduler, let quickCapture else { return [] }
+        guard let model, let scheduler, let quickCapture, let assignedWatcher else { return [] }
         return [
             SettingsPage(id: Self.settingsAccountID, title: "禅道账号", systemImage: "person.crop.circle") { AnyView(ZentaoAccountSettings(model: model)) },
             SettingsPage(id: Self.settingsReposID, title: "仓库与映射", systemImage: "folder") { AnyView(RepoSettings(model: model)) },
             SettingsPage(id: "zentao.generate", title: "日志生成", systemImage: "sparkles") { AnyView(GenerateSettings(model: model, capture: quickCapture)) },
-            SettingsPage(id: "zentao.reminder", title: "日志提醒", systemImage: "bell") { AnyView(ReminderSettings(model: model, scheduler: scheduler)) },
+            SettingsPage(id: "zentao.reminder", title: "日志提醒", systemImage: "bell") { AnyView(ReminderSettings(model: model, scheduler: scheduler, watcher: assignedWatcher)) },
         ]
     }
 
@@ -388,6 +425,14 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
             },
             MenuBarItem(id: "zentao.nextReminder", title: "离下次提醒还有多久") {
                 scheduler.nextReminder().map { "距提醒 " + countdown(to: $0) }
+            },
+            MenuBarItem(id: "zentao.gitDirty", title: "未提交/未推送仓库数") {
+                let dirtyCount = model.dirtyRepoStatuses.count
+                return dirtyCount > 0 ? "待推 \(dirtyCount)库" : nil
+            },
+            MenuBarItem(id: "zentao.bugs", title: "未解决 Bug 数") {
+                let bugCount = model.openBugs.count
+                return bugCount > 0 ? "Bug \(bugCount)" : nil
             },
         ]
     }

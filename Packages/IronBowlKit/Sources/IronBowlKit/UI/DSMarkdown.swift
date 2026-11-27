@@ -25,9 +25,65 @@ public nonisolated enum DSMarkdownBlock: Sendable, Identifiable, Equatable {
     }
 }
 
+private nonisolated final class DSMarkdownCache: @unchecked Sendable {
+    static let shared = DSMarkdownCache()
+
+    private let lock = NSLock()
+    private let maxBlocksEntries = 64
+    private let maxInlineEntries = 512
+
+    private var blocksCache: [String: [DSMarkdownBlock]] = [:]
+    private var blocksOrder: [String] = []
+    private var inlineCache: [String: AttributedString] = [:]
+    private var inlineOrder: [String] = []
+
+    func blocks(for markdown: String) -> [DSMarkdownBlock]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return blocksCache[markdown]
+    }
+
+    func storeBlocks(_ blocks: [DSMarkdownBlock], for markdown: String) {
+        guard markdown.utf8.count <= 200_000 else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        if blocksCache[markdown] == nil {
+            if blocksOrder.count >= maxBlocksEntries, let evicted = blocksOrder.first {
+                blocksOrder.removeFirst()
+                blocksCache.removeValue(forKey: evicted)
+            }
+            blocksOrder.append(markdown)
+        }
+        blocksCache[markdown] = blocks
+    }
+
+    func inline(for text: String) -> AttributedString? {
+        lock.lock()
+        defer { lock.unlock() }
+        return inlineCache[text]
+    }
+
+    func storeInline(_ attributed: AttributedString, for text: String) {
+        guard text.utf8.count <= 32_000 else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        if inlineCache[text] == nil {
+            if inlineOrder.count >= maxInlineEntries, let evicted = inlineOrder.first {
+                inlineOrder.removeFirst()
+                inlineCache.removeValue(forKey: evicted)
+            }
+            inlineOrder.append(text)
+        }
+        inlineCache[text] = attributed
+    }
+}
+
 /// 面向中文与对话输出场景的轻量 Markdown 解析器（支持表格、任务列表，且无中文标点相邻加粗失效问题）。
 public nonisolated enum DSMarkdown {
     public static func parseBlocks(_ markdown: String) -> [DSMarkdownBlock] {
+        if let cached = DSMarkdownCache.shared.blocks(for: markdown) {
+            return cached
+        }
         let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         var out: [DSMarkdownBlock] = []
         var paragraphBuffer: [String] = []
@@ -157,11 +213,21 @@ public nonisolated enum DSMarkdown {
         }
         flushQuote()
         flushParagraph()
+        DSMarkdownCache.shared.storeBlocks(out, for: markdown)
         return out
     }
 
     /// 解析行内 Markdown（支持 `**加粗**`、`__加粗__`、`*斜体*`、`` `代码` ``、`~~删除线~~`、`[链接](url)`，无中文标点边界限制）。
     public static func attributedInline(_ text: String) -> AttributedString {
+        if let cached = DSMarkdownCache.shared.inline(for: text) {
+            return cached
+        }
+        let parsed = parseAttributedInline(text)
+        DSMarkdownCache.shared.storeInline(parsed, for: text)
+        return parsed
+    }
+
+    private static func parseAttributedInline(_ text: String) -> AttributedString {
         var result = AttributedString()
         var plainBuffer = ""
         var index = text.startIndex
@@ -448,14 +514,18 @@ public struct DSMarkdownView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(blocks) { block in
-                blockView(block)
+                DSMarkdownBlockRow(block: block)
+                    .equatable()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
 
-    @ViewBuilder
-    private func blockView(_ block: DSMarkdownBlock) -> some View {
+private struct DSMarkdownBlockRow: View, Equatable {
+    let block: DSMarkdownBlock
+
+    var body: some View {
         switch block {
         case .heading(_, let level, let content):
             Text(DSMarkdown.attributedInline(content))

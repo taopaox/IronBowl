@@ -10,6 +10,23 @@ public nonisolated enum TitaLog {
         let time = ISO8601DateFormatter().string(from: Date())
         var text = "[\(time)] \(method) \(path) -> \(status)\n"
         text += String(decoding: body.prefix(4000), as: UTF8.self) + "\n\n"
+        append(text)
+    }
+
+    static func writeError(method: String, path: String, attempt: Int, maxAttempts: Int, error: Error) {
+        let time = ISO8601DateFormatter().string(from: Date())
+        let nsErr = error as NSError
+        var detail = "domain=\(nsErr.domain) code=\(nsErr.code)"
+        if let underlying = nsErr.userInfo[NSUnderlyingErrorKey] as? NSError,
+           let sslCode = underlying.userInfo["_kCFNetworkCFStreamSSLErrorOriginalValue"] {
+            detail += " ssl=\(sslCode)"
+        }
+        detail += " \(error.localizedDescription)"
+        let text = "[\(time)] \(method) \(path) -> ERROR (\(attempt)/\(maxAttempts)) \(detail)\n\n"
+        append(text)
+    }
+
+    private static func append(_ text: String) {
         lock.lock()
         defer { lock.unlock() }
         if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > 2_000_000 {
@@ -91,6 +108,11 @@ public actor TitaClient {
         self.session = URLSession(configuration: config, delegate: redirectDelegate, delegateQueue: nil)
     }
 
+    /// 结束并释放内部 `URLSession`（用于切换账号/凭证或销毁临时客户端）。
+    public nonisolated func invalidate() {
+        session.finishTasksAndInvalidate()
+    }
+
     // MARK: - 会话验证与身份探测
 
     /// 验证 Cookie 是否有效，并自动补全 `tenantId`、`userId` 与姓名。
@@ -139,17 +161,7 @@ public actor TitaClient {
             endpoint: "summary/selectTemplates?summaryType=\(summaryType.rawValue)"
         )
         let list = (obj["Data"] as? [[String: Any]]) ?? []
-        return list.compactMap { item in
-            guard let id = Self.int(item["id"] ?? item["templateId"]) else { return nil }
-            let name = ((item["name"] as? String) ?? (item["templateName"] as? String) ?? "模板 \(id)")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let modules = ((item["summaryTemplateModules"] as? [[String: Any]]) ?? [])
-                .filter { ($0["moduleType"] as? String) == "richtext" && (Self.int($0["moduleObjType"]) ?? 0) == 0 }
-                .sorted { (Self.int($0["sortIndex"]) ?? 0) < (Self.int($1["sortIndex"]) ?? 0) }
-                .compactMap { ($0["moduleName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            return TitaTemplateSummary(templateID: id, name: name, richtextModuleNames: modules)
-        }
+        return Self.parseTemplates(list)
     }
 
     public func fetchStatus(
@@ -170,15 +182,7 @@ public actor TitaClient {
                 templateID: nil
             )
         }
-        return TitaPeriodStatus(
-            summaryDate: summaryDate,
-            summaryType: summaryType,
-            state: TitaSubmitState(rawInt: Self.int(dataObj["summaryStatus"] ?? dataObj["summaryStatu"])),
-            dailyID: (dataObj["summaryId"] as? String) ?? "",
-            templateID: Self.int(dataObj["tempId"]),
-            submitDate: dataObj["submitDate"] as? String,
-            delayDate: dataObj["delayDate"] as? String
-        )
+        return Self.parseStatus(dataObj, summaryType: summaryType, summaryDate: summaryDate)
     }
 
     public func fetchDetail(summaryType: TitaSummaryType, summaryDate: String) async throws -> TitaReportDetail? {
@@ -194,10 +198,30 @@ public actor TitaClient {
         guard let dataObj = obj["Data"] as? [String: Any] else {
             return nil
         }
-        return try parseDetail(dataObj, fallbackType: summaryType, fallbackDate: summaryDate)
+        return try Self.parseDetail(dataObj, fallbackType: summaryType, fallbackDate: summaryDate)
     }
 
     public func createSummary(
+        summaryType: TitaSummaryType,
+        summaryDate: String,
+        templateID: Int
+    ) async throws -> TitaReportDetail {
+        let resolvedID = try await resolveTemplateID(preferred: templateID, summaryType: summaryType)
+        do {
+            return try await performCreateSummary(summaryType: summaryType, summaryDate: summaryDate, templateID: resolvedID)
+        } catch let error as TitaError {
+            guard case .apiError(_, let message) = error,
+                  message.contains("模板"),
+                  let templates = try? await fetchTemplates(summaryType: summaryType),
+                  let fallbackID = templates.first?.templateID,
+                  fallbackID != resolvedID else {
+                throw error
+            }
+            return try await performCreateSummary(summaryType: summaryType, summaryDate: summaryDate, templateID: fallbackID)
+        }
+    }
+
+    private func performCreateSummary(
         summaryType: TitaSummaryType,
         summaryDate: String,
         templateID: Int
@@ -211,7 +235,31 @@ public actor TitaClient {
         guard let dataObj = obj["Data"] as? [String: Any] else {
             throw TitaError.badResponse("创建总结草稿失败，未返回 Data")
         }
-        return try parseDetail(dataObj, fallbackType: summaryType, fallbackDate: summaryDate)
+        return try Self.parseDetail(dataObj, fallbackType: summaryType, fallbackDate: summaryDate)
+    }
+
+    private func resolveTemplateID(preferred: Int, summaryType: TitaSummaryType) async throws -> Int {
+        if preferred > 0 {
+            return preferred
+        }
+        if let templates = try? await fetchTemplates(summaryType: summaryType),
+           let first = templates.first {
+            return first.templateID
+        }
+        return summaryType == .weekly ? 1006 : 1007
+    }
+
+    /// 删除指定 `dailyId` 的 Tita 总结。
+    public func deleteSummary(dailyID: String) async throws {
+        let trimmed = dailyID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw TitaError.badResponse("删除总结失败：dailyId 为空")
+        }
+        _ = try await apiRequest(
+            method: "POST",
+            endpoint: "summary/delete/\(trimmed)",
+            jsonBody: [:]
+        )
     }
 
     // MARK: - 写入草稿与正式提交
@@ -498,18 +546,92 @@ public actor TitaClient {
             req.setValue("application/json;charset=UTF-8", forHTTPHeaderField: "Content-Type")
         }
 
-        let (data, resp) = try await session.data(for: req)
-        let http = resp as? HTTPURLResponse
-        let status = http?.statusCode ?? -1
         let pathForLog = url.path + (url.query.map { "?\($0)" } ?? "")
-        TitaLog.write(method: method, path: pathForLog, status: status, body: acceptHTML ? Data("[HTML length=\(data.count)]".utf8) : data)
-        guard let http else {
-            throw TitaError.badResponse("非 HTTP 响应")
+        let maxAttempts = 3
+        let retryDelays: [Duration] = [.milliseconds(300), .milliseconds(800)]
+
+        for attempt in 1...maxAttempts {
+            do {
+                let (data, resp) = try await session.data(for: req)
+                let http = resp as? HTTPURLResponse
+                let status = http?.statusCode ?? -1
+                TitaLog.write(method: method, path: pathForLog, status: status, body: acceptHTML ? Data("[HTML length=\(data.count)]".utf8) : data)
+                guard let http else {
+                    throw TitaError.badResponse("非 HTTP 响应")
+                }
+                return (data, http)
+            } catch {
+                TitaLog.writeError(method: method, path: pathForLog, attempt: attempt, maxAttempts: maxAttempts, error: error)
+                if attempt < maxAttempts, Self.shouldRetryTransportError(error, method: method, path: pathForLog) {
+                    try await Task.sleep(for: retryDelays[attempt - 1])
+                    continue
+                }
+                throw Self.mapTransportError(error)
+            }
         }
-        return (data, http)
+        throw TitaError.badResponse("请求未执行")
     }
 
-    private func parseDetail(
+    nonisolated static func shouldRetryTransportError(_ error: Error, method: String, path: String) -> Bool {
+        if error is CancellationError { return false }
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .cancelled:
+            return false
+        case .secureConnectionFailed, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+            // TLS 握手或 TCP 建连阶段失败时尚未发送任何 HTTP 请求体，GET/POST 均可安全重试。
+            return true
+        case .timedOut, .networkConnectionLost:
+            if method.uppercased() == "GET" { return true }
+            let lowerPath = path.lowercased()
+            return lowerPath.contains("summary/detail")
+                || lowerPath.contains("summary/search")
+                || lowerPath.contains("summary/checkchange")
+                || lowerPath.contains("summary/richtext/update")
+                || lowerPath.contains("summary/mood/update")
+        default:
+            return false
+        }
+    }
+
+    nonisolated static func mapTransportError(_ error: Error) -> Error {
+        guard let urlError = error as? URLError, urlError.code == .secureConnectionFailed else {
+            return error
+        }
+        return TitaError.networkError("与 Tita 建立 TLS 安全连接失败（已自动重试）。若本机开启了代理/TUN，建议将 tita.net 加入直连规则后重试。")
+    }
+
+    nonisolated static func parseTemplates(_ list: [[String: Any]]) -> [TitaTemplateSummary] {
+        list.compactMap { item in
+            guard let id = positiveInt(item["id"] ?? item["templateId"]) else { return nil }
+            let name = ((item["name"] as? String) ?? (item["templateName"] as? String) ?? "模板 \(id)")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let modules = ((item["summaryTemplateModules"] as? [[String: Any]]) ?? [])
+                .filter { ($0["moduleType"] as? String) == "richtext" && (int($0["moduleObjType"]) ?? 0) == 0 }
+                .sorted { (int($0["sortIndex"]) ?? 0) < (int($1["sortIndex"]) ?? 0) }
+                .compactMap { ($0["moduleName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            return TitaTemplateSummary(templateID: id, name: name, richtextModuleNames: modules)
+        }
+    }
+
+    nonisolated static func parseStatus(
+        _ dataObj: [String: Any],
+        summaryType: TitaSummaryType,
+        summaryDate: String
+    ) -> TitaPeriodStatus {
+        TitaPeriodStatus(
+            summaryDate: summaryDate,
+            summaryType: summaryType,
+            state: TitaSubmitState(rawInt: int(dataObj["summaryStatus"] ?? dataObj["summaryStatu"])),
+            dailyID: (dataObj["summaryId"] as? String) ?? "",
+            templateID: positiveInt(dataObj["tempId"]),
+            submitDate: dataObj["submitDate"] as? String,
+            delayDate: dataObj["delayDate"] as? String
+        )
+    }
+
+    nonisolated static func parseDetail(
         _ dataObj: [String: Any],
         fallbackType: TitaSummaryType,
         fallbackDate: String
@@ -518,19 +640,19 @@ public actor TitaClient {
         guard !dailyID.isEmpty else {
             throw TitaError.badResponse("详情缺少 dailyId")
         }
-        let summaryType = Self.int(dataObj["summaryType"]).flatMap(TitaSummaryType.init(rawValue:)) ?? fallbackType
+        let summaryType = int(dataObj["summaryType"]).flatMap(TitaSummaryType.init(rawValue:)) ?? fallbackType
         let summaryDate = (dataObj["dailyDate"] as? String) ?? fallbackDate
-        let submitState = TitaSubmitState(rawInt: Self.int(dataObj["submitState"]))
-        let templateID = Self.int(dataObj["summaryTemplateId"]) ?? (summaryType == .weekly ? 1006 : 1007)
+        let submitState = TitaSubmitState(rawInt: int(dataObj["submitState"]))
+        let templateID = positiveInt(dataObj["summaryTemplateId"]) ?? (summaryType == .weekly ? 1006 : 1007)
         let delayDate = dataObj["delayDate"] as? String
 
         let rawDetails = (dataObj["details"] as? [[String: Any]]) ?? []
         let modules: [TitaReportModule] = rawDetails.compactMap { item in
-            guard let moduleId = Self.int(item["moduleId"]) else { return nil }
+            guard let moduleId = int(item["moduleId"]) else { return nil }
             let moduleName = ((item["moduleName"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let moduleType = (item["moduleType"] as? String) ?? ""
-            let moduleObjType = Self.int(item["moduleObjType"]) ?? 0
-            let sortIndex = Self.int(item["sortIndex"]) ?? 0
+            let moduleObjType = int(item["moduleObjType"]) ?? 0
+            let sortIndex = int(item["sortIndex"]) ?? 0
             let isDelete = (item["isDelete"] as? Bool) ?? false
 
             let objData = item["objectData"]
@@ -539,10 +661,18 @@ public actor TitaClient {
             var richTextHTML = ""
 
             if let dict = objData as? [String: Any] {
-                plainText = (dict["text"] as? String) ?? ""
+                let rawText = (dict["text"] as? String) ?? ""
                 richTextHTML = (dict["richText"] as? String) ?? ""
-                if plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !richTextHTML.isEmpty {
-                    plainText = TitaRichTextConverter.plainTextFromHTML(richTextHTML)
+                if !richTextHTML.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || rawText.contains("#tita-n#") {
+                    let parsed = TitaProseMirrorParser.toMarkdown(richContent: richTextHTML)
+                    plainText = parsed.isEmpty ? rawText.replacingOccurrences(of: "#tita-n#", with: "\n") : parsed
+                } else if rawText.contains("#tita-n#") {
+                    plainText = rawText
+                        .replacingOccurrences(of: "#tita-n#", with: "\n")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
+                    plainText = rawText
                 }
                 if let d = try? JSONSerialization.data(withJSONObject: dict, options: []) {
                     rawObjectDataJSON = String(decoding: d, as: UTF8.self)
@@ -551,7 +681,7 @@ public actor TitaClient {
                 }
             } else if let str = objData as? String {
                 rawObjectDataJSON = str
-            } else if let num = Self.int(objData) {
+            } else if let num = int(objData) {
                 rawObjectDataJSON = "\(num)"
             } else {
                 rawObjectDataJSON = ""
@@ -581,7 +711,12 @@ public actor TitaClient {
         )
     }
 
-    private static func int(_ v: Any?) -> Int? {
+    nonisolated private static func positiveInt(_ v: Any?) -> Int? {
+        guard let value = int(v), value > 0 else { return nil }
+        return value
+    }
+
+    nonisolated private static func int(_ v: Any?) -> Int? {
         if let i = v as? Int { return i }
         if let s = v as? String { return Int(s) }
         if let d = v as? Double { return Int(d) }

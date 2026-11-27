@@ -416,4 +416,5 @@ public nonisolated enum ChatKeys {
     public static let sidebarCollapsed = SettingKey<Bool>("chat.sidebarCollapsed", default: false)
     public static let lastThreadID = SettingKey<String?>("chat.lastThreadID", default: nil)
     public static let lastModelByProvider = SettingKey<[String: String]>("chat.lastModelByProvider", default: [:])
+    public static let workbenchBridgeEnabled = SettingKey<Bool>("chat.workbenchBridgeEnabled", default: true)
 }

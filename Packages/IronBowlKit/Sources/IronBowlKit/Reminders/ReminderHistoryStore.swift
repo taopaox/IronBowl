@@ -6,6 +6,7 @@ public nonisolated enum ReminderSource: String, Codable, Sendable, CaseIterable,
     case zentao
     case scheduler
     case attendance
+    case todo
     case general
 
     public var id: String { rawValue }
@@ -15,6 +16,7 @@ public nonisolated enum ReminderSource: String, Codable, Sendable, CaseIterable,
         case .zentao: "禅道日志"
         case .scheduler: "定时任务"
         case .attendance: "考勤同步"
+        case .todo: "待办备忘"
         case .general: "系统提醒"
         }
     }
@@ -24,6 +26,7 @@ public nonisolated enum ReminderSource: String, Codable, Sendable, CaseIterable,
         case .zentao: "square.and.pencil"
         case .scheduler: "clock.badge.checkmark"
         case .attendance: "person.badge.clock"
+        case .todo: "checklist"
         case .general: "bell.fill"
         }
     }
@@ -33,6 +36,7 @@ public nonisolated enum ReminderSource: String, Codable, Sendable, CaseIterable,
         if id.hasPrefix("zentao.") { return .zentao }
         if id.hasPrefix("scheduler.") { return .scheduler }
         if id.hasPrefix("core.attendance.") { return .attendance }
+        if id.hasPrefix("todo.") { return .todo }
         return .general
     }
 }

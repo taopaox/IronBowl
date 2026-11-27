@@ -112,6 +112,7 @@ import UserNotifications
     #expect(ReminderSource.infer(fromReminderID: "zentao.log.reminder") == .zentao)
     #expect(ReminderSource.infer(fromReminderID: "scheduler.task.123") == .scheduler)
     #expect(ReminderSource.infer(fromReminderID: "core.attendance.issue") == .attendance)
+    #expect(ReminderSource.infer(fromReminderID: "todo.item.1") == .todo)
     #expect(ReminderSource.infer(fromReminderID: "custom.notice") == .general)
 }
 

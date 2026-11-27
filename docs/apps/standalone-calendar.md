@@ -7,7 +7,8 @@
 - **共享应用源码**：除 [`CalendarApp.swift`](../../Apps/Calendar/CalendarApp.swift)（`CalendarApp`、`CalendarAppDelegate`、`StandaloneCalendar`、`StandaloneSettings`）外，通过 [`Apps/Shared/AppUpdater.swift`](../../Apps/Shared/AppUpdater.swift) 与主工作台共享 Sparkle 2 自动更新封装。
 - **与主工作台数据互通**：
   - 打开同一个数据库 `~/Library/Application Support/IronBowl/ironbowl.sqlite`。
-  - 共享外观主题（`app.appearance`）、字体缩放（`app.fontScale`）、法定节假日缓存、手动放假/补班标记（`holidayOverride`）、天气城市和源配置。
+  - 共享外观主题（`app.appearance`）、字体缩放（`app.fontScale`）、法定节假日缓存、手动放假/补班标记（`holidayOverride`）、系统/钉钉会议日程开关（`calendar.events.*`）、天气城市和源配置。
+  - 由于独立版不依赖 `ZentaoLogPlugin`（`PluginContext.appendDailyLogDraft == nil`），日期详情卡与弹层会展示会议安排与入会入口，但不展示「+ 记日报」按钮。
   - 通过 `DistributedNotificationCenter` 与主应用实时同步设置与节假日更新。
   - 当独立版 `IronBowlCalendar` 与主工作台 `IronBowl` 同时运行时，`CalendarAppDelegate` 与 `CalendarModel` 会通过 `DistributedNotificationCenter` 广播启停生命周期与响应主工作台探针，配合主工作台的 `NSWorkspace.runningApplications` KVO 监听与 `StandaloneCalendarPresenceState`，确保无论先启动主工作台还是先启动独立版万年历，主工作台都会自动隐藏其内置状态栏日历，仅保留独立版这一份状态栏日历。
 - **三个 SwiftUI Scene**：

@@ -55,6 +55,52 @@ public nonisolated struct DayInfo: Sendable, Equatable {
     public var isWorkday: Bool { kind == .workday || kind == .makeupWorkday }
 }
 
+/// 持久化在本地的每日上下班打卡记录。
+public nonisolated struct AttendanceRecord: Sendable, Equatable {
+    public let date: String
+    public let clockIn: Date?
+    public let clockOut: Date?
+    public let onDutyResult: String
+    public let offDutyResult: String
+    public let source: String
+    public let fetchedAt: Date
+
+    public init(
+        date: String,
+        clockIn: Date? = nil,
+        clockOut: Date? = nil,
+        onDutyResult: String = "",
+        offDutyResult: String = "",
+        source: String = "dingtalk",
+        fetchedAt: Date = Date()
+    ) {
+        self.date = date
+        self.clockIn = clockIn
+        self.clockOut = clockOut
+        self.onDutyResult = onDutyResult
+        self.offDutyResult = offDutyResult
+        self.source = source
+        self.fetchedAt = fetchedAt
+    }
+}
+
+/// 每日考勤异常类型。
+public nonisolated enum AttendanceAnomaly: String, Sendable, Equatable, CaseIterable {
+    case missingClockIn
+    case missingClockOut
+    case late
+    case earlyLeave
+
+    public var displayName: String {
+        switch self {
+        case .missingClockIn: "缺上班卡"
+        case .missingClockOut: "缺下班卡"
+        case .late: "上班迟到"
+        case .earlyLeave: "提前早退"
+        }
+    }
+}
+
 /// 工作日、上下班时间、节假日。
 @Observable
 public final class WorkCalendar {
@@ -80,8 +126,10 @@ public final class WorkCalendar {
     @ObservationIgnored public var onChange: (() -> Void)?
     private var holidays: [String: (isOffDay: Bool, name: String)] = [:]
     private var overrides: [String: (isOffDay: Bool, note: String)] = [:]
-    /// 每天的上班打卡时间（yyyy-MM-dd → 打卡时刻），来自 `attendanceClockIn` 表。
+    /// 每天的上班打卡时间（yyyy-MM-dd → 打卡时刻），来自 `attendanceClockIn` / `attendanceDailyRecord` 表。
     private var clockIns: [String: Date] = [:]
+    /// 每天的完整上下班考勤记录（yyyy-MM-dd → AttendanceRecord），来自 `attendanceDailyRecord` 表。
+    private var dailyAttendances: [String: AttendanceRecord] = [:]
     /// 每天的计划加班时长（yyyy-MM-dd → 小时），来自 `dailyOvertime` 表。
     private var dailyOvertimes: [String: Double] = [:]
     public private(set) var isUpdating = false
@@ -93,20 +141,63 @@ public final class WorkCalendar {
     public private(set) var attendanceLastSync: Date?
     /// 自动同步遇到需要用户处理的问题时回调（同一天同类问题只回调一次），主工作台用来弹提醒。
     @ObservationIgnored public var onAttendanceIssue: ((DingTalkAttendanceError) -> Void)?
+    /// 同步到某天新的下班打卡时回调（主工作台用来自动消掉桌面常驻打卡提醒）。
+    @ObservationIgnored public var onClockOutSynced: ((Date, Date) -> Void)?
     @ObservationIgnored private var notifiedAttendanceIssue: String?
     @ObservationIgnored private var attendanceLastAttempt: Date?
     @ObservationIgnored private var dingtalkUserID: String?
 
-    nonisolated static let dayFormatter: DateFormatter = {
+    private nonisolated static let lunarFormatterLock = NSLock()
+    private nonisolated static let lunarFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .current
-        f.dateFormat = "yyyy-MM-dd"
+        f.calendar = Calendar(identifier: .chinese)
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "MMMd"
         return f
     }()
 
-    public nonisolated static func dayString(_ date: Date) -> String { dayFormatter.string(from: date) }
+    public nonisolated static func dayString(_ date: Date) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let c = cal.dateComponents([.year, .month, .day], from: date)
+        let y = c.year ?? 1970
+        let m = c.month ?? 1
+        let d = c.day ?? 1
+        let mm = m < 10 ? "0\(m)" : "\(m)"
+        let dd = d < 10 ? "0\(d)" : "\(d)"
+        return String(format: "%04d-%@-%@", y, mm, dd)
+    }
+
+    public nonisolated static func parseDay(_ key: String) -> Date? {
+        let parts = key.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              let y = Int(parts[0]),
+              let m = Int(parts[1]),
+              let d = Int(parts[2]),
+              (1...12).contains(m),
+              (1...31).contains(d) else {
+            return nil
+        }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        var dc = DateComponents()
+        dc.year = y
+        dc.month = m
+        dc.day = d
+        guard let date = cal.date(from: dc) else { return nil }
+        let check = cal.dateComponents([.year, .month, .day], from: date)
+        guard check.year == y, check.month == m, check.day == d else { return nil }
+        return date
+    }
+
+    private nonisolated static func hmText(_ date: Date) -> String {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+        let h = c.hour ?? 0
+        let m = c.minute ?? 0
+        let hh = h < 10 ? "0\(h)" : "\(h)"
+        let mm = m < 10 ? "0\(m)" : "\(m)"
+        return "\(hh):\(mm)"
+    }
 
     public init(database: AppDatabase, settings: SettingsStore) {
         self.database = database
@@ -148,15 +239,42 @@ public final class WorkCalendar {
     }
 
     public func reload() {
-        let (h, o, c, ot) = (try? database.pool.read { db in
-            (try Row.fetchAll(db, sql: "SELECT date, isOffDay, name FROM holiday"),
-             try Row.fetchAll(db, sql: "SELECT date, isOffDay, note FROM holidayOverride"),
-             try Row.fetchAll(db, sql: "SELECT date, clockIn FROM attendanceClockIn"),
-             try Row.fetchAll(db, sql: "SELECT date, hours FROM dailyOvertime WHERE hours > 0"))
-        }) ?? ([], [], [], [])
+        let (h, o, c, d, ot): ([Row], [Row], [Row], [Row], [Row]) = (try? database.pool.read { db -> ([Row], [Row], [Row], [Row], [Row]) in
+            let dailyRows: [Row] = (try? db.tableExists("attendanceDailyRecord")) == true
+                ? (try Row.fetchAll(db, sql: "SELECT date, clockIn, clockOut, onDutyResult, offDutyResult, source, fetchedAt FROM attendanceDailyRecord"))
+                : []
+            return (
+                try Row.fetchAll(db, sql: "SELECT date, isOffDay, name FROM holiday"),
+                try Row.fetchAll(db, sql: "SELECT date, isOffDay, note FROM holidayOverride"),
+                try Row.fetchAll(db, sql: "SELECT date, clockIn FROM attendanceClockIn"),
+                dailyRows,
+                try Row.fetchAll(db, sql: "SELECT date, hours FROM dailyOvertime WHERE hours > 0")
+            )
+        }) ?? ([], [], [], [], [])
         holidays = Dictionary(uniqueKeysWithValues: h.map { ($0["date"] as String, (isOffDay: $0["isOffDay"] as Bool, name: $0["name"] as String)) })
         overrides = Dictionary(uniqueKeysWithValues: o.map { ($0["date"] as String, (isOffDay: $0["isOffDay"] as Bool, note: $0["note"] as String)) })
-        clockIns = Dictionary(c.map { ($0["date"] as String, $0["clockIn"] as Date) }, uniquingKeysWith: { a, _ in a })
+        var nextClockIns = Dictionary(c.map { ($0["date"] as String, $0["clockIn"] as Date) }, uniquingKeysWith: { a, _ in a })
+        var nextDaily: [String: AttendanceRecord] = [:]
+        for row in d {
+            let ds: String = row["date"]
+            let ci: Date? = row["clockIn"]
+            let co: Date? = row["clockOut"]
+            let rec = AttendanceRecord(
+                date: ds,
+                clockIn: ci,
+                clockOut: co,
+                onDutyResult: row["onDutyResult"] ?? "",
+                offDutyResult: row["offDutyResult"] ?? "",
+                source: row["source"] ?? "dingtalk",
+                fetchedAt: row["fetchedAt"] ?? Date()
+            )
+            nextDaily[ds] = rec
+            if let ci {
+                nextClockIns[ds] = ci
+            }
+        }
+        clockIns = nextClockIns
+        dailyAttendances = nextDaily
         dailyOvertimes = Dictionary(ot.map { ($0["date"] as String, $0["hours"] as Double) }, uniquingKeysWith: { a, _ in a })
         onChange?()
     }
@@ -193,6 +311,9 @@ public final class WorkCalendar {
         time(settings[Self.endKey], on: date).map { $0.addingTimeInterval(flexOffset(on: date)) }
     }
 
+    public static let maxOvertimeHours: Double = 12
+    public static let overtimeStepHours: Double = 0.5
+
     /// 某天计划加班的小时数。
     public func overtimeHours(on date: Date = Date()) -> Double {
         dailyOvertimes[Self.dayString(date)] ?? 0
@@ -201,7 +322,7 @@ public final class WorkCalendar {
     /// 设置某天的计划加班小时数（按 0.5h 步进限制在 0...12）；<= 0 时清除。
     public func setOvertimeHours(_ hours: Double, on date: Date = Date()) {
         let rounded = (hours * 2).rounded() / 2
-        let clamped = min(12, max(0, rounded))
+        let clamped = min(Self.maxOvertimeHours, max(0, rounded))
         let key = Self.dayString(date)
         let current = dailyOvertimes[key] ?? 0
         guard abs(current - clamped) > 0.001 else { return }
@@ -219,6 +340,20 @@ public final class WorkCalendar {
         notifyExternalChange()
     }
 
+    /// 切换某天的计划加班时长：若当前已等于目标值则清零，否则设为目标值。
+    public func toggleOvertimeHours(_ hours: Double, on date: Date = Date()) {
+        if abs(overtimeHours(on: date) - hours) < 0.01 {
+            setOvertimeHours(0, on: date)
+        } else {
+            setOvertimeHours(hours, on: date)
+        }
+    }
+
+    /// 按指定增量微调某天的计划加班时长（受 0.5h 步进与 0...12h 上下限约束）。
+    public func adjustOvertimeHours(by delta: Double, on date: Date = Date()) {
+        setOvertimeHours(overtimeHours(on: date) + delta, on: date)
+    }
+
     /// 某天的实际下班时刻（正常下班时刻 + 计划加班时长）。供界面展示、倒计时与进度条使用。
     public func effectiveWorkEnd(on date: Date = Date()) -> Date? {
         guard let baseEnd = workEnd(on: date) else { return nil }
@@ -233,18 +368,14 @@ public final class WorkCalendar {
     /// 某天的实际下班时间文字，比如「18:00」或跨零点时的「次日 00:30」。
     public func offWorkTimeText(on date: Date = Date()) -> String? {
         guard let end = effectiveWorkEnd(on: date) else { return nil }
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        let hhmm = f.string(from: end)
+        let hhmm = Self.hmText(end)
         return Calendar.current.isDate(end, inSameDayAs: date) ? hhmm : "次日 \(hhmm)"
     }
 
     /// 某天的上班时间文字：当天有打卡记录时显示实际打卡时间（HH:mm），否则显示配置的固定上班时间（work.start）。
     public func onWorkTimeText(on date: Date = Date()) -> String {
         if let clockIn = clockIn(on: date) {
-            let f = DateFormatter()
-            f.dateFormat = "HH:mm"
-            return f.string(from: clockIn)
+            return Self.hmText(clockIn)
         }
         return settings[Self.startKey]
     }
@@ -278,14 +409,15 @@ public final class WorkCalendar {
         return min(flex, max(-flex, minute - plannedStart.timeIntervalSinceReferenceDate))
     }
 
-    /// 某天的上下班说明，比如「打卡 08:29 · 17:29 下班」、「打卡 08:29 · 19:29 下班（加班 2h）」或「08:30–17:30」。
+    /// 某天的上下班说明，比如「打卡 08:29 · 17:29 下班」、「打卡 08:55–18:06（已下班打卡）」、「打卡 08:29 · 19:29 下班（加班 2h）」或「08:30–17:30」。
     public func scheduleText(on date: Date = Date()) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
         let ot = overtimeHours(on: date)
         let otSuffix = ot > 0 ? "（加班 \(Self.hoursText(ot))h）" : ""
+        if let ci = self.clockIn(on: date), let co = self.clockOut(on: date) {
+            return "打卡 \(Self.hmText(ci))–\(Self.hmText(co))（已下班打卡）"
+        }
         if let clockIn = self.clockIn(on: date), let endText = offWorkTimeText(on: date) {
-            return "打卡 \(f.string(from: clockIn)) · \(endText) 下班\(otSuffix)"
+            return "打卡 \(Self.hmText(clockIn)) · \(endText) 下班\(otSuffix)"
         }
         if ot > 0, let endText = offWorkTimeText(on: date) {
             return "\(settings[Self.startKey])–\(endText)\(otSuffix)"
@@ -321,28 +453,136 @@ public final class WorkCalendar {
         notifyExternalChange()
     }
 
-    // MARK: 上班打卡（钉钉考勤）
+    // MARK: 上下班打卡（钉钉考勤）
+
+    /// 某天的完整上下班打卡记录。
+    public func attendance(on date: Date) -> AttendanceRecord? { dailyAttendances[Self.dayString(date)] }
 
     /// 某天的上班打卡时刻。
     public func clockIn(on date: Date) -> Date? { clockIns[Self.dayString(date)] }
 
+    /// 某天的下班打卡时刻。
+    public func clockOut(on date: Date) -> Date? { dailyAttendances[Self.dayString(date)]?.clockOut }
+
+    /// 某天的真实在岗时长（小时）：基于上班打卡与下班打卡计算，跨度超过午休分钟数时扣除午休，否则不倒扣。
+    public func actualStayHours(on date: Date) -> Double? {
+        guard let ci = clockIn(on: date), let co = clockOut(on: date), co > ci else { return nil }
+        let spanSeconds = co.timeIntervalSince(ci)
+        let lunchSeconds = Double(max(0, settings[Self.lunchMinutesKey])) * 60
+        let netSeconds = spanSeconds > lunchSeconds ? (spanSeconds - lunchSeconds) : spanSeconds
+        return netSeconds / 3600
+    }
+
+    /// 某天的考勤异常（缺上班卡 / 缺下班卡 / 迟到 / 早退）。
+    /// 仅在已同步到考勤记录时判定；若是今天且尚未到预计下班时刻，不误报缺下班卡。
+    public func attendanceAnomalies(on date: Date, now: Date = Date()) -> [AttendanceAnomaly] {
+        guard isWorkday(date), let rec = attendance(on: date) else { return [] }
+        var issues: [AttendanceAnomaly] = []
+        let cal = Calendar.current
+        let isToday = cal.isDate(date, inSameDayAs: now)
+
+        if rec.clockIn == nil || rec.onDutyResult.caseInsensitiveCompare("NotSigned") == .orderedSame {
+            let pastStart = !isToday || (workStart(on: date).map { now > $0 } ?? true)
+            if pastStart {
+                issues.append(.missingClockIn)
+            }
+        } else if ["Late", "SeriousLate", "Absenteeism"].contains(where: { rec.onDutyResult.caseInsensitiveCompare($0) == .orderedSame }) {
+            issues.append(.late)
+        }
+
+        let pastEnd: Bool = isToday
+            ? (effectiveWorkEnd(on: date).map { now >= $0 } ?? false)
+            : (cal.startOfDay(for: date) < cal.startOfDay(for: now))
+        if rec.clockOut == nil || rec.offDutyResult.caseInsensitiveCompare("NotSigned") == .orderedSame {
+            if pastEnd {
+                issues.append(.missingClockOut)
+            }
+        } else if rec.offDutyResult.caseInsensitiveCompare("Early") == .orderedSame {
+            issues.append(.earlyLeave)
+        }
+        return issues
+    }
+
     /// 记录某天的上班打卡；nil 表示清除。
     public func setClockIn(_ time: Date?, on date: Date, source: String = "dingtalk") {
         let key = Self.dayString(date)
-        guard clockIns[key] != time else { return }
+        let current = dailyAttendances[key]
+        guard clockIns[key] != time || (time != nil && current?.clockIn != time) else { return }
         try? database.pool.write { db in
             if let time {
                 try db.execute(sql: "INSERT OR REPLACE INTO attendanceClockIn(date, clockIn, source, fetchedAt) VALUES (?, ?, ?, ?)",
                                arguments: [key, time, source, Date()])
+                if try db.tableExists("attendanceDailyRecord") {
+                    try db.execute(
+                        sql: """
+                        INSERT INTO attendanceDailyRecord(date, clockIn, clockOut, onDutyResult, offDutyResult, source, fetchedAt)
+                        VALUES (?, ?, ?, 'Normal', '', ?, ?)
+                        ON CONFLICT(date) DO UPDATE SET
+                            clockIn = excluded.clockIn,
+                            onDutyResult = CASE WHEN attendanceDailyRecord.onDutyResult = '' THEN 'Normal' ELSE attendanceDailyRecord.onDutyResult END,
+                            source = excluded.source,
+                            fetchedAt = excluded.fetchedAt
+                        """,
+                        arguments: [key, time, current?.clockOut, source, Date()]
+                    )
+                }
             } else {
                 try db.execute(sql: "DELETE FROM attendanceClockIn WHERE date = ?", arguments: [key])
+                if try db.tableExists("attendanceDailyRecord") {
+                    if let co = current?.clockOut {
+                        try db.execute(
+                            sql: "UPDATE attendanceDailyRecord SET clockIn = NULL, onDutyResult = '' WHERE date = ?",
+                            arguments: [key]
+                        )
+                        _ = co
+                    } else {
+                        try db.execute(sql: "DELETE FROM attendanceDailyRecord WHERE date = ?", arguments: [key])
+                    }
+                }
             }
         }
         reload()
         notifyExternalChange()
     }
 
-    /// 立即通过 dws 拉取某天的上班打卡。任何失败都只记录在 `attendanceIssue`，下班时间回落到固定的 `work.end`。
+    /// 写入某天完整上下班考勤记录（保留已有非空字段避免覆盖手动或旧记录）。
+    public func saveAttendance(_ record: AttendanceRecord, notifyExternal: Bool = true) {
+        try? database.pool.write { db in
+            try Self.persistAttendance(record, in: db)
+        }
+        reload()
+        if notifyExternal {
+            notifyExternalChange()
+        }
+    }
+
+    private nonisolated static func persistAttendance(_ record: AttendanceRecord, in db: Database) throws {
+        if try db.tableExists("attendanceDailyRecord") {
+            try db.execute(
+                sql: """
+                INSERT OR REPLACE INTO attendanceDailyRecord(date, clockIn, clockOut, onDutyResult, offDutyResult, source, fetchedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                arguments: [
+                    record.date,
+                    record.clockIn,
+                    record.clockOut,
+                    record.onDutyResult,
+                    record.offDutyResult,
+                    record.source,
+                    record.fetchedAt,
+                ]
+            )
+        }
+        if let ci = record.clockIn {
+            try db.execute(
+                sql: "INSERT OR REPLACE INTO attendanceClockIn(date, clockIn, source, fetchedAt) VALUES (?, ?, ?, ?)",
+                arguments: [record.date, ci, record.source, record.fetchedAt]
+            )
+        }
+    }
+
+    /// 立即通过 dws 拉取某天的上下班打卡。任何失败都只记录在 `attendanceIssue`，下班时间回落到固定的 `work.end`。
     public func syncAttendance(for date: Date = Date()) async {
         guard !isSyncingAttendance else { return }
         isSyncingAttendance = true
@@ -350,15 +590,25 @@ public final class WorkCalendar {
         defer { isSyncingAttendance = false }
         do {
             let path = try await resolveDwsPath()
-            let userID: String
-            if let cached = dingtalkUserID {
-                userID = cached
-            } else {
-                userID = try await DingTalkAttendance.currentUserID(executable: path)
-                dingtalkUserID = userID
-            }
-            if let time = try await DingTalkAttendance.fetchClockIn(executable: path, userID: userID, day: Self.dayString(date)) {
-                setClockIn(time, on: date)
+            let userID = try await resolveDingtalkUserID(executable: path)
+            let ds = Self.dayString(date)
+            if let fetched = try await DingTalkAttendance.fetchDayAttendance(executable: path, userID: userID, day: ds) {
+                let prevClockOut = dailyAttendances[ds]?.clockOut
+                let resolvedIn = fetched.clockIn ?? dailyAttendances[ds]?.clockIn
+                let resolvedOut = fetched.clockOut ?? dailyAttendances[ds]?.clockOut
+                let record = AttendanceRecord(
+                    date: ds,
+                    clockIn: resolvedIn,
+                    clockOut: resolvedOut,
+                    onDutyResult: fetched.onDutyResult.isEmpty ? (dailyAttendances[ds]?.onDutyResult ?? "") : fetched.onDutyResult,
+                    offDutyResult: fetched.offDutyResult.isEmpty ? (dailyAttendances[ds]?.offDutyResult ?? "") : fetched.offDutyResult,
+                    source: "dingtalk",
+                    fetchedAt: Date()
+                )
+                saveAttendance(record)
+                if prevClockOut == nil, let newOut = resolvedOut {
+                    onClockOutSynced?(date, newOut)
+                }
             }
             attendanceIssue = nil
             attendanceLastSync = Date()
@@ -367,6 +617,60 @@ public final class WorkCalendar {
             dingtalkUserID = nil
             attendanceIssue = error as? DingTalkAttendanceError ?? .cliFailed(error.localizedDescription)
         }
+    }
+
+    /// 批量通过 dws 同步区间 `[startDate, endDate]` 内的全部考勤打卡记录，返回同步天数。
+    @discardableResult
+    public func syncAttendanceRange(from startDate: Date, to endDate: Date) async throws -> Int {
+        guard !isSyncingAttendance else { return 0 }
+        isSyncingAttendance = true
+        attendanceLastAttempt = Date()
+        defer { isSyncingAttendance = false }
+        do {
+            let path = try await resolveDwsPath()
+            let userID = try await resolveDingtalkUserID(executable: path)
+            let startStr = Self.dayString(startDate)
+            let endStr = Self.dayString(endDate)
+            let fetchedMap = try await DingTalkAttendance.fetchRangeAttendance(
+                executable: path,
+                userID: userID,
+                startDay: startStr,
+                endDay: endStr
+            )
+            let now = Date()
+            try await database.pool.write { [existing = self.dailyAttendances] db in
+                for (ds, item) in fetchedMap {
+                    let prev = existing[ds]
+                    let rec = AttendanceRecord(
+                        date: ds,
+                        clockIn: item.clockIn ?? prev?.clockIn,
+                        clockOut: item.clockOut ?? prev?.clockOut,
+                        onDutyResult: item.onDutyResult.isEmpty ? (prev?.onDutyResult ?? "") : item.onDutyResult,
+                        offDutyResult: item.offDutyResult.isEmpty ? (prev?.offDutyResult ?? "") : item.offDutyResult,
+                        source: "dingtalk",
+                        fetchedAt: now
+                    )
+                    try Self.persistAttendance(rec, in: db)
+                }
+            }
+            reload()
+            notifyExternalChange()
+            attendanceIssue = nil
+            attendanceLastSync = now
+            return fetchedMap.count
+        } catch {
+            dingtalkUserID = nil
+            let err = error as? DingTalkAttendanceError ?? .cliFailed(error.localizedDescription)
+            attendanceIssue = err
+            throw err
+        }
+    }
+
+    private func resolveDingtalkUserID(executable: String) async throws -> String {
+        if let cached = dingtalkUserID { return cached }
+        let id = try await DingTalkAttendance.currentUserID(executable: executable)
+        dingtalkUserID = id
+        return id
     }
 
     /// 配置的路径失效（卸载、换了 node 版本）时自动重新查找；找不到就清空配置。
@@ -381,15 +685,22 @@ public final class WorkCalendar {
         return found
     }
 
-    /// 定时调用：开启了钉钉同步、今天上班、还没拿到打卡、处在「最早上班 ~ 最晚下班」之间才查。
+    /// 定时调用：开启了钉钉同步、今天上班、且需要拉取上班卡或下班卡时执行同步。
     /// 重试间隔：一般失败 5 分钟；没安装 / 没登录 / 没权限这类要用户处理的问题 30 分钟，并且同一天同类问题只回调一次 `onAttendanceIssue`。
     public func syncAttendanceIfNeeded(now: Date = Date()) async {
-        guard settings[Self.dingtalkEnabledKey], isWorkday(now), clockIn(on: now) == nil,
+        guard settings[Self.dingtalkEnabledKey], isWorkday(now),
               let start = time(settings[Self.startKey], on: now),
               let end = time(settings[Self.endKey], on: now) else { return }
         let flex = TimeInterval(max(0, settings[Self.flexMinutesKey]) * 60)
         let upperEnd = effectiveWorkEnd(on: now) ?? end
-        guard now >= start.addingTimeInterval(-flex), now <= upperEnd.addingTimeInterval(flex) else { return }
+        let needsClockIn = clockIn(on: now) == nil
+            && now >= start.addingTimeInterval(-flex)
+            && now <= upperEnd.addingTimeInterval(flex)
+        let needsClockOut = clockOut(on: now) == nil
+            && now >= upperEnd.addingTimeInterval(-10 * 60)
+            && now <= upperEnd.addingTimeInterval(4 * 3600)
+        guard needsClockIn || needsClockOut else { return }
+
         let interval: TimeInterval = attendanceIssue?.needsUserAction == true ? 1800 : 300
         if let last = attendanceLastAttempt, now.timeIntervalSince(last) < interval { return }
         await syncAttendance(for: now)
@@ -465,7 +776,7 @@ public final class WorkCalendar {
         let firsts = holidays.filter { $0.value.isOffDay && $0.key > today }
             .sorted { $0.key < $1.key }
             .filter { seen.insert($0.value.name).inserted }
-        guard let first = firsts.first, let d = Self.dayFormatter.date(from: first.key) else { return nil }
+        guard let first = firsts.first, let d = Self.parseDay(first.key) else { return nil }
         return (first.value.name, d)
     }
 
@@ -475,16 +786,14 @@ public final class WorkCalendar {
         return holidays.filter { $0.value.isOffDay && $0.key.hasPrefix("\(year)-") }
             .sorted { $0.key < $1.key }
             .filter { seen.insert($0.value.name).inserted }
-            .compactMap { kv in Self.dayFormatter.date(from: kv.key).map { (kv.value.name, $0) } }
+            .compactMap { kv in Self.parseDay(kv.key).map { (kv.value.name, $0) } }
     }
 
     /// 农历日期，比如"十月十七"。
     public nonisolated static func lunarString(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .chinese)
-        f.locale = Locale(identifier: "zh_CN")
-        f.dateFormat = "MMMd"
-        return f.string(from: date)
+        lunarFormatterLock.lock()
+        defer { lunarFormatterLock.unlock() }
+        return lunarFormatter.string(from: date)
     }
 
     /// 已缓存数据覆盖到的年份。

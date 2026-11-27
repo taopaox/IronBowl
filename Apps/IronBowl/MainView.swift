@@ -1,4 +1,8 @@
+import AIWebPlugin
+import AppKit
+import FeishuPlugin
 import IronBowlKit
+import Observation
 import SwiftUI
 
 /// 主窗口：左边浅灰侧栏，右边白色内容区（WorkBuddy 风格）。
@@ -67,15 +71,234 @@ struct MainView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if app.selection == AppModel.homeID {
-            HomeView(app: app)
-        } else if app.selection == AppModel.remindersID {
-            RemindersView(app: app)
-        } else if let plugin = app.plugin(app.selection), app.enabledIDs.contains(plugin.id) {
-            plugin.makeMainView().id(plugin.id)
-        } else {
-            HomeView(app: app)
+        let enabledIDs = app.enabledIDs
+        let selectedWebPlugin: IronBowlPlugin? = {
+            guard let selection = app.selection,
+                  selection == FeishuPlugin.pluginID || selection == AIWebPlugin.pluginID,
+                  let plugin = app.plugin(selection),
+                  enabledIDs.contains(plugin.id) else {
+                return nil
+            }
+            return plugin
+        }()
+
+        let activeNativeID: String? = {
+            guard selectedWebPlugin == nil else { return nil }
+            if app.selection == AppModel.remindersID {
+                return AppModel.remindersID
+            }
+            if let plugin = app.plugin(app.selection), enabledIDs.contains(plugin.id) {
+                return plugin.id
+            }
+            return AppModel.homeID
+        }()
+
+        let validNativeIDs: Set<String> = {
+            var set: Set<String> = [AppModel.homeID, AppModel.remindersID]
+            for p in app.enabledPlugins where p.id != FeishuPlugin.pluginID && p.id != AIWebPlugin.pluginID {
+                set.insert(p.id)
+            }
+            return set
+        }()
+
+        ZStack {
+            NativePageDeck(
+                app: app,
+                activePageID: activeNativeID,
+                validPageIDs: validNativeIDs,
+                sidebarCollapsed: collapsed,
+                trimToken: app.pageDeckTrimToken
+            )
+            .id(app.pageDeckResetToken)
+            .allowsHitTesting(selectedWebPlugin == nil)
+            .accessibilityHidden(selectedWebPlugin != nil)
+
+            if let selectedWebPlugin {
+                selectedWebPlugin.makeMainView()
+                    .id(selectedWebPlugin.id)
+            }
         }
+    }
+}
+
+@Observable
+private final class PageDeckEnvironment {
+    var activePageID: String?
+    var sidebarCollapsed = false
+}
+
+private struct PageDeckWrapperView: View {
+    let pageID: String
+    let deckEnv: PageDeckEnvironment
+    let content: AnyView
+
+    var body: some View {
+        content
+            .environment(\.sidebarCollapsed, deckEnv.sidebarCollapsed)
+            .environment(\.isPageActive, deckEnv.activePageID == pageID)
+            .environment(\.locale, CN.locale)
+    }
+}
+
+/// 原生页面 AppKit 保活容器：按 pageID 缓存 NSHostingView（sizingOptions = []），切页仅切换 isHidden，兼顾瞬时切换与滚动/编辑器状态保留。
+private struct NativePageDeck: NSViewRepresentable {
+    let app: AppModel
+    let activePageID: String?
+    let validPageIDs: Set<String>
+    let sidebarCollapsed: Bool
+    let trimToken: Int
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> PageDeckContainerView {
+        let view = PageDeckContainerView()
+        updateView(view, coordinator: context.coordinator)
+        return view
+    }
+
+    func updateNSView(_ nsView: PageDeckContainerView, context: Context) {
+        updateView(nsView, coordinator: context.coordinator)
+    }
+
+    static func dismantleNSView(_ nsView: PageDeckContainerView, coordinator: Coordinator) {
+        nsView.clearAll()
+    }
+
+    private func updateView(_ container: PageDeckContainerView, coordinator: Coordinator) {
+        coordinator.environment.sidebarCollapsed = sidebarCollapsed
+        coordinator.environment.activePageID = activePageID
+        if coordinator.lastTrimToken != trimToken {
+            coordinator.lastTrimToken = trimToken
+            container.trimInactivePages(keepActiveID: activePageID)
+        }
+        container.syncPages(
+            activePageID: activePageID,
+            validPageIDs: validPageIDs,
+            deckEnv: coordinator.environment
+        ) { pageID in
+            makePageContent(for: pageID)
+        }
+    }
+
+    private func makePageContent(for pageID: String) -> AnyView {
+        if pageID == AppModel.homeID {
+            return AnyView(HomeView(app: app))
+        }
+        if pageID == AppModel.remindersID {
+            return AnyView(RemindersView(app: app))
+        }
+        if let plugin = app.plugin(pageID) {
+            return plugin.makeMainView()
+        }
+        return AnyView(HomeView(app: app))
+    }
+
+    final class Coordinator {
+        let environment = PageDeckEnvironment()
+        var lastTrimToken = 0
+    }
+}
+
+private final class PageDeckContainerView: NSView {
+    private static let maxCachedPages = 8
+
+    private var cachedHostingViews: [String: NSHostingView<PageDeckWrapperView>] = [:]
+    private var lruOrder: [String] = []
+    private var currentActiveID: String?
+
+    override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        for host in cachedHostingViews.values where !host.isHidden {
+            if host.frame != bounds {
+                host.frame = bounds
+            }
+        }
+    }
+
+    func syncPages(
+        activePageID: String?,
+        validPageIDs: Set<String>,
+        deckEnv: PageDeckEnvironment,
+        makeContent: (String) -> AnyView
+    ) {
+        // 移除已被停用或无效的插件页缓存
+        let obsoleteIDs = cachedHostingViews.keys.filter { !validPageIDs.contains($0) }
+        for id in obsoleteIDs {
+            evictPage(id: id)
+        }
+
+        if let activePageID, cachedHostingViews[activePageID] == nil {
+            let wrapper = PageDeckWrapperView(
+                pageID: activePageID,
+                deckEnv: deckEnv,
+                content: makeContent(activePageID)
+            )
+            let host = NSHostingView(rootView: wrapper)
+            host.sizingOptions = []
+            host.autoresizingMask = [.width, .height]
+            host.frame = bounds
+            host.isHidden = true
+            addSubview(host)
+            cachedHostingViews[activePageID] = host
+        }
+
+        if let activePageID {
+            lruOrder.removeAll { $0 == activePageID }
+            lruOrder.append(activePageID)
+        }
+
+        // 先切换显隐再做淘汰，避免闪烁
+        if currentActiveID != activePageID || activePageID == nil {
+            for (id, host) in cachedHostingViews {
+                let shouldShow = (id == activePageID)
+                if shouldShow && host.frame != bounds {
+                    host.frame = bounds
+                }
+                if host.isHidden == shouldShow {
+                    host.isHidden = !shouldShow
+                }
+            }
+            currentActiveID = activePageID
+        } else if let activePageID, let activeHost = cachedHostingViews[activePageID], activeHost.frame != bounds {
+            activeHost.frame = bounds
+        }
+
+        isHidden = (activePageID == nil)
+
+        while cachedHostingViews.count > Self.maxCachedPages {
+            guard let victim = lruOrder.first(where: { $0 != activePageID && $0 != AppModel.homeID })
+                    ?? lruOrder.first(where: { $0 != activePageID }) else {
+                break
+            }
+            evictPage(id: victim)
+        }
+    }
+
+    func trimInactivePages(keepActiveID: String?) {
+        let toRemove = cachedHostingViews.keys.filter { $0 != AppModel.homeID && $0 != keepActiveID }
+        for id in toRemove {
+            evictPage(id: id)
+        }
+    }
+
+    func clearAll() {
+        for host in cachedHostingViews.values {
+            host.removeFromSuperview()
+        }
+        cachedHostingViews.removeAll()
+        lruOrder.removeAll()
+        currentActiveID = nil
+    }
+
+    private func evictPage(id: String) {
+        if let host = cachedHostingViews.removeValue(forKey: id) {
+            host.removeFromSuperview()
+        }
+        lruOrder.removeAll { $0 == id }
     }
 }
 
@@ -86,6 +309,8 @@ struct Sidebar: View {
     @AppStorage("sidebarCollapsedDirs") private var collapsedDirsRaw = ""
     @State private var renamingItem: SidebarPinnedItem?
     @State private var renameText = ""
+    @State private var editingProfile = false
+    @State private var hoveringProfile = false
 
     private var collapsedDirs: Set<String> {
         Set(collapsedDirsRaw.split(separator: ",").map(String.init))
@@ -124,7 +349,35 @@ struct Sidebar: View {
                 DSSloganView(style: .sidebar)
             }
             .padding(.horizontal, 18)
-            .padding(.bottom, 14)
+            .padding(.bottom, 10)
+
+            Button {
+                app.commandPalette.show()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(DS.font(12))
+                        .foregroundStyle(DS.textTertiary)
+                    Text("搜索或命令…")
+                        .font(DS.font(12.5))
+                        .foregroundStyle(DS.textSecondary)
+                    Spacer(minLength: 0)
+                    Text("⌘K")
+                        .font(DS.font(10.5, .medium))
+                        .foregroundStyle(DS.textTertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(DS.card, in: .rect(cornerRadius: 4))
+                }
+                .padding(.horizontal, 9)
+                .frame(height: DS.s(28))
+                .background(DS.selected, in: .rect(cornerRadius: DS.controlRadius))
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help("打开全局命令面板与全文搜索 (⌘K / ⌃⌥⌘K)")
+            .padding(.horizontal, 10)
+            .padding(.bottom, 8)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
@@ -177,24 +430,55 @@ struct Sidebar: View {
             ResourceCard(app: app, isVisible: isVisible).padding(.horizontal, 10).padding(.bottom, 8)
             TodayCard(app: app).padding(.horizontal, 10).padding(.bottom, 8)
 
-            HStack(spacing: 6) {
-                Image("AppLogo")
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: DS.s(18), height: DS.s(18))
-                Text(NSFullUserName().isEmpty ? "我" : NSFullUserName()).font(DS.font(13.5))
-                    .lineLimit(1)
-                Spacer()
+            let slogan = app.userProfile.effectiveSlogan
+            let hasSlogan = slogan != nil
+            HStack(spacing: 4) {
+                Button {
+                    editingProfile = true
+                } label: {
+                    HStack(spacing: 8) {
+                        UserProfileAvatarView(
+                            image: app.userProfile.avatarImage,
+                            size: hasSlogan ? DS.s(28) : DS.s(22)
+                        )
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(app.userProfile.effectiveDisplayName)
+                                .font(DS.font(13.5, .medium))
+                                .foregroundStyle(DS.text)
+                                .lineLimit(1)
+                            if let slogan {
+                                Text(slogan)
+                                    .font(DS.font(11))
+                                    .foregroundStyle(DS.textSecondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 5)
+                    .background(hoveringProfile ? DS.hover : .clear, in: .rect(cornerRadius: DS.controlRadius))
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .onHover { hoveringProfile = $0 }
+                .help(profileHelpText(name: app.userProfile.effectiveDisplayName, slogan: slogan))
+
                 Button { openWindow(id: "settings") } label: { Image(systemName: "gearshape") }
                     .buttonStyle(.dsGhost)
                     .help("设置")
             }
-            .padding(.horizontal, 14)
-            .frame(height: 44)
+            .padding(.horizontal, 8)
+            .padding(.vertical, hasSlogan ? 6 : 4)
+            .frame(minHeight: hasSlogan ? DS.s(52) : DS.s(44))
             .overlay(alignment: .top) { Rectangle().fill(DS.border).frame(height: 1) }
         }
         .background(DS.sidebar)
+        .sheet(isPresented: $editingProfile) {
+            UserProfileEditorSheet(profile: app.userProfile) {
+                editingProfile = false
+            }
+        }
         .sheet(item: $renamingItem) { item in
             VStack(alignment: .leading, spacing: 14) {
                 Text("重命名固定网页").font(DS.sectionTitle)
@@ -221,6 +505,13 @@ struct Sidebar: View {
             .frame(width: DS.s(320))
             .background(DS.card)
         }
+    }
+
+    private func profileHelpText(name: String, slogan: String?) -> String {
+        if let slogan {
+            return "\(name)\n\(slogan)\n点击编辑个人资料"
+        }
+        return "\(name)\n点击编辑个人资料"
     }
 
     @ViewBuilder

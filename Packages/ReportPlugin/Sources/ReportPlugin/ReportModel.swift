@@ -21,6 +21,7 @@ final class WeeklyReportModel {
     var providerKind: AIProviderKind
 
     var extraNotes: String = ""
+    var monthlyOKR: String = ""
     var reportTitle: String = ""
     var reportContent: String = ""
 
@@ -29,6 +30,8 @@ final class WeeklyReportModel {
     private(set) var recentReports: [WeeklyReportRecord] = []
     private(set) var recentMonthlyReports: [MonthlyReportRecord] = []
     private(set) var monthWeeklySummaries: [WeeklyReportRecord] = []
+    private(set) var monthGitStats: GitMonthlyStats = .empty
+    var isLoadingGitStats = false
 
     var isLoadingLogs = false
     var isGenerating = false
@@ -48,6 +51,16 @@ final class WeeklyReportModel {
     @ObservationIgnored private var rawItemsByDate: [String: [DailyLogItem]] = [:]
     @ObservationIgnored private var autoSaveTask: Task<Void, Never>?
     @ObservationIgnored private var copiedResetTask: Task<Void, Never>?
+    @ObservationIgnored private var cachedTitaClient: (key: TitaClientCacheKey, client: TitaClient)?
+    @ObservationIgnored private var lastLogsSyncedAtByKey: [String: Date] = [:]
+    @ObservationIgnored private var lastTitaSyncedAtByKey: [String: Date] = [:]
+
+    private struct TitaClientCacheKey: Equatable {
+        let baseURL: String
+        let cookie: String
+        let tenantID: String
+        let userID: String
+    }
 
     init(context: PluginContext, lockedPeriodKind: ReportPeriodKind? = nil) {
         self.context = context
@@ -62,6 +75,18 @@ final class WeeklyReportModel {
         self.recentMonthlyReports = store.recentMonthlyReports()
         loadSavedReportForActivePeriod()
         loadLocalLogs()
+    }
+
+    func shouldAutoSyncLogs(cooldown: TimeInterval = 60) -> Bool {
+        let key = "\(periodKind.rawValue)-\(activePeriodKey)"
+        guard let last = lastLogsSyncedAtByKey[key] else { return true }
+        return Date().timeIntervalSince(last) >= cooldown
+    }
+
+    func shouldAutoSyncTita(cooldown: TimeInterval = 60) -> Bool {
+        let key = "\(periodKind.rawValue)-\(activePeriodKey)"
+        guard let last = lastTitaSyncedAtByKey[key] else { return true }
+        return Date().timeIntervalSince(last) >= cooldown
     }
 
     var settings: SettingsStore { context.settings }
@@ -86,6 +111,27 @@ final class WeeklyReportModel {
     var includeHours: Bool {
         get { settings[ReportKeys.includeHours] }
         set { settings[ReportKeys.includeHours] = newValue }
+    }
+
+    var includeGitStats: Bool {
+        get { settings[ReportKeys.includeGitStats] }
+        set {
+            guard settings[ReportKeys.includeGitStats] != newValue else { return }
+            settings[ReportKeys.includeGitStats] = newValue
+            if newValue && periodKind == .monthly {
+                Task { await refreshMonthGitStats() }
+            }
+        }
+    }
+
+    var feishuCLIPath: String {
+        get { settings[ReportKeys.feishuCLIPath] }
+        set { settings[ReportKeys.feishuCLIPath] = newValue }
+    }
+
+    var feishuMonthlyDocURL: String {
+        get { settings[ReportKeys.feishuMonthlyDocURL] }
+        set { settings[ReportKeys.feishuMonthlyDocURL] = newValue }
     }
 
     var isZentaoConfigured: Bool {
@@ -132,8 +178,12 @@ final class WeeklyReportModel {
 
     var activeTitaTemplateID: Int {
         switch periodKind {
-        case .weekly: settings[ReportKeys.titaWeeklyTemplateID]
-        case .monthly: settings[ReportKeys.titaMonthlyTemplateID]
+        case .weekly:
+            let saved = settings[ReportKeys.titaWeeklyTemplateID]
+            return saved > 0 ? saved : ReportKeys.titaWeeklyTemplateID.defaultValue
+        case .monthly:
+            let saved = settings[ReportKeys.titaMonthlyTemplateID]
+            return saved > 0 ? saved : ReportKeys.titaMonthlyTemplateID.defaultValue
         }
     }
 
@@ -296,6 +346,7 @@ final class WeeklyReportModel {
         clearActiveFilter()
         syncedFromZentao = false
         remoteError = nil
+        monthGitStats = .empty
         titaStatus = nil
         titaStatusError = nil
         message = nil
@@ -319,6 +370,7 @@ final class WeeklyReportModel {
         clearActiveFilter()
         syncedFromZentao = false
         remoteError = nil
+        monthGitStats = .empty
         titaStatus = nil
         titaStatusError = nil
         message = nil
@@ -342,6 +394,7 @@ final class WeeklyReportModel {
         clearActiveFilter()
         syncedFromZentao = false
         remoteError = nil
+        monthGitStats = .empty
         titaStatus = nil
         titaStatusError = nil
         message = nil
@@ -423,18 +476,35 @@ final class WeeklyReportModel {
         let start = activeStartDateString
         let end = activeEndDateString
         let include = includeDrafts
+        let shouldFetchGit = (targetKind == .monthly && includeGitStats)
 
-        let result = await dailyLogService.fetch(
+        if shouldFetchGit {
+            isLoadingGitStats = true
+        }
+
+        async let logResult = dailyLogService.fetch(
             from: start,
             to: end,
             includeDrafts: include
         )
+        async let gitResult: GitMonthlyStats? = shouldFetchGit
+            ? fetchMonthGitStats(start: start, end: end)
+            : nil
+
+        let (result, fetchedGit) = await (logResult, gitResult)
         isLoadingLogs = false
+        if shouldFetchGit {
+            isLoadingGitStats = false
+        }
         guard periodKind == targetKind && activePeriodKey == targetKey else { return }
 
         rawItemsByDate = result.itemsByDate
         syncedFromZentao = result.syncedFromZentao
         remoteError = result.remoteError
+        lastLogsSyncedAtByKey["\(targetKind.rawValue)-\(targetKey)"] = Date()
+        if let fetchedGit {
+            monthGitStats = fetchedGit
+        }
         rebuildDays(using: result.itemsByDate, periodKind: targetKind, week: targetWeek, month: targetMonth)
         if targetKind == .monthly {
             recentMonthlyReports = store.recentMonthlyReports()
@@ -442,6 +512,29 @@ final class WeeklyReportModel {
         } else {
             recentReports = store.recentReports()
         }
+    }
+
+    func refreshMonthGitStats() async {
+        guard periodKind == .monthly, !isLoadingGitStats else { return }
+        let targetKey = month.monthKey
+        let start = month.startDateString
+        let end = month.endDateString
+        isLoadingGitStats = true
+        defer { isLoadingGitStats = false }
+        let stats = await fetchMonthGitStats(start: start, end: end)
+        guard periodKind == .monthly && month.monthKey == targetKey else { return }
+        monthGitStats = stats
+    }
+
+    private func fetchMonthGitStats(start: String, end: String) async -> GitMonthlyStats {
+        let repos = GitScanner.configuredRepos(database: context.database, settings: settings)
+        let email = await GitScanner.configuredAuthorEmail(settings: settings)
+        return await GitScanner.monthlyStats(
+            repos: repos,
+            authorEmail: email,
+            startDate: start,
+            endDate: end
+        )
     }
 
     private func rebuildDays(
@@ -481,11 +574,17 @@ final class WeeklyReportModel {
         }
 
         let trimmedNotes = extraNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedOKR = periodKind == .monthly ? monthlyOKR.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let hasGit = periodKind == .monthly && includeGitStats && monthGitStats.totalCommits > 0
         let noun = periodKind.displayName
         let periodLabel = periodKind == .weekly ? "本周" : "本月"
-        if totalLogCount == 0 && trimmedNotes.isEmpty {
+        if totalLogCount == 0 && trimmedNotes.isEmpty && trimmedOKR.isEmpty && !hasGit {
             errorMessage = "\(periodLabel)暂未查到每日日报，请先刷新查询禅道记录，或在补充说明中填写工作要点后再生成。"
             return
+        }
+
+        if periodKind == .monthly && includeGitStats && !monthGitStats.hasData {
+            await refreshMonthGitStats()
         }
 
         let provider = context.providers.config(providerKind)
@@ -533,7 +632,10 @@ final class WeeklyReportModel {
                 extraNotes: extraNotes,
                 style: style,
                 includeHours: includeHours,
-                promptTemplate: settings[ReportKeys.monthlyPrompt]
+                promptTemplate: settings[ReportKeys.monthlyPrompt],
+                monthlyOKR: monthlyOKR,
+                gitStats: monthGitStats,
+                includeGitStats: includeGitStats
             )
             output = await WeeklyReportGenerator.generate(input, provider: activeProvider)
 
@@ -552,7 +654,8 @@ final class WeeklyReportModel {
                 providerName: output.usedAI ? provider.kind.displayName : "本地规则汇总",
                 totalHours: totalHours,
                 generatedAt: currentMonthlyRecord?.generatedAt ?? now,
-                updatedAt: now
+                updatedAt: now,
+                monthlyOKR: monthlyOKR
             )
             store.saveMonthly(record)
             currentMonthlyRecord = record
@@ -582,6 +685,7 @@ final class WeeklyReportModel {
     }
 
     func loadSavedReport(for targetWeek: WeekRange) {
+        monthlyOKR = ""
         if let saved = store.report(forWeekStart: targetWeek.startDateString) {
             currentRecord = saved
             reportTitle = saved.title
@@ -601,11 +705,13 @@ final class WeeklyReportModel {
             reportTitle = saved.title
             reportContent = saved.content
             extraNotes = saved.extraNotes
+            monthlyOKR = saved.monthlyOKR
         } else {
             currentMonthlyRecord = nil
             reportTitle = WeeklyReportGenerator.defaultTitle(for: targetMonth)
             reportContent = ""
             extraNotes = ""
+            monthlyOKR = ""
         }
     }
 
@@ -646,7 +752,8 @@ final class WeeklyReportModel {
             recentReports = store.recentReports()
 
         case .monthly:
-            guard currentMonthlyRecord != nil || !trimmedContent.isEmpty else { return }
+            let trimmedOKR = monthlyOKR.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard currentMonthlyRecord != nil || !trimmedContent.isEmpty || !trimmedOKR.isEmpty else { return }
             let now = Date()
             let resolvedTitle = reportTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? WeeklyReportGenerator.defaultTitle(for: month)
@@ -662,7 +769,8 @@ final class WeeklyReportModel {
                 providerName: currentMonthlyRecord?.providerName ?? "手动编辑",
                 totalHours: totalHours > 0 ? totalHours : (currentMonthlyRecord?.totalHours ?? 0),
                 generatedAt: currentMonthlyRecord?.generatedAt ?? now,
-                updatedAt: now
+                updatedAt: now,
+                monthlyOKR: monthlyOKR
             )
             store.saveMonthly(record)
             currentMonthlyRecord = record
@@ -688,6 +796,7 @@ final class WeeklyReportModel {
         }
         reportContent = ""
         extraNotes = ""
+        monthlyOKR = ""
         errorMessage = nil
     }
 
@@ -784,16 +893,35 @@ final class WeeklyReportModel {
     }
 
     func makeTitaClient() throws -> TitaClient {
-        try TitaClient(
-            baseURL: titaBaseURL,
-            cookie: titaCookie,
-            tenantID: titaTenantID,
-            userID: titaUserID
+        let key = TitaClientCacheKey(
+            baseURL: titaBaseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            cookie: titaCookie.trimmingCharacters(in: .whitespacesAndNewlines),
+            tenantID: titaTenantID.trimmingCharacters(in: .whitespacesAndNewlines),
+            userID: titaUserID.trimmingCharacters(in: .whitespacesAndNewlines)
         )
+        if let cached = cachedTitaClient, cached.key == key {
+            return cached.client
+        }
+        cachedTitaClient?.client.invalidate()
+        cachedTitaClient = nil
+        let client = try TitaClient(
+            baseURL: key.baseURL,
+            cookie: key.cookie,
+            tenantID: key.tenantID,
+            userID: key.userID
+        )
+        cachedTitaClient = (key, client)
+        return client
+    }
+
+    private func invalidateCachedTitaClient() {
+        cachedTitaClient?.client.invalidate()
+        cachedTitaClient = nil
     }
 
     @discardableResult
     func applyTitaCredentialInput(_ raw: String) -> TitaCredentialParser.ParsedCredential {
+        invalidateCachedTitaClient()
         let parsed = TitaCredentialParser.parse(raw)
         if !parsed.cookie.isEmpty {
             settings[ReportKeys.titaCookie] = parsed.cookie
@@ -813,6 +941,7 @@ final class WeeklyReportModel {
     }
 
     func clearTitaSession() {
+        invalidateCachedTitaClient()
         settings[ReportKeys.titaCookie] = ""
         settings[ReportKeys.titaTenantID] = ""
         settings[ReportKeys.titaUserID] = ""
@@ -869,6 +998,7 @@ final class WeeklyReportModel {
             )
             guard periodKind == targetKind && activePeriodKey == targetKey else { return }
             titaStatus = status
+            lastTitaSyncedAtByKey["\(targetKind.rawValue)-\(targetKey)"] = Date()
             if let remoteTid = status.templateID, remoteTid > 0 {
                 switch targetKind {
                 case .weekly: settings[ReportKeys.titaWeeklyTemplateID] = remoteTid
@@ -879,6 +1009,28 @@ final class WeeklyReportModel {
             guard periodKind == targetKind && activePeriodKey == targetKey else { return }
             titaStatusError = error.localizedDescription
         }
+    }
+
+    nonisolated static func resolveTitaTemplateID(
+        detailTemplateID: Int?,
+        statusTemplateID: Int?,
+        savedTemplateID: Int,
+        matchedTemplateID: Int?,
+        summaryType: TitaSummaryType
+    ) -> Int {
+        if let detailTemplateID, detailTemplateID > 0 {
+            return detailTemplateID
+        }
+        if let matchedTemplateID, matchedTemplateID > 0 {
+            return matchedTemplateID
+        }
+        if let statusTemplateID, statusTemplateID > 0 {
+            return statusTemplateID
+        }
+        if savedTemplateID > 0 {
+            return savedTemplateID
+        }
+        return summaryType == .weekly ? 1006 : 1007
     }
 
     func prepareTitaEditor() async throws -> TitaPreparedEditor {
@@ -900,7 +1052,14 @@ final class WeeklyReportModel {
         }
 
         let detail = try await client.fetchDetail(summaryType: summaryType, summaryDate: summaryDate)
-        let templateID = detail?.templateID ?? status?.templateID ?? activeTitaTemplateID
+        let preferredTemplateID = Self.resolveTitaTemplateID(
+            detailTemplateID: detail?.templateID,
+            statusTemplateID: status?.templateID,
+            savedTemplateID: activeTitaTemplateID,
+            matchedTemplateID: nil,
+            summaryType: summaryType
+        )
+        var resolvedTemplateID = preferredTemplateID
 
         let moduleNames: [String]
         let existingTexts: [String]
@@ -915,7 +1074,20 @@ final class WeeklyReportModel {
             sortIndices = richModules.map(\.sortIndex)
         } else {
             let templates = (try? await client.fetchTemplates(summaryType: summaryType)) ?? []
-            let matchedTemplate = templates.first { $0.templateID == templateID } ?? templates.first
+            let matchedTemplate = templates.first { $0.templateID == preferredTemplateID } ?? templates.first
+            if let matchedTemplate {
+                resolvedTemplateID = Self.resolveTitaTemplateID(
+                    detailTemplateID: detail?.templateID,
+                    statusTemplateID: status?.templateID,
+                    savedTemplateID: activeTitaTemplateID,
+                    matchedTemplateID: matchedTemplate.templateID,
+                    summaryType: summaryType
+                )
+                switch periodKind {
+                case .weekly: settings[ReportKeys.titaWeeklyTemplateID] = resolvedTemplateID
+                case .monthly: settings[ReportKeys.titaMonthlyTemplateID] = resolvedTemplateID
+                }
+            }
             let names = (matchedTemplate?.richtextModuleNames.isEmpty == false)
                 ? matchedTemplate!.richtextModuleNames
                 : TitaContentMapper.defaultModuleNames
@@ -946,7 +1118,7 @@ final class WeeklyReportModel {
 
         return TitaPreparedEditor(
             detail: detail,
-            templateID: templateID,
+            templateID: resolvedTemplateID,
             modules: editableModules,
             mood: mood,
             remoteState: remoteState,
@@ -1076,5 +1248,81 @@ final class WeeklyReportModel {
         errorMessage = nil
         message = "Tita 历史同步完成：\(result.summaryText)"
         return result
+    }
+
+    // MARK: - 定时自动生成与 Tita 未交提醒
+
+    func runScheduledAutoGenerate(
+        overwriteExisting: Bool,
+        remindIfTitaUnsubmitted: Bool,
+        notifyStyle: ReminderStyle,
+        now: Date = Date()
+    ) async -> ScheduledTaskOutcome {
+        let targetPluginID = periodKind == .weekly ? ReportPlugin.pluginID : MonthlyReportPlugin.pluginID
+        let noun = periodKind.displayName
+
+        switch periodKind {
+        case .weekly:
+            await selectWeek(WeekRange.containing(now))
+        case .monthly:
+            await selectMonth(MonthRange.containing(now))
+        }
+
+        let hasExtra = !extraNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard totalLogCount > 0 || hasExtra else {
+            return .skipped(
+                summary: "本周期暂无日报记录，跳过生成\(noun)",
+                detail: "区间 \(activePeriodRangeText) 暂未查到已提交工时或草稿记录。",
+                shouldNotifyOverride: false,
+                actionTitle: "打开\(noun)",
+                actionPluginID: targetPluginID
+            )
+        }
+
+        let hadExisting = hasReportContent
+        if !hadExisting || overwriteExisting {
+            await generate()
+            if !hasReportContent, let err = errorMessage {
+                return .failed(
+                    summary: "自动生成\(noun)失败",
+                    detail: err,
+                    actionTitle: "打开\(noun)",
+                    actionPluginID: targetPluginID
+                )
+            }
+        }
+
+        var titaHint = ""
+        if remindIfTitaUnsubmitted && isTitaConfigured {
+            await refreshTitaStatus()
+            if let status = titaStatus, !status.state.isSubmitted {
+                titaHint = "，Tita 尚未提交"
+                let reminder = ReminderContent(
+                    id: "report.tita.unsubmitted.\(periodKind.rawValue)",
+                    title: "「\(activePeriodTitle)」\(noun)尚未提交 Tita",
+                    message: "本地\(noun)草稿已备好（\(loggedDaysCount) 天 · \(WorkCalendar.hoursText(totalHours))h），点击即可预览并推送 Tita。",
+                    systemImage: "paperplane.fill",
+                    source: .scheduler,
+                    targetPluginID: targetPluginID,
+                    actions: [
+                        ReminderAction(id: "later", title: "稍后处理") {},
+                        ReminderAction(id: "push", title: "去预览并推送 Tita", isPrimary: true) { [weak self] in
+                            self?.context.openPlugin(targetPluginID)
+                        },
+                    ]
+                )
+                context.reminders.show(reminder, style: notifyStyle)
+            } else if titaStatus?.state.isSubmitted == true {
+                titaHint = "，Tita 已提交"
+            }
+        }
+
+        let verb = (hadExisting && !overwriteExisting) ? "已保留既有\(noun)草稿" : "已自动生成\(noun)草稿"
+        return .succeeded(
+            summary: "\(verb)（\(loggedDaysCount) 天 · \(WorkCalendar.hoursText(totalHours))h\(titaHint)）",
+            detail: "\(activePeriodTitle)（\(activePeriodRangeText)）",
+            actionTitle: "查看\(noun)",
+            actionPluginID: targetPluginID
+        )
     }
 }

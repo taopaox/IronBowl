@@ -199,7 +199,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.plan.outputs.tag }}
+          VER: ${{ steps.plan.outputs.version }}
         run: |
-          gh release create "$TAG" dist/* \
-            --title "IronBowl ${TAG}" \
+          gh release create "$TAG" \
+            "dist/IronBowl-v${VER}-macOS-arm64.dmg#饭碗-v${VER}-macOS-arm64.dmg" \
+            "dist/IronBowl-v${VER}-macOS-arm64.zip#饭碗-v${VER}-macOS-arm64.zip" \
+            "dist/IronBowlCalendar-v${VER}-macOS-arm64.dmg#万年历-v${VER}-macOS-arm64.dmg" \
+            "dist/IronBowlCalendar-v${VER}-macOS-arm64.zip#万年历-v${VER}-macOS-arm64.zip" \
+            "dist/SHA256SUMS.txt" \
+            "dist/appcast-ironbowl.xml" \
+            "dist/appcast-calendar.xml" \
+            --title "饭碗 ${TAG}" \
             --notes-file release-notes.md

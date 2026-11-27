@@ -45,6 +45,50 @@ enum LogKeys {
     static let snoozeMinutes = SettingKey<Int>("reminder.snoozeMinutes", default: 15)
     static let remindOnOffDays = SettingKey<Bool>("reminder.offDays", default: false)
     static let skipDate = SettingKey<String>("reminder.skipDate", default: "")
+
+    static let watchAssignedEnabled = SettingKey<Bool>("zentao.watch.enabled", default: true)
+    static let watchAssignedInterval = SettingKey<Int>("zentao.watch.intervalMinutes", default: 15)
+    static let watchBugsOnly = SettingKey<Bool>("zentao.watch.bugsOnly", default: false)
+    static let knownOpenBugIDs = SettingKey<[Int]?>("zentao.watch.knownBugIDs", default: nil)
+    static let knownOpenTaskIDs = SettingKey<[Int]?>("zentao.watch.knownTaskIDs", default: nil)
+}
+
+public extension GitScanner {
+    @MainActor
+    static func configuredRepos(database: AppDatabase, settings: SettingsStore) -> [String] {
+        let root = settings[LogKeys.gitRoot]
+        let depth = settings[LogKeys.gitDepth]
+        let discovered = discoverRepos(root: root, depth: depth)
+        let mappings = LogStore(db: database).mappings()
+        return discovered.filter { mappings[$0]?.excluded != true }
+    }
+
+    @MainActor
+    static func mappedProjectNames(database: AppDatabase) -> [String: String] {
+        let mappings = LogStore(db: database).mappings()
+        var out: [String: String] = [:]
+        for (path, m) in mappings where !m.excluded && !m.projectName.isEmpty {
+            out[path] = m.projectName
+        }
+        return out
+    }
+
+    @MainActor
+    static func configuredAuthorEmail(settings: SettingsStore) async -> String {
+        let saved = settings[LogKeys.authorEmail].trimmingCharacters(in: .whitespacesAndNewlines)
+        if !saved.isEmpty { return saved }
+        return await globalEmail() ?? ""
+    }
+
+    @MainActor
+    static func configuredGitRoot(settings: SettingsStore) -> String {
+        settings[LogKeys.gitRoot]
+    }
+
+    @MainActor
+    static func configuredGitDepth(settings: SettingsStore) -> Int {
+        settings[LogKeys.gitDepth]
+    }
 }
 
 nonisolated struct RepoMapping: Sendable, Hashable, Codable, FetchableRecord, PersistableRecord {

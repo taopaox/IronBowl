@@ -1,6 +1,7 @@
 import AppKit
 import IronBowlKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 设置窗口：左边搜索 + 分组导航，右边灰底白卡（WorkBuddy 风格）。
 struct SettingsView: View {
@@ -20,6 +21,7 @@ struct SettingsView: View {
             SettingsPage(id: "worktime", title: "工作时间", systemImage: "clock") { AnyView(WorkTimeSettings(app: app)) },
             SettingsPage(id: "web", title: "网页与内存", systemImage: "globe") { AnyView(WebSettings(app: app)) },
             SettingsPage(id: "ai", title: "AI 提供者", systemImage: "sparkles") { AnyView(ProviderSettings(app: app)) },
+            SettingsPage(id: "about", title: "关于", systemImage: "info.circle") { AnyView(AboutSettings(app: app)) },
         ])
         let plugins = app.enabledPlugins.compactMap { p -> NavGroup? in
             let pages = p.settingsPages
@@ -109,10 +111,58 @@ struct SettingsView: View {
 
 struct GeneralSettings: View {
     @Bindable var app: AppModel
-    @State private var copiedVersion = false
+    @State private var avatarError: String?
 
     var body: some View {
         let s = app.settings
+        let profile = app.userProfile
+        DSSection("个人资料", footer: "显示在主窗口左下角；也可以直接点击左下角头像或姓名快速编辑。") {
+            DSRow("头像 / Logo", description: profile.hasCustomAvatar ? "已使用自定义图片" : "默认使用应用图标") {
+                HStack(spacing: 8) {
+                    UserProfileAvatarView(image: profile.avatarImage, size: DS.s(30))
+                    Button("选择图片…") {
+                        guard let url = UserProfileAvatarPicker.pickLocalImageURL() else { return }
+                        do {
+                            try profile.saveAvatar(from: url)
+                            avatarError = nil
+                        } catch {
+                            avatarError = error.localizedDescription
+                        }
+                    }
+                    .buttonStyle(.dsSecondary)
+                    if profile.hasCustomAvatar {
+                        Button("恢复默认") {
+                            profile.clearAvatar()
+                            avatarError = nil
+                        }
+                        .buttonStyle(.dsGhost)
+                    }
+                }
+            }
+            if let avatarError {
+                DSBlockRow {
+                    DSBanner(.danger, avatarError)
+                }
+            }
+            DSRow("显示姓名", description: "留空时默认使用系统用户名（\(profile.fallbackDisplayName)）。") {
+                TextField(
+                    "",
+                    text: Binding(get: { profile.displayName }, set: { profile.displayName = $0 }),
+                    prompt: Text(profile.fallbackDisplayName)
+                )
+                .textFieldStyle(.ds)
+                .frame(width: DS.s(240))
+            }
+            DSRow("个人标语", description: "显示在左下角姓名下方，留空时不显示。") {
+                TextField(
+                    "",
+                    text: Binding(get: { profile.slogan }, set: { profile.slogan = $0 }),
+                    prompt: Text("写一句个人签名或标语")
+                )
+                .textFieldStyle(.ds)
+                .frame(width: DS.s(240))
+            }
+        }
         DSSection("启动与显示") {
             DSLaunchAtLoginRow(controller: app.launchAtLogin, appName: "饭碗")
             DSRow("程序坞图标", description: "饭碗平时只在菜单栏，这里决定要不要在程序坞里出现。") {
@@ -120,6 +170,24 @@ struct GeneralSettings: View {
                     selection: Binding(get: { s[AppKeys.dockMode] }, set: { s[AppKeys.dockMode] = $0; app.applyDockMode() }),
                     options: DockMode.allCases.map { DSPickerOption($0, title: $0.displayName, subtitle: $0.detail) }
                 )
+            }
+            DSRow(
+                "全局命令面板快捷键",
+                description: app.commandPalette.shortcutError ?? "在任意应用中按 ⌃⌥⌘K（窗口内按 ⌘K）呼出命令面板与全局历史搜索。"
+            ) {
+                HStack(spacing: 8) {
+                    Button("立即打开") {
+                        app.commandPalette.show()
+                    }
+                    .buttonStyle(.dsSecondary)
+                    DSToggle(isOn: Binding(
+                        get: { s[AppKeys.commandPaletteShortcut] },
+                        set: { val in
+                            s[AppKeys.commandPaletteShortcut] = val
+                            app.commandPalette.syncShortcut()
+                        }
+                    ))
+                }
             }
         }
         DSSection("菜单栏显示", footer: "饭碗图标一直显示；打开的信息按顺序跟在后面，用箭头调整顺序。") {
@@ -132,6 +200,123 @@ struct GeneralSettings: View {
                 }
             }
         }
+        DataBackupSettingsSection(app: app)
+    }
+}
+
+private struct DataBackupSettingsSection: View {
+    let app: AppModel
+    @State private var isBusy = false
+    @State private var feedback: (isError: Bool, text: String)?
+    @State private var pendingRestoreURL: URL?
+
+    var body: some View {
+        DSSection("数据备份与恢复", footer: "备份包包含全部设置、禅道日报与草稿、周报月报、待办备忘、随手便签、AI 对话历史以及自定义头像与图标；导入前会自动在本地留存当前库快照。") {
+            DSRow("导出数据备份", description: "打包为 .zip 压缩文件，方便迁移到新电脑或定期归档。") {
+                Button("导出备份包…") {
+                    exportBackup()
+                }
+                .buttonStyle(.dsSecondary)
+                .disabled(isBusy)
+            }
+            DSRow("从备份包恢复", description: "选择先前导出的 .zip 备份包覆盖恢复本地数据。") {
+                Button("导入并恢复…") {
+                    chooseRestoreFile()
+                }
+                .buttonStyle(.dsSecondary)
+                .disabled(isBusy)
+            }
+            DSRow("本地数据目录", description: AppPaths.supportDirectory.path) {
+                Button("在访达中打开") {
+                    NSWorkspace.shared.open(AppPaths.supportDirectory)
+                }
+                .buttonStyle(.dsGhost)
+            }
+            if let feedback {
+                DSBlockRow {
+                    DSBanner(feedback.isError ? .danger : .success, feedback.text)
+                }
+            }
+        }
+        .alert("确认从备份包恢复？", isPresented: Binding(
+            get: { pendingRestoreURL != nil },
+            set: { if !$0 { pendingRestoreURL = nil } }
+        )) {
+            Button("确认恢复", role: .destructive) {
+                if let url = pendingRestoreURL {
+                    pendingRestoreURL = nil
+                    performRestore(from: url)
+                }
+            }
+            Button("取消", role: .cancel) {
+                pendingRestoreURL = nil
+            }
+        } message: {
+            Text("恢复操作将使用「\(pendingRestoreURL?.lastPathComponent ?? "")」中的数据替换当前数据库内容（恢复前会自动留存本地安全快照）。")
+        }
+    }
+
+    private func exportBackup() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.zip]
+        let fmt = DateFormatter()
+        fmt.calendar = Calendar(identifier: .gregorian)
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        panel.nameFieldStringValue = "IronBowl-Backup-\(fmt.string(from: Date())).zip"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        isBusy = true
+        feedback = nil
+        app.settings.flushDeferredWrites()
+        let db = app.database
+        let version = Bundle.main.displayVersion
+        Task {
+            defer { isBusy = false }
+            do {
+                let manifest = try await DataBackupService.exportBackup(database: db, appVersion: version, to: url)
+                feedback = (false, "已导出备份包（设置 \(manifest.settingsCount) 项 · 待办 \(manifest.todosCount) 条 · 便签 \(manifest.notesCount) 条）")
+            } catch {
+                feedback = (true, error.localizedDescription)
+            }
+        }
+    }
+
+    private func chooseRestoreFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.zip]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        pendingRestoreURL = url
+    }
+
+    private func performRestore(from url: URL) {
+        isBusy = true
+        feedback = nil
+        app.settings.flushDeferredWrites()
+        let db = app.database
+        let migrations = app.plugins.flatMap(\.migrations)
+        Task {
+            defer { isBusy = false }
+            do {
+                let manifest = try await DataBackupService.restoreBackup(from: url, into: db, migrations: migrations)
+                app.reloadAllStoresAfterRestore()
+                feedback = (false, "恢复成功（设置 \(manifest.settingsCount) 项 · 待办 \(manifest.todosCount) 条 · 便签 \(manifest.notesCount) 条），所有视图已重载。")
+            } catch {
+                feedback = (true, error.localizedDescription)
+            }
+        }
+    }
+}
+
+// MARK: 关于
+
+struct AboutSettings: View {
+    let app: AppModel
+    @State private var copiedVersion = false
+
+    var body: some View {
         DSSection("关于") {
             DSBlockRow {
                 VStack(alignment: .leading, spacing: 10) {

@@ -87,7 +87,7 @@ git push origin dev
    git merge origin/main --no-edit
    git push origin dev
    ```
-2. 验证 GitHub Release 与上传产物完整（包含 `IronBowl` / `IronBowlCalendar` 的 `.dmg`、`.zip`、`SHA256SUMS.txt`、`appcast-ironbowl.xml`、`appcast-calendar.xml`）：
+2. 验证 GitHub Release 与上传产物完整（包含 `IronBowl` / `IronBowlCalendar` 的 `.dmg`、`.zip` 及其中文 `label` `饭碗-v...` / `万年历-v...`，以及 `SHA256SUMS.txt`、`appcast-ironbowl.xml`、`appcast-calendar.xml`）：
    ```bash
    gh release view <tag> --json tagName,url,assets
    ```

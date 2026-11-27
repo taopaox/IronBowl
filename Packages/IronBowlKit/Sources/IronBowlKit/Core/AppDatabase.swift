@@ -26,6 +26,12 @@ public nonisolated enum AppPaths {
         return dir
     }
 
+    public nonisolated static var userAvatarsDirectory: URL {
+        let dir = supportDirectory.appending(path: "user-avatars", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     public nonisolated static var databaseURL: URL {
         supportDirectory.appending(path: "ironbowl.sqlite")
     }
@@ -49,7 +55,7 @@ public nonisolated final class AppDatabase: Sendable {
         try migrator.migrate(pool)
     }
 
-    static let coreMigrations: [DatabaseMigration] = [
+    public static let coreMigrations: [DatabaseMigration] = [
         DatabaseMigration("core.v1") { db in
             try db.create(table: "setting") { t in
                 t.primaryKey("key", .text)
@@ -175,6 +181,67 @@ public nonisolated final class AppDatabase: Sendable {
                 t.column("targetPluginID", .text)
                 t.column("targetSettingsPage", .text)
                 t.column("createdAt", .datetime).notNull().indexed()
+            }
+        },
+        DatabaseMigration("core.v8") { db in
+            try db.create(table: "todoItem") { t in
+                t.primaryKey("id", .text)
+                t.column("title", .text).notNull()
+                t.column("notes", .text).notNull().defaults(to: "")
+                t.column("dueDate", .text).indexed()
+                t.column("remindAt", .datetime)
+                t.column("remindedAt", .datetime)
+                t.column("priority", .integer).notNull().defaults(to: 0)
+                t.column("estimatedHours", .double).notNull().defaults(to: 1.0)
+                t.column("isCompleted", .boolean).notNull().defaults(to: false).indexed()
+                t.column("completedAt", .datetime)
+                t.column("loggedDate", .text)
+                t.column("zentaoObjectType", .text)
+                t.column("zentaoObjectID", .integer)
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull().indexed()
+            }
+        },
+        DatabaseMigration("core.v9") { db in
+            try db.create(table: "scratchpadNote") { t in
+                t.primaryKey("id", .text)
+                t.column("title", .text).notNull()
+                t.column("content", .text).notNull()
+                t.column("colorTag", .text).notNull().defaults(to: "amber")
+                t.column("isPinned", .boolean).notNull().defaults(to: false)
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull().indexed()
+            }
+        },
+        DatabaseMigration("core.v10") { db in
+            try db.create(table: "attendanceDailyRecord") { t in
+                t.primaryKey("date", .text)          // yyyy-MM-dd
+                t.column("clockIn", .datetime)
+                t.column("clockOut", .datetime)
+                t.column("onDutyResult", .text).notNull().defaults(to: "")
+                t.column("offDutyResult", .text).notNull().defaults(to: "")
+                t.column("source", .text).notNull().defaults(to: "dingtalk")
+                t.column("fetchedAt", .datetime).notNull()
+            }
+            if try db.tableExists("attendanceClockIn") {
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO attendanceDailyRecord(date, clockIn, onDutyResult, offDutyResult, source, fetchedAt)
+                    SELECT date, clockIn, 'Normal', '', source, fetchedAt FROM attendanceClockIn
+                    """)
+            }
+        },
+        DatabaseMigration("core.v11") { db in
+            try db.create(table: "clipboardHistory") { t in
+                t.primaryKey("id", .text)
+                t.column("content", .text).notNull()
+                t.column("contentHash", .text).notNull().indexed()
+                t.column("kind", .text).notNull().defaults(to: "text")
+                t.column("sourceApp", .text).notNull().defaults(to: "")
+                t.column("charCount", .integer).notNull().defaults(to: 0)
+                t.column("copyCount", .integer).notNull().defaults(to: 1)
+                t.column("isSnippet", .boolean).notNull().defaults(to: false).indexed()
+                t.column("snippetTitle", .text).notNull().defaults(to: "")
+                t.column("copiedAt", .datetime).notNull().indexed()
             }
         },
     ]

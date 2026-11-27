@@ -34,6 +34,12 @@ struct IronBowlApp: App {
             CommandGroup(replacing: .appSettings) {
                 SettingsCommand(app: app)
             }
+            CommandGroup(after: .textEditing) {
+                Button("命令面板与全局搜索…") {
+                    app.commandPalette.toggle()
+                }
+                .keyboardShortcut("k", modifiers: .command)
+            }
         }
 
         Window("设置", id: "settings") {
@@ -100,4 +106,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 关掉主窗口不退出，菜单栏图标常驻。
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        app?.settings.flushDeferredWrites()
+    }
 }

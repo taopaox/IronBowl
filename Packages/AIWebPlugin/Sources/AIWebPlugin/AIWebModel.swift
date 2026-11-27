@@ -120,6 +120,7 @@ public final class AIWebModel {
     // MARK: - 导航
 
     public func selectDirectory() {
+        guard activeAppID != nil else { return }
         activeAppID = nil
         settings[AIWebKeys.activeAppID] = nil
     }
@@ -129,6 +130,7 @@ public final class AIWebModel {
             selectDirectory()
             return
         }
+        guard activeAppID != id else { return }
         activeAppID = id
         settings[AIWebKeys.activeAppID] = id
     }

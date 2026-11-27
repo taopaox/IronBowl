@@ -1,23 +1,30 @@
 # 周报与月报插件（`ReportPlugin` & `MonthlyReportPlugin`）
 
-`Packages/ReportPlugin` 同时提供两个插件——**周报**（`ReportPlugin`，ID：`report`）与 **月报**（`MonthlyReportPlugin`，ID：`report.monthly`），在主窗口左侧栏通过 `sidebarSection = "汇报"` 与 `ZentaoLogPlugin`（「日报」）共同归入「汇报」分组，复用同一套日报查询与生成底座，分别按周（周一至周日）或按自然月（1 日至月末）汇总每日工作日报并生成结构化报告，支持复用禅道远端工时、本地已提交记录、未提交草稿与本月已有周报，提供 AI 智能提炼与本地规则兜底汇总。
+`Packages/ReportPlugin` 同时提供四个插件——**周报**（`ReportPlugin`，ID：`report`）、**月报**（`MonthlyReportPlugin`，ID：`report.monthly`）、**牛马账本**（`WorkLedgerPlugin`，ID：`report.stats`）与 **季度/年报**（`AnnualReviewPlugin`，ID：`report.annual`），在主窗口左侧栏通过 `sidebarSection = "汇报"` 与 `ZentaoLogPlugin`（「日报」）共同归入「汇报」分组。周报与月报复用同一套日报查询与生成底座，分别按周（周一至周日）或按自然月（1 日至月末）汇总每日工作日报并生成结构化报告；牛马账本按月/年汇总工时、加班、钉钉打卡作息与项目投入占比；季度/年报则聚合月报、账本工时与本地 Git 代码贡献生成季度/半年度/年度述职报告及可导出图片的「牛马年度报告」。
 
 ## 模块组成
 
 | 文件 | 核心符号 | 职责 |
 | :--- | :--- | :--- |
-| `ReportPlugin.swift` | `ReportPlugin`, `MonthlyReportPlugin` | 两个独立侧边栏插件入口：周报（ID：`report`，锁定 `.weekly`，含「Tita 对接」设置页）与月报（ID：`report.monthly`，锁定 `.monthly`），通过 `sidebarBadge` 在侧栏展示「本周未写 / 本月未写 / 待推Tita」角标，各自提供对应生成设置页、首页快捷操作、概览卡片及对话意图路由 |
+| `ReportPlugin.swift` | `ReportPlugin`, `MonthlyReportPlugin`, `WorkLedgerPlugin`, `AnnualReviewPlugin` | 四个独立侧边栏插件入口：周报（ID：`report`）、月报（ID：`report.monthly`）、牛马账本（ID：`report.stats`）与季度/年报（ID：`report.annual`） |
+| `Model/ReviewRange.swift` | `ReviewScopeKind`, `ReviewRange` | 季度（Q1–Q4）、半年度（H1/H2）与全年周期范围计算与切换 |
+| `Generator/AnnualReviewGenerator.swift` | `AnnualReviewStyle`, `AnnualReviewGenerator` | 述职晋升 STAR / OKR 复盘 / 精简量化提纲三种风格 AI 与规则生成 |
+| `AnnualReviewModel.swift` & `Views/AnnualReviewView.swift` & `Views/AnnualPosterSheet.swift` | `AnnualReviewModel`, `AnnualReviewView`, `AnnualPosterSheet` | 季度与年度述职工作区及支持导出 2x PNG 的「牛马年度报告」卡片 |
+| `WorkLedgerModel.swift` | `WorkLedgerModel`, `WorkLedgerSummary`, `LedgerPeriodMode`, `LedgerDayStat`, `LedgerAnomalyDay`, `LedgerMonthStat`, `LedgerProjectStat` | 按月/年汇总禅道工时、本地加班记录、钉钉上下班打卡与真实在岗时长、缺卡/迟到早退核对及项目工时占比 |
+| `Views/WorkLedgerView.swift` | `WorkLedgerView` | 「牛马账本」工时热力日历、年度柱状分布、在岗 vs 填报时长对比、考勤异常核对与项目投入占比看板（支持一键同步区间钉钉考勤） |
 | `ReportChatHandler.swift` | `ReportChatHandler`, `ReportChatIntent` | 识别首页对话中的生成/查看周报或月报指令（过滤代码/调试类提问） |
 | `Views/ReportChatCard.swift` | `ReportChatCard` | 在首页聊天流内直接展示并操作的周报/月报卡片（Markdown 预览、展开、重新生成、复制与打开 Tita） |
-| `ReportModel.swift` | `WeeklyReportModel` | `@Observable` 业务状态：支持 `lockedPeriodKind` 锁定周/月模式、上下周与上下月切换、调用 `ZentaoDailyLogService` 查区间日报、生成/编辑/自动保存、历史列表、复制/导出 Markdown 与 Tita 状态查询/草稿保存/提交 |
+| `ReportModel.swift` | `WeeklyReportModel` | `@Observable` 业务状态：支持 `lockedPeriodKind` 锁定周/月模式、上下周与上下月切换、调用 `ZentaoDailyLogService` 查区间日报、月报自动扫描 `GitScanner.monthlyStats` 与持久化 `monthlyOKR`、生成/编辑/自动保存、历史列表、复制/导出 Markdown、Tita 推送与飞书文档写入 |
+| `Feishu/FeishuDocService.swift` | `FeishuDocService`, `FeishuAuthStatus`, `FeishuDeviceLoginInfo`, `FeishuFetchedDoc`, `FeishuDocWriteResult`, `FeishuCLIError` | 基于本机 `lark-cli` 的飞书用户授权检测/设备流登录、云文档与知识库子文档 Markdown 读取、覆盖写入并回读验证 |
+| `Views/FeishuDocExportSheet.swift` | `FeishuDocExportSheet` | 「写飞书」弹窗：授权状态诊断与设备登录链接引导、读取目标文档下挂周报子文档导入补充说明、覆盖写入飞书文档与回读确认 |
 | `Model/WeekRange.swift` | `WeekRange` | 按中国工作周（周一至周日）与 ISO 周历计算起止日期、周次标题、上下周偏移及「本周 / 上周」标签 |
 | `Model/MonthRange.swift` | `MonthRange`, `MonthWeekSlice` | 按自然月（1 日至月末）计算起止日期、周分片（`weeks`）、上下月偏移及「本月 / 上月」标签 |
 | `Model/ReportMarkdown.swift` | `ReportMarkdownBlock`, `ReportMarkdown` | 面向中文标点相邻 `**加粗**` 与多级嵌套列表的轻量 Markdown 块级/行内解析器 |
-| `Store/ReportStore.swift` | `ReportPeriodKind`, `WeeklyReportStyle`, `ReportKeys`, `WeeklyReportRecord`, `MonthlyReportRecord`, `ReportMigrations`, `ReportStore` | 设置键（含 Tita 配置）、拆分迁移 `ReportMigrations.weekly`（`report.v1` / `weeklyReport`）与 `ReportMigrations.monthly`（`report.v2` / `monthlyReport`）及读写操作 |
-| `Generator/WeeklyReportGenerator.swift` | `DailyReportDay`, `WeeklyReportInput`, `MonthlyReportInput`, `WeeklyReportOutput`, `WeeklyReportGenerator` | 周报/月报提示词模板渲染、只读 JSON Schema AI 生成与 4 种风格的规则兜底汇总（含 `tita` 模板风格） |
-| `Tita/TitaModels.swift` | `TitaSummaryType`, `TitaSubmitState`, `TitaMood`, `TitaAccountInfo`, `TitaPeriodStatus`, `TitaTemplateSummary`, `TitaReportDetail`, `TitaEditableModule`, `TitaSearchFeedItem`, `TitaHistorySyncResult`, `TitaError` | Tita 周报（`26`）/月报（`27`）接口数据模型、历史列表模型与状态枚举 |
-| `Tita/TitaHelpers.swift` | `TitaPeriodCode`, `TitaCredentialParser`, `TitaBSGlobalParser`, `TitaRichTextConverter`, `TitaContentMapper`, `TitaSubmitPayloadBuilder`, `TitaProseMirrorParser` | Tita 周期正反向编码（`YYYY-MM-WW` / `YYYY-MM-01` ↔ `WeekRange` / `MonthRange`）、cURL/Cookie 解析、`BSGlobal` 识别、ProseMirror HTML/JSON 与 Markdown 互转、4 模块内容映射与提交请求体拼装 |
-| `Tita/TitaClient.swift` | `TitaClient`, `TitaLog` | Tita 直连 HTTP 客户端（Cookie 鉴权、会话与身份探测、模板拉取、历史分页拉取 `summary/search`、草稿更新、正式提交与回查）及脱敏接口日志 `tita.log` |
+| `Store/ReportStore.swift` | `ReportPeriodKind`, `WeeklyReportStyle`, `ReportKeys`, `WeeklyReportRecord`, `MonthlyReportRecord`, `ReviewReportRecord`, `ReportMigrations`, `ReportStore` | 设置键（含 Tita 与飞书文档配置）、拆分迁移 `ReportMigrations.weekly`（`report.v1` / `weeklyReport`）、`ReportMigrations.monthly`（`report.v2` / `monthlyReport`）、`ReportMigrations.review`（`report.v3` / `reviewReport`）与 `ReportMigrations.monthlyOKR`（`report.v4` 新增 `monthlyOKR` 列）及读写操作 |
+| `Generator/WeeklyReportGenerator.swift` | `DailyReportDay`, `WeeklyReportInput`, `MonthlyReportInput`, `WeeklyReportOutput`, `WeeklyReportGenerator` | 周报/月报提示词模板渲染（月报支持 `{{monthlyOKR}}` 与 `{{gitStats}}`）、只读 JSON Schema AI 生成与 4 种风格的规则兜底汇总（含公司月报规范与 `tita` 模板风格） |
+| `Tita/TitaModels.swift` | `TitaSummaryType`, `TitaSubmitState`, `TitaMood`, `TitaAccountInfo`, `TitaPeriodStatus`, `TitaTemplateSummary`, `TitaReportDetail`, `TitaEditableModule`, `TitaSearchFeedItem`, `TitaHistorySyncResult`, `TitaError` | Tita 周报（`26`）/月报（`27`）接口数据模型（含 `selectedValues` 心情解析）、历史列表模型与状态枚举 |
+| `Tita/TitaHelpers.swift` | `TitaPeriodCode`, `TitaCredentialParser`, `TitaBSGlobalParser`, `TitaRichTextConverter`, `TitaContentMapper`, `TitaSubmitPayloadBuilder`, `TitaProseMirrorParser` | Tita 周期正反向编码（`YYYY-MM-WW` / `YYYY-MM-01` ↔ `WeekRange` / `MonthRange`）、cURL/Cookie 解析、`BSGlobal` 识别、ProseMirror `EditorState` JSON 与 Markdown 互转、4 模块内容映射（含问题+改进合并章节自动拆分）与提交请求体拼装 |
+| `Tita/TitaClient.swift` | `TitaClient`, `TitaLog` | Tita 直连 HTTP 客户端（Cookie 鉴权、会话复用与 `URLSession` 长连接、TLS 握手/建连瞬断自动重试、身份探测、模板拉取、历史分页拉取 `summary/search`、草稿更新、正式提交、删除 `summary/delete` 与回查）及脱敏接口日志 `tita.log` |
 | `Tita/TitaHistorySyncService.swift` | `TitaHistorySyncService` | 自动分页拉取 Tita 个人全部历史周报/月报并安全合并写入本地 `weeklyReport` / `monthlyReport`（默认保护本地已编辑内容） |
 | `Views/ReportView.swift` | `ReportView` | 双页活页手账工作区（`JournalSpreadShell`）：顶栏展示章节实心身份胶囊（「周报」松绿 / 「月报」靛蓝）与高对比状态胶囊（「本周未写 / 本月未写 / Tita 未交 / 本周已写」）、历史弹层、刷新与 AI 选择器，右缘提供「日报 / 周报 / 月报 / 历史」彩签；左页展示周期撕历、三联汇总、周/月筛选条及联动日报荧光笔重点的每日摘录（支持 `+ 引用` 插入正文）；右页顶部贯通状态色带，内置 `JournalStatusBanner` 醒目横幅、默认展开的大尺寸黄色便利贴「补充说明」（`JournalStickyNote`，支持按需收起）、可点击 Tita 状态橡皮印章、单行聚焦工具栏与手账排印正文/Markdown 编辑区 |
 | `Views/ReportSettingsView.swift` | `ReportSettingsView` | 按 `periodKind` 分别呈现「周报 → 周报生成」与「月报 → 月报生成」设置页：默认风格、草稿/工时开关、提示词编辑与「Tita 对接」跳转入口 |
@@ -43,18 +50,20 @@
   - 未配置 AI 或 CLI 执行失败时，自动降级为 `fallbackReport` 按项目分组、拆行去重生成结构化 Markdown 报告。
 - **自定义提示词占位符**：
   - 周报：`{{weekRange}}`、`{{totalHours}}`、`{{styleInstruction}}`、`{{dailyLogs}}`、`{{extraNotes}}`
-  - 月报：`{{monthRange}}`、`{{totalHours}}`、`{{styleInstruction}}`、`{{dailyLogs}}`、`{{weeklyReports}}`、`{{extraNotes}}`
+  - 月报：`{{monthRange}}`、`{{totalHours}}`、`{{styleInstruction}}`、`{{monthlyOKR}}`、`{{gitStats}}`、`{{dailyLogs}}`、`{{weeklyReports}}`、`{{extraNotes}}`
 
 ## 持久化与设置键（`ReportKeys`）
 
 - **数据库表**：
   - `weeklyReport`（迁移 `report.v1`，主键 `weekStart` `yyyy-MM-dd`）
-  - `monthlyReport`（迁移 `report.v2`，主键 `monthKey` `yyyy-MM`）
+  - `monthlyReport`（迁移 `report.v2`、`report.v4` 新增 `monthlyOKR` 列，主键 `monthKey` `yyyy-MM`）
+  - `reviewReport`（迁移 `report.v3`，主键 `periodKey`）
 - **设置键**：
   - `report.lastPeriodKind`（默认 `.weekly`，用于未锁定模式）
   - `report.style`（默认 `.standard`）
   - `report.includeDrafts`（默认 `true`）
   - `report.includeHours`（默认 `true`）
+  - `report.monthly.includeGitStats`（默认 `true`）
   - `report.prompt`（默认 `WeeklyReportGenerator.defaultPrompt`）
   - `report.monthlyPrompt`（默认 `WeeklyReportGenerator.defaultMonthlyPrompt`）
   - `report.tita.baseURL`（默认 `"https://www.tita.net"`）
@@ -62,6 +71,8 @@
   - `report.tita.tenantID` / `report.tita.userID` / `report.tita.userName`（验证登录态后自动从 `BSGlobal` 与 `summary/status` 填充）
   - `report.tita.weeklyTemplateID`（默认 `1006`） / `report.tita.monthlyTemplateID`（默认 `1007`）
   - `report.tita.defaultMood`（默认 `0` 不选）
+  - `report.feishu.cliPath`（`lark-cli` 可执行路径，默认空自动探测）
+  - `report.feishu.monthlyDocURL`（默认目标飞书文档链接，默认空）
 
 ## Tita 周报/月报直连对接
 
@@ -72,12 +83,20 @@
    - **导入 Cookie / Copy as cURL**：`TitaCredentialParser` 支持直接粘贴 Chrome DevTools 复制的 `curl` 命令、`Cookie:` 请求头或纯 Cookie 字符串，并自动识别 URL 中的 `tenantId` 与 `userId`。
 2. **周期映射与富文本拆分**：
    - `TitaPeriodCode` 按 Tita 规则将周报编码为周一所在自然月的第 `WW` 周（`YYYY-MM-WW`）、月报编码为 `YYYY-MM-01`。
-   - `TitaContentMapper` 将本地生成的 Markdown 报告自动映射为 Tita 的 4 个富文本模块，`TitaRichTextConverter` 转为 ProseMirror HTML 与纯文本（上限 10,000 字）。
+   - `TitaContentMapper` 将本地生成的 Markdown 报告自动映射为 Tita 的 4 个富文本模块，`TitaRichTextConverter` 转为 Tita ProseMirror `EditorState` JSON（`{"doc": ..., "selection": ...}`）与纯文本（上限 10,000 字）。
 3. **草稿保存与确认提交**：
-   - 查询接口：`GET summary/status`、`GET summary/selectTemplates`、`POST summary/detail`；
-   - 初始化与保存草稿：`POST summary/create/{dailyDate}/{reportType}/{templateId}`、`POST summary/mood/update/{feedId}/{moduleId}/{mood}`、`POST summary/richtext/update`；
-   - 正式提交/更新：提交前重新拉取详情保留既有 OKR/附件/`@ta查看` 等模块数据，调用 `POST summary/checkchange/{feedId}` 与 `POST summary/submit/{feedId}/1`（需经二次确认弹窗），所有脱敏请求摘要写入 `~/Library/Application Support/IronBowl/logs/tita.log`。
+   - 查询接口：`GET summary/status`、`GET summary/selectTemplates`、`POST summary/detail`（解析状态与详情时自动忽略非正 `tempId` / `summaryTemplateId`，并在初始化编辑面板与创建草稿前对齐 `summary/selectTemplates` 的有效模板 ID，模板失效时自动回退重试）；
+   - 初始化与保存草稿：`POST summary/create/{dailyDate}/{reportType}/{templateId}`、`POST summary/mood/update/{feedId}/{moduleId}/{mood}`、`POST summary/richtext/update`、`POST summary/delete/{feedId}`；
+   - 正式提交/更新：提交前重新拉取详情保留既有 OKR/附件/`@ta查看` 等模块数据，调用 `POST summary/checkchange/{feedId}` 与 `POST summary/submit/{feedId}/1`（需经二次确认弹窗）；`WeeklyReportModel` 自动复用同一会话的 `TitaClient`（保持 `URLSession` TLS 长连接），对 TLS 握手/建连瞬断与幂等请求自动退避重试，所有脱敏请求摘要及传输层错误均写入 `~/Library/Application Support/IronBowl/logs/tita.log`。
 4. **历史周报与月报同步**：
    - 在「设置 → 周报 → Tita 对接」点击「一键同步全部历史」，或在周报/月报页面历史弹层点击「同步 Tita」。
    - `TitaHistorySyncService` 调用 `POST summary/search`（`relation = 1`、`startTime/endTime = ""`）自动翻页拉取全部历史周报与月报，`TitaProseMirrorParser` 将 `dailyContent[].richContent` 的 ProseMirror JSON（兼容旧版 HTML）转换为 Markdown，`TitaPeriodCode.weekRange(fromSummaryDate:)` / `monthRange(fromSummaryDate:)` 反向映射为 `WeekRange` / `MonthRange`，合并写入 `weeklyReport` / `monthlyReport`（`providerName = "Tita 同步"`）。
    - 冲突保护：默认跳过已有非空且非 `"Tita 同步"` 来源的本地报告，仅补齐缺失周期或刷新先前由 Tita 同步的记录；设置页可选开启「覆盖本地已编辑的报告」。
+
+## 定时自动生成与 Tita 未交提醒
+
+`ReportPlugin` 与 `MonthlyReportPlugin` 在启动时分别向 `context.scheduler` 注册 `report.autoGenerateWeekly` 与 `report.autoGenerateMonthly` 定时动作，并在首次安装时写入内置默认任务 `builtin.report.weeklyAutoGenerate`：
+
+- **默认调度**：每周五 `17:30`（`MisfirePolicy.runIfMissedToday`），汇总本周每日日报（无日报时自动 `.skipped` 跳过）。
+- **防覆盖保护（`overwriteExisting`）**：默认 `false`，若本周已存在非空周报则保留既有内容不覆盖；开启后重新汇总生成。
+- **Tita 未交提醒（`remindIfTitaUnsubmitted`）**：默认 `true`，若已配置 Tita 且检测到当前周期尚未正式提交，则通过 `ReminderCenter` 弹出 `report.tita.unsubmitted.*` 提醒，支持一键跳转周报/月报页预览推送。

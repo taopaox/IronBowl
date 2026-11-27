@@ -263,3 +263,32 @@ import Testing
     }
     #expect(remainingMessages == 0)
 }
+
+@Test @MainActor func chatStoreLazyLoadsMessagesOnlyForSelectedThreadUntilSwitched() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appending(path: "ironbowl-chat-lazy-test-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let dbURL = dir.appending(path: "test.sqlite")
+    let db = try AppDatabase(url: dbURL, migrations: [])
+    let settings = SettingsStore(database: db)
+    let providers = AIProviderStore(settings: settings)
+    let store = ChatStore(database: db, settings: settings, providers: providers)
+
+    let first = store.createThread(title: "第一会话", providerKind: .agy, workspacePath: dir.path)
+    _ = store.insertCards([ChatCardAttachment(cardID: "core.lunar", label: "农历", valueSnapshot: "初一")], into: first.id)
+
+    let second = store.createThread(title: "第二会话", providerKind: .agy, workspacePath: dir.path)
+    _ = store.insertCards([ChatCardAttachment(cardID: "core.offwork", label: "下班", valueSnapshot: "18:00")], into: second.id)
+
+    // 当前选中为 second，重载后仅应立即加载 second 的消息，first 待切换时懒加载
+    let reloaded = ChatStore(database: db, settings: settings, providers: providers)
+    #expect(reloaded.selectedThreadID == second.id)
+    #expect(reloaded.messagesByThread[second.id]?.count == 1)
+    #expect(reloaded.messagesByThread[first.id] == nil)
+
+    reloaded.selectThread(first.id)
+    #expect(reloaded.messagesByThread[first.id]?.count == 1)
+    #expect(reloaded.messagesByThread[first.id]?.first?.cards.first?.cardID == "core.lunar")
+}

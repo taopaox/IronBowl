@@ -34,6 +34,12 @@ packages:
     path: Packages/SchedulerPlugin
   ReportPlugin:
     path: Packages/ReportPlugin
+  TodoPlugin:
+    path: Packages/TodoPlugin
+  WorkspacePlugin:
+    path: Packages/WorkspacePlugin
+  DevToolsPlugin:
+    path: Packages/DevToolsPlugin
 targets:
   IronBowl:
     type: application
@@ -50,6 +56,9 @@ targets:
       - package: AIWebPlugin
       - package: SchedulerPlugin
       - package: ReportPlugin
+      - package: TodoPlugin
+      - package: WorkspacePlugin
+      - package: DevToolsPlugin
     info:
       path: Apps/IronBowl/Info.plist
       properties:
@@ -61,6 +70,8 @@ targets:
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.productivity
         NSUserNotificationAlertStyle: alert
+        NSCalendarsFullAccessUsageDescription: 用于在万年历与工作台中展示当日会议与日程安排。
+        NSCalendarsUsageDescription: 用于在万年历与工作台中展示当日会议与日程安排。
         NSHumanReadableCopyright: 饭碗 IronBowl
         SUFeedURL: https://github.com/taopaox/IronBowl/releases/latest/download/appcast-ironbowl.xml
         SUPublicEDKey: BDkyFzrp28vcg8cMVHXpuc/NpDukEfbD+WPUlAR/TmA=
@@ -93,6 +104,8 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.lifestyle
+        NSCalendarsFullAccessUsageDescription: 用于在万年历与工作台中展示当日会议与日程安排。
+        NSCalendarsUsageDescription: 用于在万年历与工作台中展示当日会议与日程安排。
         NSHumanReadableCopyright: 饭碗 IronBowl
         SUFeedURL: https://github.com/taopaox/IronBowl/releases/latest/download/appcast-calendar.xml
         SUPublicEDKey: BDkyFzrp28vcg8cMVHXpuc/NpDukEfbD+WPUlAR/TmA=

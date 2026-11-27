@@ -4,11 +4,14 @@ import ZentaoLogPlugin
 
 struct ReportView: View {
     @Bindable var model: WeeklyReportModel
+    @Environment(\.isPageActive) private var isPageActive
     @State private var showHistory = false
     @State private var previewMode: PreviewMode = .preview
     @State private var confirmClear = false
     @State private var showTitaSubmit = false
+    @State private var showFeishuExport = false
     @State private var notesExpanded = true
+    @State private var okrExpanded = true
     @State private var titaStampToken = 0
 
     enum PreviewMode: Hashable {
@@ -84,12 +87,13 @@ struct ReportView: View {
             rightJournalPage
         }
         .task(id: "\(model.periodKind.rawValue)-\(model.activePeriodKey)") {
-            model.loadLocalLogs()
-            if model.isZentaoConfigured && !model.syncedFromZentao {
-                await model.refreshLogs()
-            }
-            if model.isTitaConfigured {
-                await model.refreshTitaStatus()
+            await syncPeriodIfNeeded()
+        }
+        .onChange(of: isPageActive) { _, active in
+            if active {
+                Task { await syncPeriodIfNeeded() }
+            } else {
+                model.saveEditsIfNeeded()
             }
         }
         .onChange(of: model.titaStatus?.state) { _, _ in
@@ -101,6 +105,9 @@ struct ReportView: View {
         .sheet(isPresented: $showTitaSubmit) {
             TitaSubmitSheet(model: model)
         }
+        .sheet(isPresented: $showFeishuExport) {
+            FeishuDocExportSheet(model: model)
+        }
         .alert("清空\(model.periodKind.displayName)？", isPresented: $confirmClear) {
             Button("清空", role: .destructive) {
                 model.clearReport()
@@ -108,6 +115,20 @@ struct ReportView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("将删除本地保存的「\(model.activePeriodTitle)」\(model.periodKind.displayName)内容，不影响每日禅道日报。")
+        }
+    }
+
+    private func syncPeriodIfNeeded() async {
+        if model.days.isEmpty {
+            model.loadLocalLogs()
+        }
+        if model.isZentaoConfigured && (!model.syncedFromZentao || model.shouldAutoSyncLogs()) {
+            await model.refreshLogs()
+        } else if model.periodKind == .monthly && model.includeGitStats && !model.monthGitStats.hasData {
+            await model.refreshMonthGitStats()
+        }
+        if model.isTitaConfigured && (model.titaStatus == nil || model.shouldAutoSyncTita()) {
+            await model.refreshTitaStatus()
         }
     }
 
@@ -237,6 +258,10 @@ struct ReportView: View {
 
         // 2. 周期统计三联卡
         JournalPeriodSummaryCards(model: model, palette: p)
+
+        if model.periodKind == .monthly {
+            JournalMonthlyGitCard(model: model, palette: p)
+        }
 
         // 3. 7 天 / 月周分片筛选条
         if model.periodKind == .weekly {
@@ -409,6 +434,10 @@ struct ReportView: View {
 
         reportStatusBanner(palette: p)
 
+        if model.periodKind == .monthly {
+            JournalMonthlyOKRCard(model: model, palette: p, expanded: $okrExpanded)
+        }
+
         JournalExtraNotesSticky(model: model, palette: p, expanded: $notesExpanded)
 
         if model.hasReportContent || previewMode == .edit {
@@ -499,6 +528,14 @@ struct ReportView: View {
             }
             .buttonStyle(.journalSecondary(p))
             .help("清空当前\(model.periodKind.displayName)")
+
+            Button {
+                showFeishuExport = true
+            } label: {
+                Label("写飞书", systemImage: "doc.badge.arrow.up")
+            }
+            .buttonStyle(.journalSecondary(p))
+            .help("通过 lark-cli 读取飞书子周报或覆盖写入目标飞书文档")
 
             Button {
                 showTitaSubmit = true
@@ -813,6 +850,174 @@ private struct JournalMonthWeekStrip: View {
     }
 }
 
+private struct JournalMonthlyGitCard: View {
+    @Bindable var model: WeeklyReportModel
+    let palette: JournalPalette
+
+    var body: some View {
+        let stats = model.monthGitStats
+        JournalPaperCard(palette: palette, padding: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.left.forwardslash.chevron.right")
+                        .font(DS.font(11, .semibold))
+                        .foregroundStyle(palette.stampGreen)
+                    Text("本月 Git 统计")
+                        .font(DS.font(12, .bold))
+                        .foregroundStyle(palette.ink)
+
+                    Spacer(minLength: 4)
+
+                    Toggle("附 Git", isOn: $model.includeGitStats)
+                        .toggleStyle(.checkbox)
+                        .font(DS.font(11))
+                        .foregroundStyle(palette.inkSecondary)
+
+                    Button {
+                        Task { await model.refreshMonthGitStats() }
+                    } label: {
+                        if model.isLoadingGitStats {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(DS.font(11))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(palette.inkSecondary)
+                    .disabled(model.isLoadingGitStats)
+                    .help("重新扫描本月 Git 提交统计")
+                }
+
+                if !model.includeGitStats {
+                    Text("已关闭 Git 统计注入（可勾选「附 Git」启用）")
+                        .font(DS.font(11))
+                        .foregroundStyle(palette.inkTertiary)
+                } else if model.isLoadingGitStats && !stats.hasData {
+                    Text("正在扫描本地仓库本月提交…")
+                        .font(DS.font(11.5))
+                        .foregroundStyle(palette.inkSecondary)
+                } else if !stats.hasData {
+                    Text("暂未扫到本月提交，点右上角刷新可重新扫描")
+                        .font(DS.font(11))
+                        .foregroundStyle(palette.inkTertiary)
+                } else {
+                    HStack(spacing: 10) {
+                        Text("净提交 \(stats.netCommits)（总 \(stats.totalCommits) / 合并 \(stats.mergeCommits)）")
+                        Text("·")
+                        Text("活跃 \(stats.activeRepoCount)/\(stats.totalReposScanned) 仓")
+                    }
+                    .font(DS.font(11.5, .medium).monospacedDigit())
+                    .foregroundStyle(palette.ink)
+
+                    HStack(spacing: 8) {
+                        Text("Bug修复 \(stats.bugFixCommits)")
+                        Text("·")
+                        Text("接口联调 \(stats.apiIntegrationCommits)")
+                        Text("·")
+                        Text("部署配置 \(stats.deployConfigCommits)")
+                        if let peak = stats.peakDay, stats.peakDayCommits > 0 {
+                            Text("·")
+                            Text("高峰 \(peak.suffix(5))(\(stats.peakDayCommits))")
+                        }
+                    }
+                    .font(DS.font(11).monospacedDigit())
+                    .foregroundStyle(palette.inkSecondary)
+                    .lineLimit(1)
+                }
+            }
+        }
+    }
+}
+
+private struct JournalMonthlyOKRCard: View {
+    @Bindable var model: WeeklyReportModel
+    let palette: JournalPalette
+    @Binding var expanded: Bool
+
+    var body: some View {
+        let trimmed = model.monthlyOKR.trimmingCharacters(in: .whitespacesAndNewlines)
+        JournalPaperCard(palette: palette, padding: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Button {
+                        withAnimation(.snappy(duration: 0.18)) {
+                            expanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "target")
+                                .font(DS.font(12))
+                                .foregroundStyle(palette.stampRed)
+                            Text("本月 OKR")
+                                .font(DS.font(13.5, .bold))
+                                .foregroundStyle(palette.ink)
+                            Text("生成月报时逐条量化对照完成度与偏差原因")
+                                .font(DS.font(11.5))
+                                .foregroundStyle(palette.inkTertiary)
+                                .lineLimit(1)
+                            Spacer(minLength: 4)
+                            Text(expanded ? "收起" : "展开")
+                                .font(DS.font(11.5, .medium))
+                                .foregroundStyle(palette.inkSecondary)
+                        }
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+
+                    if expanded && !trimmed.isEmpty {
+                        Button("清空") {
+                            model.monthlyOKR = ""
+                            model.scheduleAutoSave()
+                        }
+                        .buttonStyle(.plain)
+                        .font(DS.font(11.5, .medium))
+                        .foregroundStyle(palette.stampRed)
+                    }
+                }
+
+                if expanded {
+                    ZStack(alignment: .topLeading) {
+                        if model.monthlyOKR.isEmpty {
+                            Text("例如：\n1. 完成固废溯源平台管理端及 APP 全量交付（目标 100%）\n2. 推进三维模型跨端鸿蒙适配与性能优化（目标完成核心场景验证）")
+                                .font(DS.body)
+                                .foregroundStyle(palette.inkTertiary)
+                                .padding(.top, 2)
+                                .padding(.leading, 5)
+                                .allowsHitTesting(false)
+                        }
+                        TextEditor(text: $model.monthlyOKR)
+                            .font(DS.body)
+                            .lineSpacing(5)
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: DS.s(90), maxHeight: DS.s(170))
+                            .onChange(of: model.monthlyOKR) {
+                                model.scheduleAutoSave()
+                            }
+                    }
+                    .padding(10)
+                    .background(palette.paper.opacity(0.65), in: .rect(cornerRadius: 8))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8).strokeBorder(palette.borderStrong)
+                    }
+                } else {
+                    Text(trimmed.isEmpty ? "点击填写本月个人 OKR…" : trimmed)
+                        .font(DS.font(12.5))
+                        .foregroundStyle(trimmed.isEmpty ? palette.inkTertiary : palette.inkSecondary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(.rect)
+                        .onTapGesture {
+                            withAnimation(.snappy(duration: 0.18)) {
+                                expanded = true
+                            }
+                        }
+                }
+            }
+        }
+    }
+}
+
 private struct JournalExtraNotesSticky: View {
     @Bindable var model: WeeklyReportModel
     let palette: JournalPalette
@@ -982,73 +1187,84 @@ private struct JournalMarkdownReportView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(blocks) { block in
-                switch block {
-                case .heading(_, let level, let text):
-                    if level == 2 {
-                        HStack(spacing: 8) {
-                            RoundedRectangle(cornerRadius: 1.5)
-                                .fill(chapterColor)
-                                .frame(width: 3.5, height: DS.s(16))
-                            Text(ReportMarkdown.attributedInline(text))
-                                .font(JournalPalette.serif(16.5, .bold))
-                                .foregroundStyle(palette.ink)
-                        }
-                        .padding(.top, 10)
-                        .padding(.bottom, 2)
-                    } else {
-                        Text(ReportMarkdown.attributedInline(text))
-                            .font(level == 1 ? JournalPalette.serif(19, .bold) : DS.font(14.5, .semibold))
-                            .foregroundStyle(palette.ink)
-                            .padding(.top, level == 1 ? 4 : 6)
-                    }
-                case .bullet(_, let indentLevel, let marker, let text):
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(marker)
-                            .font(DS.body.monospacedDigit())
-                            .foregroundStyle(palette.inkSecondary)
-                            .frame(minWidth: DS.s(18), alignment: .trailing)
-                        Text(ReportMarkdown.attributedInline(text))
-                            .font(DS.body)
-                            .foregroundStyle(palette.ink)
-                            .lineSpacing(6)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.leading, CGFloat(4 + indentLevel * 18))
-                case .blockquote(_, let text):
-                    HStack(alignment: .top, spacing: 10) {
-                        RoundedRectangle(cornerRadius: 1.5)
-                            .fill(palette.borderStrong)
-                            .frame(width: 3)
-                        Text(ReportMarkdown.attributedInline(text))
-                            .font(DS.body)
-                            .foregroundStyle(palette.inkSecondary)
-                            .lineSpacing(6)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.vertical, 2)
-                case .codeBlock(_, let code):
-                    Text(code)
-                        .font(DS.mono(12.5))
-                        .foregroundStyle(palette.ink)
-                        .lineSpacing(4)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(palette.paperAlt, in: .rect(cornerRadius: 8))
-                case .divider:
-                    Divider()
-                        .overlay(palette.borderStrong)
-                        .padding(.vertical, 4)
-                case .paragraph(_, let text):
-                    Text(ReportMarkdown.attributedInline(text))
-                        .font(DS.body)
-                        .foregroundStyle(palette.ink)
-                        .lineSpacing(6)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                JournalMarkdownBlockRow(block: block, palette: palette, chapterColor: chapterColor)
+                    .equatable()
             }
         }
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct JournalMarkdownBlockRow: View, Equatable {
+    let block: ReportMarkdownBlock
+    let palette: JournalPalette
+    let chapterColor: Color
+
+    var body: some View {
+        switch block {
+        case .heading(_, let level, let text):
+            if level == 2 {
+                HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(chapterColor)
+                        .frame(width: 3.5, height: DS.s(16))
+                    Text(ReportMarkdown.attributedInline(text))
+                        .font(JournalPalette.serif(16.5, .bold))
+                        .foregroundStyle(palette.ink)
+                }
+                .padding(.top, 10)
+                .padding(.bottom, 2)
+            } else {
+                Text(ReportMarkdown.attributedInline(text))
+                    .font(level == 1 ? JournalPalette.serif(19, .bold) : DS.font(14.5, .semibold))
+                    .foregroundStyle(palette.ink)
+                    .padding(.top, level == 1 ? 4 : 6)
+            }
+        case .bullet(_, let indentLevel, let marker, let text):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(marker)
+                    .font(DS.body.monospacedDigit())
+                    .foregroundStyle(palette.inkSecondary)
+                    .frame(minWidth: DS.s(18), alignment: .trailing)
+                Text(ReportMarkdown.attributedInline(text))
+                    .font(DS.body)
+                    .foregroundStyle(palette.ink)
+                    .lineSpacing(6)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.leading, CGFloat(4 + indentLevel * 18))
+        case .blockquote(_, let text):
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(palette.borderStrong)
+                    .frame(width: 3)
+                Text(ReportMarkdown.attributedInline(text))
+                    .font(DS.body)
+                    .foregroundStyle(palette.inkSecondary)
+                    .lineSpacing(6)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 2)
+        case .codeBlock(_, let code):
+            Text(code)
+                .font(DS.mono(12.5))
+                .foregroundStyle(palette.ink)
+                .lineSpacing(4)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(palette.paperAlt, in: .rect(cornerRadius: 8))
+        case .divider:
+            Divider()
+                .overlay(palette.borderStrong)
+                .padding(.vertical, 4)
+        case .paragraph(_, let text):
+            Text(ReportMarkdown.attributedInline(text))
+                .font(DS.body)
+                .foregroundStyle(palette.ink)
+                .lineSpacing(6)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

@@ -50,6 +50,8 @@ public protocol IronBowlPlugin: AnyObject {
     var homeCards: [HomeCard] { get }
     /// 首页输入框的内容交给插件处理；处理了返回给用户看的结果，不处理返回 nil。
     func handleHomeInput(_ text: String) async -> String?
+    /// 供全局 ⌘K 命令面板展示的插件直达子命令。
+    var paletteCommands: [PaletteCommand] { get }
     /// 判断首页「今天」AI 对话是否应交由本插件按工作台业务规则处理。
     func canHandleChatIntent(_ text: String) -> Bool
     /// 按工作台业务规则处理首页对话意图，并通过 `onProgress` 实时上报执行步骤。
@@ -82,6 +84,7 @@ public extension IronBowlPlugin {
     var quickActions: [QuickAction] { [] }
     var homeCards: [HomeCard] { [] }
     func handleHomeInput(_ text: String) async -> String? { nil }
+    var paletteCommands: [PaletteCommand] { [] }
     func canHandleChatIntent(_ text: String) -> Bool { false }
     func handleChatIntent(
         _ text: String,
@@ -251,6 +254,39 @@ public struct QuickAction: Identifiable {
     }
 }
 
+/// 全局 ⌘K 命令面板中的插件动作项。
+public struct PaletteCommand: Identifiable {
+    public let id: String
+    public let title: String
+    public let subtitle: String?
+    public let keywords: [String]
+    public let systemImage: String
+    public let badge: String?
+    public let searchHaystack: String
+    public let action: () -> Void
+
+    public init(
+        id: String,
+        title: String,
+        subtitle: String? = nil,
+        keywords: [String] = [],
+        systemImage: String,
+        badge: String? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.keywords = keywords
+        self.systemImage = systemImage
+        self.badge = badge
+        self.searchHaystack = ([title, subtitle ?? "", badge ?? ""] + keywords)
+            .joined(separator: " ")
+            .lowercased()
+        self.action = action
+    }
+}
+
 /// 首页小卡片。`value`、`detail` 在视图里求值，跟着 @Observable 状态刷新。
 public struct HomeCard: Identifiable {
     public let id: String
@@ -277,10 +313,17 @@ public final class PluginContext {
     public let providers: AIProviderStore
     public let webSessions: WebSessionManager
     public let scheduler: TaskScheduler
+    public let todos: TodoStore
+    public let scratchpad: ScratchpadStore
+    public let clipboard: ClipboardHistoryStore
     /// 打开主窗口并切到某个插件页。
     public let openPlugin: (String) -> Void
     /// 打开设置窗口，可指定页面 id。
     public let openSettings: (String?) -> Void
+    /// 切换到首页「今天」并绑定指定工作目录发起对话。
+    public let openChatInWorkspace: (String) -> Void
+    /// 从万年历等解耦插件向禅道日报写入外部草稿（独立版万年历中为 nil）。
+    public let appendDailyLogDraft: ((_ work: String, _ hours: Double, _ date: Date) -> Bool)?
 
     public init(
         database: AppDatabase,
@@ -290,8 +333,13 @@ public final class PluginContext {
         providers: AIProviderStore,
         webSessions: WebSessionManager? = nil,
         scheduler: TaskScheduler? = nil,
+        todos: TodoStore? = nil,
+        scratchpad: ScratchpadStore? = nil,
+        clipboard: ClipboardHistoryStore? = nil,
         openPlugin: @escaping (String) -> Void,
-        openSettings: @escaping (String?) -> Void
+        openSettings: @escaping (String?) -> Void,
+        openChatInWorkspace: @escaping (String) -> Void = { _ in },
+        appendDailyLogDraft: ((_ work: String, _ hours: Double, _ date: Date) -> Bool)? = nil
     ) {
         self.database = database
         self.settings = settings
@@ -307,8 +355,13 @@ public final class PluginContext {
             openPlugin: openPlugin,
             openSettings: openSettings
         )
+        self.todos = todos ?? TodoStore(database: database)
+        self.scratchpad = scratchpad ?? ScratchpadStore(database: database)
+        self.clipboard = clipboard ?? ClipboardHistoryStore(database: database, settings: settings)
         self.openPlugin = openPlugin
         self.openSettings = openSettings
+        self.openChatInWorkspace = openChatInWorkspace
+        self.appendDailyLogDraft = appendDailyLogDraft
     }
 }
 

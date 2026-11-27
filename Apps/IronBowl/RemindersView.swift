@@ -452,6 +452,7 @@ private struct ReminderHistoryCard: View {
         case .zentao: DS.brand
         case .scheduler: .indigo
         case .attendance: DS.warning
+        case .todo: DS.success
         case .general: DS.toggle
         }
     }

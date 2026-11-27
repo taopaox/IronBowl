@@ -43,9 +43,15 @@ public nonisolated enum Lunar {
 
     /// 公历日期对应的农历（按本地日期的正午算，避免时区跨日）。
     public static func lunar(_ date: Date) -> LunarDate {
+        let key = dayKey(date)
+        if let cached = labelCache.lunar(forKey: key) {
+            return cached
+        }
         let noon = gregorian.date(bySettingHour: 12, minute: 0, second: 0, of: date) ?? date
         let c = chinese.dateComponents([.year, .month, .day], from: noon)
-        return LunarDate(month: c.month ?? 1, day: c.day ?? 1, isLeapMonth: c.isLeapMonth ?? false, cycleYear: c.year ?? 1)
+        let resolved = LunarDate(month: c.month ?? 1, day: c.day ?? 1, isLeapMonth: c.isLeapMonth ?? false, cycleYear: c.year ?? 1)
+        labelCache.storeLunar(resolved, forKey: key)
+        return resolved
     }
 
     // MARK: 节气
@@ -100,6 +106,7 @@ public nonisolated enum Lunar {
     }
 
     private static let termCache = TermCache()
+    private static let labelCache = LabelCache()
 
     /// 这一天是不是节气。
     public static func solarTerm(_ date: Date) -> String? {
@@ -145,14 +152,62 @@ public nonisolated enum Lunar {
 
     /// 月历格子下面那行字：节日 > 节气 > 农历日（和百度一致，初一也显示"初一"）。
     public static func cellLabel(_ date: Date) -> (text: String, isSpecial: Bool) {
-        if let f = festival(date) { return (f, true) }
-        if let t = solarTerm(date) { return (t, true) }
-        return (lunar(date).dayName, false)
+        let key = dayKey(date)
+        if let cached = labelCache.cellLabel(forKey: key) {
+            return cached
+        }
+        let resolved: (text: String, isSpecial: Bool)
+        if let f = festival(date) {
+            resolved = (f, true)
+        } else if let t = solarTerm(date) {
+            resolved = (t, true)
+        } else {
+            resolved = (lunar(date).dayName, false)
+        }
+        labelCache.storeCellLabel(resolved, forKey: key)
+        return resolved
     }
 
     static func dayKey(_ date: Date) -> String {
         let c = gregorian.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+}
+
+private nonisolated final class LabelCache: @unchecked Sendable {
+    private static let maxEntries = 2048
+    private let lock = NSLock()
+    private var lunarByDay: [String: Lunar.LunarDate] = [:]
+    private var cellLabelByDay: [String: (text: String, isSpecial: Bool)] = [:]
+
+    func lunar(forKey key: String) -> Lunar.LunarDate? {
+        lock.lock()
+        defer { lock.unlock() }
+        return lunarByDay[key]
+    }
+
+    func storeLunar(_ value: Lunar.LunarDate, forKey key: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        if lunarByDay.count >= Self.maxEntries {
+            lunarByDay.removeAll(keepingCapacity: true)
+        }
+        lunarByDay[key] = value
+    }
+
+    func cellLabel(forKey key: String) -> (text: String, isSpecial: Bool)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cellLabelByDay[key]
+    }
+
+    func storeCellLabel(_ value: (text: String, isSpecial: Bool), forKey key: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        if cellLabelByDay.count >= Self.maxEntries {
+            cellLabelByDay.removeAll(keepingCapacity: true)
+        }
+        cellLabelByDay[key] = value
     }
 }
 

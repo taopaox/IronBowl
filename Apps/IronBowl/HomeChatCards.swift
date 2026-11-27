@@ -5,11 +5,11 @@ import SwiftUI
 enum HomeCardCatalog {
     static func coreCards(for app: AppModel) -> [HomeCard] {
         let cal = app.workCalendar
-        let now = app.now
+        let initialNow = Date()
         return [
             HomeCard(
                 id: "core.lunar",
-                label: CN.monthDay(now) + " " + CN.weekday(now),
+                label: CN.monthDay(initialNow) + " " + CN.weekday(initialNow),
                 value: { WorkCalendar.lunarString(app.now) },
                 detail: {
                     let today = app.now

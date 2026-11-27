@@ -204,11 +204,22 @@ public nonisolated struct TitaReportDetail: Sendable, Equatable {
 
     public var currentMood: TitaMood {
         guard let raw = moodModule?.rawObjectDataJSON.trimmingCharacters(in: .whitespacesAndNewlines),
-              let intVal = Int(raw),
-              let mood = TitaMood(rawValue: intVal) else {
+              !raw.isEmpty else {
             return .unset
         }
-        return mood
+        if let intVal = Int(raw), let mood = TitaMood(rawValue: intVal) {
+            return mood
+        }
+        if let data = raw.data(using: .utf8),
+           let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           let values = (obj["selectedValues"] as? [Any]) ?? (obj["SelectedValues"] as? [Any]),
+           let first = values.first {
+            let intVal = (first as? Int) ?? (first as? String).flatMap(Int.init)
+            if let intVal, let mood = TitaMood(rawValue: intVal) {
+                return mood
+            }
+        }
+        return .unset
     }
 }
 
@@ -245,6 +256,7 @@ public nonisolated enum TitaError: LocalizedError, Sendable, Equatable {
     case sessionExpired
     case httpError(Int, String)
     case apiError(code: Int, message: String)
+    case networkError(String)
     case badResponse(String)
 
     public var errorDescription: String? {
@@ -259,6 +271,8 @@ public nonisolated enum TitaError: LocalizedError, Sendable, Equatable {
             detail.isEmpty ? "Tita 请求失败（HTTP \(status)）" : "Tita 请求失败（HTTP \(status)）：\(detail)"
         case .apiError(let code, let message):
             message.isEmpty ? "Tita 接口返回错误（Code=\(code)）" : "Tita 接口返回错误（Code=\(code)）：\(message)"
+        case .networkError(let message):
+            message
         case .badResponse(let sample):
             "Tita 返回了无法解析的数据：\(sample.prefix(160))"
         }

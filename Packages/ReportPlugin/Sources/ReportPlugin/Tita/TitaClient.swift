@@ -10,6 +10,23 @@ public nonisolated enum TitaLog {
         let time = ISO8601DateFormatter().string(from: Date())
         var text = "[\(time)] \(method) \(path) -> \(status)\n"
         text += String(decoding: body.prefix(4000), as: UTF8.self) + "\n\n"
+        append(text)
+    }
+
+    static func writeError(method: String, path: String, attempt: Int, maxAttempts: Int, error: Error) {
+        let time = ISO8601DateFormatter().string(from: Date())
+        let nsErr = error as NSError
+        var detail = "domain=\(nsErr.domain) code=\(nsErr.code)"
+        if let underlying = nsErr.userInfo[NSUnderlyingErrorKey] as? NSError,
+           let sslCode = underlying.userInfo["_kCFNetworkCFStreamSSLErrorOriginalValue"] {
+            detail += " ssl=\(sslCode)"
+        }
+        detail += " \(error.localizedDescription)"
+        let text = "[\(time)] \(method) \(path) -> ERROR (\(attempt)/\(maxAttempts)) \(detail)\n\n"
+        append(text)
+    }
+
+    private static func append(_ text: String) {
         lock.lock()
         defer { lock.unlock() }
         if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int, size > 2_000_000 {
@@ -89,6 +106,11 @@ public actor TitaClient {
         let redirectDelegate = TitaRedirectDelegate(allowedHost: url.host)
         self.delegate = redirectDelegate
         self.session = URLSession(configuration: config, delegate: redirectDelegate, delegateQueue: nil)
+    }
+
+    /// 结束并释放内部 `URLSession`（用于切换账号/凭证或销毁临时客户端）。
+    public nonisolated func invalidate() {
+        session.finishTasksAndInvalidate()
     }
 
     // MARK: - 会话验证与身份探测
@@ -511,15 +533,59 @@ public actor TitaClient {
             req.setValue("application/json;charset=UTF-8", forHTTPHeaderField: "Content-Type")
         }
 
-        let (data, resp) = try await session.data(for: req)
-        let http = resp as? HTTPURLResponse
-        let status = http?.statusCode ?? -1
         let pathForLog = url.path + (url.query.map { "?\($0)" } ?? "")
-        TitaLog.write(method: method, path: pathForLog, status: status, body: acceptHTML ? Data("[HTML length=\(data.count)]".utf8) : data)
-        guard let http else {
-            throw TitaError.badResponse("非 HTTP 响应")
+        let maxAttempts = 3
+        let retryDelays: [Duration] = [.milliseconds(300), .milliseconds(800)]
+
+        for attempt in 1...maxAttempts {
+            do {
+                let (data, resp) = try await session.data(for: req)
+                let http = resp as? HTTPURLResponse
+                let status = http?.statusCode ?? -1
+                TitaLog.write(method: method, path: pathForLog, status: status, body: acceptHTML ? Data("[HTML length=\(data.count)]".utf8) : data)
+                guard let http else {
+                    throw TitaError.badResponse("非 HTTP 响应")
+                }
+                return (data, http)
+            } catch {
+                TitaLog.writeError(method: method, path: pathForLog, attempt: attempt, maxAttempts: maxAttempts, error: error)
+                if attempt < maxAttempts, Self.shouldRetryTransportError(error, method: method, path: pathForLog) {
+                    try await Task.sleep(for: retryDelays[attempt - 1])
+                    continue
+                }
+                throw Self.mapTransportError(error)
+            }
         }
-        return (data, http)
+        throw TitaError.badResponse("请求未执行")
+    }
+
+    nonisolated static func shouldRetryTransportError(_ error: Error, method: String, path: String) -> Bool {
+        if error is CancellationError { return false }
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .cancelled:
+            return false
+        case .secureConnectionFailed, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+            // TLS 握手或 TCP 建连阶段失败时尚未发送任何 HTTP 请求体，GET/POST 均可安全重试。
+            return true
+        case .timedOut, .networkConnectionLost:
+            if method.uppercased() == "GET" { return true }
+            let lowerPath = path.lowercased()
+            return lowerPath.contains("summary/detail")
+                || lowerPath.contains("summary/search")
+                || lowerPath.contains("summary/checkchange")
+                || lowerPath.contains("summary/richtext/update")
+                || lowerPath.contains("summary/mood/update")
+        default:
+            return false
+        }
+    }
+
+    nonisolated static func mapTransportError(_ error: Error) -> Error {
+        guard let urlError = error as? URLError, urlError.code == .secureConnectionFailed else {
+            return error
+        }
+        return TitaError.networkError("与 Tita 建立 TLS 安全连接失败（已自动重试）。若本机开启了代理/TUN，建议将 tita.net 加入直连规则后重试。")
     }
 
     nonisolated static func parseTemplates(_ list: [[String: Any]]) -> [TitaTemplateSummary] {

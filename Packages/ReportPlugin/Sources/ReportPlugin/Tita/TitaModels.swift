@@ -245,6 +245,7 @@ public nonisolated enum TitaError: LocalizedError, Sendable, Equatable {
     case sessionExpired
     case httpError(Int, String)
     case apiError(code: Int, message: String)
+    case networkError(String)
     case badResponse(String)
 
     public var errorDescription: String? {
@@ -259,6 +260,8 @@ public nonisolated enum TitaError: LocalizedError, Sendable, Equatable {
             detail.isEmpty ? "Tita 请求失败（HTTP \(status)）" : "Tita 请求失败（HTTP \(status)）：\(detail)"
         case .apiError(let code, let message):
             message.isEmpty ? "Tita 接口返回错误（Code=\(code)）" : "Tita 接口返回错误（Code=\(code)）：\(message)"
+        case .networkError(let message):
+            message
         case .badResponse(let sample):
             "Tita 返回了无法解析的数据：\(sample.prefix(160))"
         }

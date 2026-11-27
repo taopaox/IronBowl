@@ -1276,3 +1276,31 @@ import Testing
         summaryType: .weekly
     ) == 3001)
 }
+
+@Test func titaClientTransportRetryAndErrorMappingRules() {
+    // 1. TLS 握手/建连阶段失败：GET 与 POST 均安全重试
+    #expect(TitaClient.shouldRetryTransportError(URLError(.secureConnectionFailed), method: "GET", path: "/api/v1/1/2/summary/status"))
+    #expect(TitaClient.shouldRetryTransportError(URLError(.secureConnectionFailed), method: "POST", path: "/api/v1/1/2/summary/submit/abc/1"))
+    #expect(TitaClient.shouldRetryTransportError(URLError(.cannotConnectToHost), method: "POST", path: "/api/v1/1/2/summary/create/2026-11-04/26/1006"))
+
+    // 2. 超时/断连：仅幂等请求重试，不重试正式提交与创建
+    #expect(TitaClient.shouldRetryTransportError(URLError(.timedOut), method: "GET", path: "/api/v1/1/2/summary/selectTemplates"))
+    #expect(TitaClient.shouldRetryTransportError(URLError(.networkConnectionLost), method: "POST", path: "/api/v1/1/2/summary/detail"))
+    #expect(TitaClient.shouldRetryTransportError(URLError(.timedOut), method: "POST", path: "/api/v1/1/2/summary/richtext/update"))
+    #expect(!TitaClient.shouldRetryTransportError(URLError(.timedOut), method: "POST", path: "/api/v1/1/2/summary/submit/abc/1"))
+    #expect(!TitaClient.shouldRetryTransportError(URLError(.networkConnectionLost), method: "POST", path: "/api/v1/1/2/summary/create/2026-11-04/26/1006"))
+
+    // 3. 证书校验失败与取消错误不重试
+    #expect(!TitaClient.shouldRetryTransportError(URLError(.serverCertificateUntrusted), method: "GET", path: "/api/v1/1/2/summary/status"))
+    #expect(!TitaClient.shouldRetryTransportError(URLError(.cancelled), method: "GET", path: "/api/v1/1/2/summary/status"))
+    #expect(!TitaClient.shouldRetryTransportError(CancellationError(), method: "GET", path: "/api/v1/1/2/summary/status"))
+
+    // 4. TLS 错误映射为可读网络提示
+    let mapped = TitaClient.mapTransportError(URLError(.secureConnectionFailed)) as? TitaError
+    #expect(mapped != nil)
+    #expect(mapped?.localizedDescription.contains("TLS") == true)
+    #expect(mapped?.localizedDescription.contains("tita.net") == true)
+
+    let untouched = TitaClient.mapTransportError(URLError(.timedOut)) as? URLError
+    #expect(untouched?.code == .timedOut)
+}

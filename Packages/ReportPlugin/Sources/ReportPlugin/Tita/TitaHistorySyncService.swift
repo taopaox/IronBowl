@@ -24,6 +24,7 @@ public nonisolated enum TitaHistorySyncService {
             tenantID: tenantID,
             userID: userID
         )
+        defer { client.invalidate() }
 
         if tenantID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || userID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

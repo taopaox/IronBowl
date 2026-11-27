@@ -48,6 +48,14 @@ final class WeeklyReportModel {
     @ObservationIgnored private var rawItemsByDate: [String: [DailyLogItem]] = [:]
     @ObservationIgnored private var autoSaveTask: Task<Void, Never>?
     @ObservationIgnored private var copiedResetTask: Task<Void, Never>?
+    @ObservationIgnored private var cachedTitaClient: (key: TitaClientCacheKey, client: TitaClient)?
+
+    private struct TitaClientCacheKey: Equatable {
+        let baseURL: String
+        let cookie: String
+        let tenantID: String
+        let userID: String
+    }
 
     init(context: PluginContext, lockedPeriodKind: ReportPeriodKind? = nil) {
         self.context = context
@@ -788,16 +796,35 @@ final class WeeklyReportModel {
     }
 
     func makeTitaClient() throws -> TitaClient {
-        try TitaClient(
-            baseURL: titaBaseURL,
-            cookie: titaCookie,
-            tenantID: titaTenantID,
-            userID: titaUserID
+        let key = TitaClientCacheKey(
+            baseURL: titaBaseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            cookie: titaCookie.trimmingCharacters(in: .whitespacesAndNewlines),
+            tenantID: titaTenantID.trimmingCharacters(in: .whitespacesAndNewlines),
+            userID: titaUserID.trimmingCharacters(in: .whitespacesAndNewlines)
         )
+        if let cached = cachedTitaClient, cached.key == key {
+            return cached.client
+        }
+        cachedTitaClient?.client.invalidate()
+        cachedTitaClient = nil
+        let client = try TitaClient(
+            baseURL: key.baseURL,
+            cookie: key.cookie,
+            tenantID: key.tenantID,
+            userID: key.userID
+        )
+        cachedTitaClient = (key, client)
+        return client
+    }
+
+    private func invalidateCachedTitaClient() {
+        cachedTitaClient?.client.invalidate()
+        cachedTitaClient = nil
     }
 
     @discardableResult
     func applyTitaCredentialInput(_ raw: String) -> TitaCredentialParser.ParsedCredential {
+        invalidateCachedTitaClient()
         let parsed = TitaCredentialParser.parse(raw)
         if !parsed.cookie.isEmpty {
             settings[ReportKeys.titaCookie] = parsed.cookie
@@ -817,6 +844,7 @@ final class WeeklyReportModel {
     }
 
     func clearTitaSession() {
+        invalidateCachedTitaClient()
         settings[ReportKeys.titaCookie] = ""
         settings[ReportKeys.titaTenantID] = ""
         settings[ReportKeys.titaUserID] = ""

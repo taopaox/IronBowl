@@ -1,6 +1,7 @@
 import AppKit
 import IronBowlKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 设置窗口：左边搜索 + 分组导航，右边灰底白卡（WorkBuddy 风格）。
 struct SettingsView: View {
@@ -179,6 +180,111 @@ struct GeneralSettings: View {
                 DSRow(plugin.title, description: plugin.isComingSoon ? "即将推出" : nil) {
                     DSToggle(isOn: Binding(get: { app.enabledIDs.contains(plugin.id) }, set: { app.setEnabled(plugin.id, $0) }))
                 }
+            }
+        }
+        DataBackupSettingsSection(app: app)
+    }
+}
+
+private struct DataBackupSettingsSection: View {
+    let app: AppModel
+    @State private var isBusy = false
+    @State private var feedback: (isError: Bool, text: String)?
+    @State private var pendingRestoreURL: URL?
+
+    var body: some View {
+        DSSection("数据备份与恢复", footer: "备份包包含全部设置、禅道日报与草稿、周报月报、待办备忘、随手便签、AI 对话历史以及自定义头像与图标；导入前会自动在本地留存当前库快照。") {
+            DSRow("导出数据备份", description: "打包为 .zip 压缩文件，方便迁移到新电脑或定期归档。") {
+                Button("导出备份包…") {
+                    exportBackup()
+                }
+                .buttonStyle(.dsSecondary)
+                .disabled(isBusy)
+            }
+            DSRow("从备份包恢复", description: "选择先前导出的 .zip 备份包覆盖恢复本地数据。") {
+                Button("导入并恢复…") {
+                    chooseRestoreFile()
+                }
+                .buttonStyle(.dsSecondary)
+                .disabled(isBusy)
+            }
+            DSRow("本地数据目录", description: AppPaths.supportDirectory.path) {
+                Button("在访达中打开") {
+                    NSWorkspace.shared.open(AppPaths.supportDirectory)
+                }
+                .buttonStyle(.dsGhost)
+            }
+            if let feedback {
+                DSBlockRow {
+                    DSBanner(feedback.isError ? .danger : .success, feedback.text)
+                }
+            }
+        }
+        .alert("确认从备份包恢复？", isPresented: Binding(
+            get: { pendingRestoreURL != nil },
+            set: { if !$0 { pendingRestoreURL = nil } }
+        )) {
+            Button("确认恢复", role: .destructive) {
+                if let url = pendingRestoreURL {
+                    pendingRestoreURL = nil
+                    performRestore(from: url)
+                }
+            }
+            Button("取消", role: .cancel) {
+                pendingRestoreURL = nil
+            }
+        } message: {
+            Text("恢复操作将使用「\(pendingRestoreURL?.lastPathComponent ?? "")」中的数据替换当前数据库内容（恢复前会自动留存本地安全快照）。")
+        }
+    }
+
+    private func exportBackup() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.zip]
+        let fmt = DateFormatter()
+        fmt.calendar = Calendar(identifier: .gregorian)
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        panel.nameFieldStringValue = "IronBowl-Backup-\(fmt.string(from: Date())).zip"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        isBusy = true
+        feedback = nil
+        let db = app.database
+        let version = Bundle.main.displayVersion
+        Task {
+            defer { isBusy = false }
+            do {
+                let manifest = try await DataBackupService.exportBackup(database: db, appVersion: version, to: url)
+                feedback = (false, "已导出备份包（设置 \(manifest.settingsCount) 项 · 待办 \(manifest.todosCount) 条 · 便签 \(manifest.notesCount) 条）")
+            } catch {
+                feedback = (true, error.localizedDescription)
+            }
+        }
+    }
+
+    private func chooseRestoreFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.zip]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        pendingRestoreURL = url
+    }
+
+    private func performRestore(from url: URL) {
+        isBusy = true
+        feedback = nil
+        let db = app.database
+        let migrations = app.plugins.flatMap(\.migrations)
+        Task {
+            defer { isBusy = false }
+            do {
+                let manifest = try await DataBackupService.restoreBackup(from: url, into: db, migrations: migrations)
+                app.reloadAllStoresAfterRestore()
+                feedback = (false, "恢复成功（设置 \(manifest.settingsCount) 项 · 待办 \(manifest.todosCount) 条 · 便签 \(manifest.notesCount) 条），所有视图已重载。")
+            } catch {
+                feedback = (true, error.localizedDescription)
             }
         }
     }

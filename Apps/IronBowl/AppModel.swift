@@ -396,4 +396,26 @@ final class AppModel {
         applyDockMode()
         if isOpen { NSApp.activate() }
     }
+
+    // MARK: 数据恢复后全量重载
+
+    func reloadAllStoresAfterRestore() {
+        settings.reload()
+        applyAppearance()
+        DS.fontScale = settings[AppKeys.fontScale]
+        userProfile.reloadAvatar()
+        workCalendar.reload()
+        context.todos.reload()
+        context.scratchpad.reload()
+        reminders.reloadHistory()
+        scheduler.recomputeNextRuns()
+        chat.loadThreads()
+        calendarModel?.syncExternalChanges()
+        applyDockMode()
+        for p in plugins where started.contains(p.id) {
+            p.stop()
+            started.remove(p.id)
+        }
+        syncPlugins()
+    }
 }

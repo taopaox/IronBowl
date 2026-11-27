@@ -18,7 +18,7 @@
 | `HomeChatActivityView.swift` | `HomeChatActivityView` | 可折叠命令/工具/思考/文件改动输出详情、退出码与原始 JSONL 事件查看器 |
 | `HomeChatCards.swift` | `HomeCardCatalog`, `HomeChatCardStrip`, `HomeCardPickerPopover` | 汇总核心卡片与已启用插件 `homeCards`，支持通过 `makeInteractiveChatCard(for:)` 在对话内渲染可操作活卡片与卡片选择器 |
 | `MenuBar.swift` | `MenuBarLabel`, `MenuPanel`, `MenuWorkHeroCard`, `MenuOvertimeQuickBar`, `MenuStatusCard`, `MenuShortcutTile` | 菜单栏透明底双行微缩仪表卡标签（调用 `MenuBarCardRenderer` 并传入 `MenuBarIcon` 插画图标），以及点击弹出的分层卡片式快捷面板（`AppLogo` 品牌图标与日期栏、今日上下班主卡及底部 `MenuOvertimeQuickBar` 快捷加班修改条、概览状态卡片网格与含「今天」「消息提醒」及各启用插件的快捷入口瓷砖，底栏提供「设置」「检查更新」「退出饭碗」） |
-| `SettingsView.swift` | `SettingsView` 及各核心设置页 | 左侧搜索、分组导航与底部版本号，右侧各核心设置页（「通用 → 个人资料」配置左下角自定义头像/Logo、显示姓名与个人标语，「通用 → 启动与显示」通过共享 `DSLaunchAtLoginRow` 配置开机自动启动并在需要系统授权时提供引导跳转，独立的「关于」页 `AboutSettings` 展示 `AppLogo` 品牌图标、版本信息、复制按钮及 Sparkle 2 软件更新与自动检查/下载开关） |
+| `SettingsView.swift` | `SettingsView` 及各核心设置页 | 左侧搜索、分组导航与底部版本号，右侧各核心设置页（「通用 → 个人资料」配置左下角自定义头像/Logo、显示姓名与个人标语，「通用 → 启动与显示」通过共享 `DSLaunchAtLoginRow` 配置开机自动启动并在需要系统授权时提供引导跳转，「通用 → 数据备份与恢复」支持一键导出/导入 `.zip` 备份包并自动重载全量状态，独立的「关于」页 `AboutSettings` 展示 `AppLogo` 品牌图标、版本信息、复制按钮及 Sparkle 2 软件更新与自动检查/下载开关） |
 
 ## 窗口与运行形态
 

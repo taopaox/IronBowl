@@ -14,6 +14,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `~/Library/Application Support/IronBowl/logs/zentao.log` | 禅道 HTTP 请求/响应调试日志（不含密码，超过 2MB 自动清空轮转） |
 | `~/Library/Application Support/IronBowl/ai-logos/` | AI 目录插件上传/抓取的本地 PNG Logo 与远程图标缓存（`AILogoStore`） |
 | `~/Library/Application Support/IronBowl/user-avatars/` | 用户自定义左下角头像/Logo 归一化 PNG 文件（`AppPaths.userAvatarsDirectory`、`UserProfileStore`） |
+| `~/Library/Application Support/IronBowl/backups/` | 一键恢复备份前自动留存的安全库快照 `pre-restore-*.sqlite`（保留最近 5 份，`DataBackupService`） |
 
 ## 数据库与迁移（`AppDatabase`）
 

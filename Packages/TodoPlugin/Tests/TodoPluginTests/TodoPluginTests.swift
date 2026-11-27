@@ -70,3 +70,33 @@ import ZentaoLogPlugin
     store.clearCompleted()
     #expect(store.items.count == 1)
 }
+
+@MainActor
+@Test func scratchpadStoreCRUDJSONAndDerivedTitle() throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "scratchpad-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let db = try AppDatabase(url: url, migrations: [])
+    let store = ScratchpadStore(database: db)
+
+    let first = try #require(store.createNote(title: "", content: "# 联调参数\n{\"b\":2,\"a\":1}", colorTag: .blue))
+    let second = try #require(store.createNote(title: "测试账号", content: "admin / 123456", colorTag: .green, isPinned: true))
+
+    // 置顶的排在前面
+    #expect(store.notes.map(\.id) == [second.id, first.id])
+    #expect(first.displayTitle == "联调参数")
+    #expect(ScratchpadStore.derivedTitle(title: "", content: "") == "无标题便签")
+
+    // JSON 美化与压缩
+    let pretty = try ScratchpadStore.formatJSON(#"{"b":2,"a":1}"#).get()
+    #expect(pretty.contains("\n"))
+    #expect(pretty.contains("\"a\" : 1"))
+    let minified = try ScratchpadStore.minifyJSON(pretty).get()
+    #expect(minified == #"{"a":1,"b":2}"#)
+
+    store.togglePinned(id: first.id)
+    #expect(store.notes.first?.id == first.id)
+
+    store.delete(id: second.id)
+    #expect(store.notes.count == 1)
+}

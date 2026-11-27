@@ -53,7 +53,7 @@ flowchart LR
 | `Packages/AIWebPlugin` | Swift Package | 20 个内置 AI 网站目录、可折叠侧栏子项、官方 Logo 与自定义图标抓取 |
 | `Packages/SchedulerPlugin` | Swift Package | 定时任务管理页面、任务编辑弹窗、执行日志审计与调度引擎生命周期控制 |
 | `Packages/ReportPlugin` | Swift Package | 按周/月查询每日日报（禅道/本地提交/草稿）、AI 与规则汇总生成周报和月报、预览编辑及 Markdown 导出 |
-| `Packages/TodoPlugin` | Swift Package | 待办与日程备忘管理、定时提醒与一键转入禅道日报草稿 |
+| `Packages/TodoPlugin` | Swift Package | 待办与日程备忘管理、定时提醒、随手便签与剪贴板暂存板、一键转入禅道日报草稿 |
 
 ## 插件协议与生命周期
 
@@ -89,6 +89,7 @@ flowchart LR
 | `webSessions` | `WebSessionManager` | 创建与复用受全局墓碑策略托管的网页会话 |
 | `scheduler` | `TaskScheduler` | 注册定时任务动作、写入默认定时任务并统一调度执行 |
 | `todos` | `TodoStore` | 读写跨应用共享的待办与备忘数据并触发跨进程同步 |
+| `scratchpad` | `ScratchpadStore` | 读写随手便签与剪贴板暂存数据 |
 | `openPlugin` | `(String) -> Void` | 跳转到指定插件主视图并激活主窗口 |
 | `openSettings` | `(String?) -> Void` | 打开设置窗口并定位到指定设置页 ID |
 
@@ -104,5 +105,6 @@ flowchart LR
 7. `MonthlyReportPlugin`（`report.monthly`，月报）
 8. `WorkLedgerPlugin`（`report.stats`，牛马账本）
 9. `TodoPlugin`（`todo`，待办）
+10. `ScratchpadPlugin`（`scratchpad`，随手便签）
 
 当应用版本升级引入新插件 ID 时，`AppModel` 会比对 `app.knownPlugins` 与 `app.enabledPlugins`，自动将新增插件加入已启用列表，避免老用户升级后看不到新插件。

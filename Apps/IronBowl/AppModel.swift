@@ -80,6 +80,7 @@ final class AppModel {
             MonthlyReportPlugin(),
             WorkLedgerPlugin(),
             TodoPlugin(),
+            ScratchpadPlugin(),
         ]
         self.plugins = plugins
         defer { AppModel.shared = self }

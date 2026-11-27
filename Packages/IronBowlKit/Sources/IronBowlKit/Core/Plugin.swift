@@ -278,6 +278,7 @@ public final class PluginContext {
     public let webSessions: WebSessionManager
     public let scheduler: TaskScheduler
     public let todos: TodoStore
+    public let scratchpad: ScratchpadStore
     /// 打开主窗口并切到某个插件页。
     public let openPlugin: (String) -> Void
     /// 打开设置窗口，可指定页面 id。
@@ -292,6 +293,7 @@ public final class PluginContext {
         webSessions: WebSessionManager? = nil,
         scheduler: TaskScheduler? = nil,
         todos: TodoStore? = nil,
+        scratchpad: ScratchpadStore? = nil,
         openPlugin: @escaping (String) -> Void,
         openSettings: @escaping (String?) -> Void
     ) {
@@ -310,6 +312,7 @@ public final class PluginContext {
             openSettings: openSettings
         )
         self.todos = todos ?? TodoStore(database: database)
+        self.scratchpad = scratchpad ?? ScratchpadStore(database: database)
         self.openPlugin = openPlugin
         self.openSettings = openSettings
     }

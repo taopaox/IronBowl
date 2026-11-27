@@ -55,7 +55,7 @@ public nonisolated final class AppDatabase: Sendable {
         try migrator.migrate(pool)
     }
 
-    static let coreMigrations: [DatabaseMigration] = [
+    public static let coreMigrations: [DatabaseMigration] = [
         DatabaseMigration("core.v1") { db in
             try db.create(table: "setting") { t in
                 t.primaryKey("key", .text)
@@ -198,6 +198,17 @@ public nonisolated final class AppDatabase: Sendable {
                 t.column("loggedDate", .text)
                 t.column("zentaoObjectType", .text)
                 t.column("zentaoObjectID", .integer)
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull().indexed()
+            }
+        },
+        DatabaseMigration("core.v9") { db in
+            try db.create(table: "scratchpadNote") { t in
+                t.primaryKey("id", .text)
+                t.column("title", .text).notNull()
+                t.column("content", .text).notNull()
+                t.column("colorTag", .text).notNull().defaults(to: "amber")
+                t.column("isPinned", .boolean).notNull().defaults(to: false)
                 t.column("createdAt", .datetime).notNull()
                 t.column("updatedAt", .datetime).notNull().indexed()
             }

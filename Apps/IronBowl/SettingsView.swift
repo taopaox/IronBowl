@@ -20,6 +20,7 @@ struct SettingsView: View {
             SettingsPage(id: "worktime", title: "工作时间", systemImage: "clock") { AnyView(WorkTimeSettings(app: app)) },
             SettingsPage(id: "web", title: "网页与内存", systemImage: "globe") { AnyView(WebSettings(app: app)) },
             SettingsPage(id: "ai", title: "AI 提供者", systemImage: "sparkles") { AnyView(ProviderSettings(app: app)) },
+            SettingsPage(id: "about", title: "关于", systemImage: "info.circle") { AnyView(AboutSettings(app: app)) },
         ])
         let plugins = app.enabledPlugins.compactMap { p -> NavGroup? in
             let pages = p.settingsPages
@@ -109,7 +110,6 @@ struct SettingsView: View {
 
 struct GeneralSettings: View {
     @Bindable var app: AppModel
-    @State private var copiedVersion = false
 
     var body: some View {
         let s = app.settings
@@ -132,6 +132,16 @@ struct GeneralSettings: View {
                 }
             }
         }
+    }
+}
+
+// MARK: 关于
+
+struct AboutSettings: View {
+    let app: AppModel
+    @State private var copiedVersion = false
+
+    var body: some View {
         DSSection("关于") {
             DSBlockRow {
                 VStack(alignment: .leading, spacing: 10) {

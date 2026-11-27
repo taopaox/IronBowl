@@ -14,7 +14,7 @@
 
 - **`defaultWorkHours`**：计算公式为 $\max(0, (\text{下班分钟} - \text{上班分钟} - \text{午休分钟}) / 60)$，默认 8 小时。
 - **`workEnd(on:)`**：返回指定日期的正常下班 `Date`（仅含弹性规则顺延，不含加班），专供禅道日志「正常/加班提交拆条分界线」使用。当天有上班打卡记录时按弹性规则顺延（见下节），否则就是 `work.end`。
-- **`overtimeHours(on:)` / `setOvertimeHours(_:on:)`**：读写指定日期的计划加班小时数（按 `0.5h` 步进限制在 `0...12`，`<= 0` 时清除），持久化在核心数据库 `dailyOvertime` 表（`core.v4` 迁移），写入后通过 `com.taopaox.ironbowl.holidaysDidChange` 通知跨进程刷新。
+- **`overtimeHours(on:)` / `setOvertimeHours(_:on:)` / `toggleOvertimeHours(_:on:)` / `adjustOvertimeHours(by:on:)`**：读写、预设切换与增量微调指定日期的计划加班小时数（步进常量 `overtimeStepHours = 0.5`，上限 `maxOvertimeHours = 12`，`<= 0` 时清除），持久化在核心数据库 `dailyOvertime` 表（`core.v4` 迁移），写入后通过 `com.taopaox.ironbowl.holidaysDidChange` 通知跨进程刷新；同时供主菜单栏快捷面板 `MenuOvertimeQuickBar`、首页日报交互卡片与禅道日志页共享使用。
 - **`effectiveWorkEnd(on:)` / `offWorkTimeText(on:)`**：在 `workEnd(on:)` 的基础上顺延当日 `overtimeHours(on:)` 小时，得到实际下班时刻（及格式化文字，跨零点时显示 `次日 HH:mm`），供主工作台侧栏「距下班倒计时」、首页「下班卡」、菜单栏「离下班还有多久」以及禅道日志工时卡「XX:XX 下班」标签使用。
 - **`onWorkTimeText(on:)`**：返回当日上班时间文字，有打卡记录时显示实际打卡时间（`HH:mm`），否则显示配置的固定上班时间（`work.start`），供侧栏今日卡片展示。
 - **`workStart(on:)`**：同样按弹性偏移折算后的上班时刻，侧栏今日卡片与状态栏面板主卡的下班进度条以它为起点。

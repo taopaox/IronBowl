@@ -255,6 +255,46 @@ private func fakeDws(auth: String, attendance: String = #"{"ok":true,"data":{"re
     #expect(cal.scheduleText(on: day) == "08:30–17:30")
 }
 
+@MainActor @Test func overtimeToggleAndAdjustFollowStepAndBounds() throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "ironbowl-overtime-toggle-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let db = try AppDatabase(url: url, migrations: [])
+    let settings = SettingsStore(database: db)
+    settings[WorkCalendar.startKey] = "08:30"
+    settings[WorkCalendar.endKey] = "17:30"
+    let cal = WorkCalendar(database: db, settings: settings)
+    let day = time("2026-11-25", "12:00")
+
+    // toggle 选中、再点清零、切到其他预设
+    cal.toggleOvertimeHours(2, on: day)
+    #expect(cal.overtimeHours(on: day) == 2)
+    #expect(cal.effectiveWorkEnd(on: day) == time("2026-11-25", "19:30"))
+
+    cal.toggleOvertimeHours(2, on: day)
+    #expect(cal.overtimeHours(on: day) == 0)
+    #expect(cal.effectiveWorkEnd(on: day) == time("2026-11-25", "17:30"))
+
+    cal.toggleOvertimeHours(3, on: day)
+    #expect(cal.overtimeHours(on: day) == 3)
+    cal.toggleOvertimeHours(1, on: day)
+    #expect(cal.overtimeHours(on: day) == 1)
+    #expect(cal.effectiveWorkEnd(on: day) == time("2026-11-25", "18:30"))
+
+    // 步进增减与上下限钳制
+    cal.adjustOvertimeHours(by: WorkCalendar.overtimeStepHours, on: day)
+    #expect(cal.overtimeHours(on: day) == 1.5)
+    #expect(cal.effectiveWorkEnd(on: day) == time("2026-11-25", "19:00"))
+
+    cal.adjustOvertimeHours(by: -WorkCalendar.overtimeStepHours, on: day)
+    #expect(cal.overtimeHours(on: day) == 1)
+    cal.adjustOvertimeHours(by: -2, on: day)
+    #expect(cal.overtimeHours(on: day) == 0)
+
+    cal.setOvertimeHours(WorkCalendar.maxOvertimeHours, on: day)
+    cal.adjustOvertimeHours(by: WorkCalendar.overtimeStepHours, on: day)
+    #expect(cal.overtimeHours(on: day) == WorkCalendar.maxOvertimeHours)
+}
+
 @MainActor @Test func workProgressComputesRatioAcrossWorkday() throws {
     let url = FileManager.default.temporaryDirectory.appending(path: "ironbowl-progress-\(UUID().uuidString).sqlite")
     defer { try? FileManager.default.removeItem(at: url) }

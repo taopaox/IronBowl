@@ -193,6 +193,9 @@ public final class WorkCalendar {
         time(settings[Self.endKey], on: date).map { $0.addingTimeInterval(flexOffset(on: date)) }
     }
 
+    public static let maxOvertimeHours: Double = 12
+    public static let overtimeStepHours: Double = 0.5
+
     /// 某天计划加班的小时数。
     public func overtimeHours(on date: Date = Date()) -> Double {
         dailyOvertimes[Self.dayString(date)] ?? 0
@@ -201,7 +204,7 @@ public final class WorkCalendar {
     /// 设置某天的计划加班小时数（按 0.5h 步进限制在 0...12）；<= 0 时清除。
     public func setOvertimeHours(_ hours: Double, on date: Date = Date()) {
         let rounded = (hours * 2).rounded() / 2
-        let clamped = min(12, max(0, rounded))
+        let clamped = min(Self.maxOvertimeHours, max(0, rounded))
         let key = Self.dayString(date)
         let current = dailyOvertimes[key] ?? 0
         guard abs(current - clamped) > 0.001 else { return }
@@ -217,6 +220,20 @@ public final class WorkCalendar {
         }
         reload()
         notifyExternalChange()
+    }
+
+    /// 切换某天的计划加班时长：若当前已等于目标值则清零，否则设为目标值。
+    public func toggleOvertimeHours(_ hours: Double, on date: Date = Date()) {
+        if abs(overtimeHours(on: date) - hours) < 0.01 {
+            setOvertimeHours(0, on: date)
+        } else {
+            setOvertimeHours(hours, on: date)
+        }
+    }
+
+    /// 按指定增量微调某天的计划加班时长（受 0.5h 步进与 0...12h 上下限约束）。
+    public func adjustOvertimeHours(by delta: Double, on date: Date = Date()) {
+        setOvertimeHours(overtimeHours(on: date) + delta, on: date)
     }
 
     /// 某天的实际下班时刻（正常下班时刻 + 计划加班时长）。供界面展示、倒计时与进度条使用。

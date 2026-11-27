@@ -32,10 +32,10 @@ enum DockMode: String, Codable, Sendable, CaseIterable, Identifiable {
 }
 
 /// 菜单栏独立 Logo 左键点击行为。
-enum MenuBarLogoAction: String, Codable, Sendable, CaseIterable, Identifiable {
+nonisolated enum MenuBarLogoAction: String, Codable, Sendable, CaseIterable, Identifiable {
     case toggleHome
-    case openHome
     case openMainWindow
+    case showMainWindow
     case unreadOrHome
     case openReminders
     case commandPalette
@@ -43,11 +43,21 @@ enum MenuBarLogoAction: String, Codable, Sendable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        if raw == "openHome" {
+            self = .showMainWindow
+            return
+        }
+        self = Self(rawValue: raw) ?? .toggleHome
+    }
+
     var displayName: String {
         switch self {
         case .toggleHome: "打开 / 收起首页"
-        case .openHome: "仅打开首页"
         case .openMainWindow: "打开 / 收起主窗口"
+        case .showMainWindow: "仅打开主窗口"
         case .unreadOrHome: "有未读看提醒，无未读进首页"
         case .openReminders: "打开消息提醒"
         case .commandPalette: "打开命令面板与搜索"
@@ -58,8 +68,8 @@ enum MenuBarLogoAction: String, Codable, Sendable, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .toggleHome: "左键秒开首页「今天」，已在前台首页时再点一次收起；右键弹出快捷面板。"
-        case .openHome: "左键直接打开并前置首页「今天」，再次点击不会收起窗口；右键弹出快捷面板。"
         case .openMainWindow: "左键打开主窗口并保留上次页面，已在前台时再点一次收起；右键弹出快捷面板。"
+        case .showMainWindow: "左键直接打开并前置主窗口并保留当前页面状态，再次点击不会收起窗口；右键弹出快捷面板。"
         case .unreadOrHome: "有未读消息时直接跳转「消息提醒」，无未读时打开或收起首页；右键弹出快捷面板。"
         case .openReminders: "左键直接打开「消息提醒」中心；右键弹出快捷面板。"
         case .commandPalette: "左键呼出全局命令面板与全文搜索（同 ⌃⌥⌘K）；右键弹出快捷面板。"
@@ -333,10 +343,10 @@ final class AppModel {
         switch action {
         case .toggleHome:
             toggleMainWindow(targetPluginID: Self.homeID)
-        case .openHome:
-            open(plugin: Self.homeID)
         case .openMainWindow:
             toggleMainWindow(targetPluginID: nil)
+        case .showMainWindow:
+            showMainWindow()
         case .unreadOrHome:
             if reminders.unreadCount > 0 {
                 open(plugin: Self.remindersID)

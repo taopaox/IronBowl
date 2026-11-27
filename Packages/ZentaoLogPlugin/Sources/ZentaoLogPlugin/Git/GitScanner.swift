@@ -39,6 +39,53 @@ public nonisolated struct RepoWorkspaceStatus: Sendable, Identifiable, Hashable,
     public var needsAttention: Bool { uncommittedCount > 0 || unpushedCount > 0 }
 }
 
+/// 单个仓库在指定周期内的提交统计。
+public nonisolated struct GitRepoCommitCount: Sendable, Equatable, Codable, Identifiable {
+    public let name: String
+    public let commits: Int
+    public var id: String { name }
+
+    public init(name: String, commits: Int) {
+        self.name = name
+        self.commits = commits
+    }
+}
+
+/// 指定时间区间内的 Git 代码提交统计（用于季度/年度述职与牛马年度报告）。
+public nonisolated struct GitPeriodStats: Sendable, Equatable, Codable {
+    public let commitCount: Int
+    public let activeRepoCount: Int
+    public let addedLines: Int
+    public let deletedLines: Int
+    public let topRepos: [GitRepoCommitCount]
+    public let busiestMonth: String?
+
+    public static let empty = GitPeriodStats(
+        commitCount: 0,
+        activeRepoCount: 0,
+        addedLines: 0,
+        deletedLines: 0,
+        topRepos: [],
+        busiestMonth: nil
+    )
+
+    public init(
+        commitCount: Int,
+        activeRepoCount: Int,
+        addedLines: Int,
+        deletedLines: Int,
+        topRepos: [GitRepoCommitCount],
+        busiestMonth: String?
+    ) {
+        self.commitCount = commitCount
+        self.activeRepoCount = activeRepoCount
+        self.addedLines = addedLines
+        self.deletedLines = deletedLines
+        self.topRepos = topRepos
+        self.busiestMonth = busiestMonth
+    }
+}
+
 public nonisolated enum GitScanner {
     static let git = "/usr/bin/git"
 
@@ -182,6 +229,114 @@ public nonisolated enum GitScanner {
             uncommittedCount: uncommittedCount,
             unpushedCount: unpushedCount,
             hasUpstream: hasUpstream
+        )
+    }
+
+    /// 统计 `[startDate, endDate]`（`yyyy-MM-dd` 闭区间）内的跨仓库去重 Git 提交、增删行数及最活跃月份。
+    @concurrent
+    public static func periodStats(
+        repos: [String],
+        authorEmail: String,
+        startDate: String,
+        endDate: String
+    ) async -> GitPeriodStats {
+        let dayFmt = DateFormatter()
+        dayFmt.calendar = Calendar(identifier: .gregorian)
+        dayFmt.locale = Locale(identifier: "en_US_POSIX")
+        dayFmt.timeZone = .current
+        dayFmt.dateFormat = "yyyy-MM-dd"
+
+        guard !repos.isEmpty,
+              let start = dayFmt.date(from: startDate),
+              let endDay = dayFmt.date(from: endDate),
+              start <= endDay else {
+            return .empty
+        }
+        let cal = Calendar(identifier: .gregorian)
+        let startBound = cal.startOfDay(for: start)
+        let endBound = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: endDay)) ?? endDay
+        let iso = ISO8601DateFormatter()
+        iso.timeZone = .current
+        let since = iso.string(from: startBound)
+        let until = iso.string(from: endBound)
+
+        let rawActivities = await withTaskGroup(of: (Int, RepoActivity?).self) { group in
+            for (i, repo) in repos.enumerated() {
+                group.addTask {
+                    var args = ["-C", repo, "log", "--all", "--no-merges"]
+                    if !authorEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        args.append("--author=\(authorEmail)")
+                    }
+                    args += [
+                        "--since=\(since)", "--until=\(until)",
+                        "--date=iso-strict", "--format=%x1e%H%x1f%aI%x1f%s", "--numstat",
+                    ]
+                    guard let r = try? await Shell.run(git, args, timeout: 45), r.status == 0 else {
+                        return (i, nil)
+                    }
+                    let commits = parseLog(r.stdout).filter { $0.date >= startBound && $0.date < endBound }
+                    return (i, commits.isEmpty ? nil : RepoActivity(repoPath: repo, commits: commits))
+                }
+            }
+            var collected: [(Int, RepoActivity?)] = []
+            for await item in group { collected.append(item) }
+            return collected.sorted { $0.0 < $1.0 }.compactMap(\.1)
+        }
+
+        return aggregatePeriodStats(rawActivities)
+    }
+
+    /// 对多个仓库的提交活动按哈希去重后聚合周期统计（纯函数，便于单测）。
+    public static func aggregatePeriodStats(_ activities: [RepoActivity]) -> GitPeriodStats {
+        var seen = Set<String>()
+        var totalCommits = 0
+        var added = 0
+        var deleted = 0
+        var repoCounts: [String: Int] = [:]
+        var monthCounts: [String: Int] = [:]
+
+        let monthFmt = DateFormatter()
+        monthFmt.calendar = Calendar(identifier: .gregorian)
+        monthFmt.locale = Locale(identifier: "en_US_POSIX")
+        monthFmt.timeZone = .current
+        monthFmt.dateFormat = "yyyy-MM"
+
+        for act in activities {
+            let unique = act.commits.filter { seen.insert($0.hash).inserted }
+            guard !unique.isEmpty else { continue }
+            repoCounts[act.repoName, default: 0] += unique.count
+            for commit in unique {
+                totalCommits += 1
+                for f in commit.files {
+                    added += f.added
+                    deleted += f.deleted
+                }
+                let mk = monthFmt.string(from: commit.date)
+                monthCounts[mk, default: 0] += 1
+            }
+        }
+
+        let topRepos = repoCounts.keys
+            .sorted {
+                let lc = repoCounts[$0] ?? 0
+                let rc = repoCounts[$1] ?? 0
+                if lc != rc { return lc > rc }
+                return $0.localizedStandardCompare($1) == .orderedAscending
+            }
+            .map { GitRepoCommitCount(name: $0, commits: repoCounts[$0] ?? 0) }
+
+        let busiestMonth = monthCounts.max { lhs, rhs in
+            if lhs.value != rhs.value { return lhs.value < rhs.value }
+            return lhs.key > rhs.key
+        }?.key
+
+        return GitPeriodStats(
+            commitCount: totalCommits,
+            activeRepoCount: repoCounts.count,
+            addedLines: added,
+            deletedLines: deleted,
+            topRepos: topRepos,
+            busiestMonth: busiestMonth
         )
     }
 

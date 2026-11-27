@@ -79,6 +79,7 @@ final class AppModel {
             ReportPlugin(),
             MonthlyReportPlugin(),
             WorkLedgerPlugin(),
+            AnnualReviewPlugin(),
             TodoPlugin(),
             ScratchpadPlugin(),
         ]

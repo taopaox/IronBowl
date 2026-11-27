@@ -1,12 +1,15 @@
 # 周报与月报插件（`ReportPlugin` & `MonthlyReportPlugin`）
 
-`Packages/ReportPlugin` 同时提供三个插件——**周报**（`ReportPlugin`，ID：`report`）、**月报**（`MonthlyReportPlugin`，ID：`report.monthly`）与 **牛马账本**（`WorkLedgerPlugin`，ID：`report.stats`），在主窗口左侧栏通过 `sidebarSection = "汇报"` 与 `ZentaoLogPlugin`（「日报」）共同归入「汇报」分组。周报与月报复用同一套日报查询与生成底座，分别按周（周一至周日）或按自然月（1 日至月末）汇总每日工作日报并生成结构化报告；牛马账本则按月/年汇总工时、加班、钉钉打卡作息与项目投入占比。
+`Packages/ReportPlugin` 同时提供四个插件——**周报**（`ReportPlugin`，ID：`report`）、**月报**（`MonthlyReportPlugin`，ID：`report.monthly`）、**牛马账本**（`WorkLedgerPlugin`，ID：`report.stats`）与 **季度/年报**（`AnnualReviewPlugin`，ID：`report.annual`），在主窗口左侧栏通过 `sidebarSection = "汇报"` 与 `ZentaoLogPlugin`（「日报」）共同归入「汇报」分组。周报与月报复用同一套日报查询与生成底座，分别按周（周一至周日）或按自然月（1 日至月末）汇总每日工作日报并生成结构化报告；牛马账本按月/年汇总工时、加班、钉钉打卡作息与项目投入占比；季度/年报则聚合月报、账本工时与本地 Git 代码贡献生成季度/半年度/年度述职报告及可导出图片的「牛马年度报告」。
 
 ## 模块组成
 
 | 文件 | 核心符号 | 职责 |
 | :--- | :--- | :--- |
-| `ReportPlugin.swift` | `ReportPlugin`, `MonthlyReportPlugin`, `WorkLedgerPlugin` | 三个独立侧边栏插件入口：周报（ID：`report`，锁定 `.weekly`，含「Tita 对接」设置页）、月报（ID：`report.monthly`，锁定 `.monthly`）与牛马账本（ID：`report.stats`） |
+| `ReportPlugin.swift` | `ReportPlugin`, `MonthlyReportPlugin`, `WorkLedgerPlugin`, `AnnualReviewPlugin` | 四个独立侧边栏插件入口：周报（ID：`report`）、月报（ID：`report.monthly`）、牛马账本（ID：`report.stats`）与季度/年报（ID：`report.annual`） |
+| `Model/ReviewRange.swift` | `ReviewScopeKind`, `ReviewRange` | 季度（Q1–Q4）、半年度（H1/H2）与全年周期范围计算与切换 |
+| `Generator/AnnualReviewGenerator.swift` | `AnnualReviewStyle`, `AnnualReviewGenerator` | 述职晋升 STAR / OKR 复盘 / 精简量化提纲三种风格 AI 与规则生成 |
+| `AnnualReviewModel.swift` & `Views/AnnualReviewView.swift` & `Views/AnnualPosterSheet.swift` | `AnnualReviewModel`, `AnnualReviewView`, `AnnualPosterSheet` | 季度与年度述职工作区及支持导出 2x PNG 的「牛马年度报告」卡片 |
 | `WorkLedgerModel.swift` | `WorkLedgerModel`, `WorkLedgerSummary`, `LedgerPeriodMode`, `LedgerDayStat`, `LedgerAnomalyDay`, `LedgerMonthStat`, `LedgerProjectStat` | 按月/年汇总禅道工时、本地加班记录、钉钉上下班打卡与真实在岗时长、缺卡/迟到早退核对及项目工时占比 |
 | `Views/WorkLedgerView.swift` | `WorkLedgerView` | 「牛马账本」工时热力日历、年度柱状分布、在岗 vs 填报时长对比、考勤异常核对与项目投入占比看板（支持一键同步区间钉钉考勤） |
 | `ReportChatHandler.swift` | `ReportChatHandler`, `ReportChatIntent` | 识别首页对话中的生成/查看周报或月报指令（过滤代码/调试类提问） |

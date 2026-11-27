@@ -83,3 +83,27 @@ func localZentaoEfforts() async throws {
     #expect(localStatus.unpushedCount == 0)
     #expect(localStatus.needsAttention)
 }
+
+@Test func aggregatesGitPeriodStatsWithDeduplicationAndBusiestMonth() {
+    let cal = Calendar(identifier: .gregorian)
+    let d1 = cal.date(from: DateComponents(year: 2026, month: 10, day: 12, hour: 10))!
+    let d2 = cal.date(from: DateComponents(year: 2026, month: 11, day: 5, hour: 11))!
+    let d3 = cal.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 15))!
+
+    let c1 = GitCommit(hash: "aaa", date: d1, subject: "feat: init", files: [GitFileChange(path: "A.swift", added: 100, deleted: 10)])
+    let c2 = GitCommit(hash: "bbb", date: d2, subject: "feat: core", files: [GitFileChange(path: "B.swift", added: 50, deleted: 5)])
+    let c3 = GitCommit(hash: "ccc", date: d3, subject: "fix: bug", files: [GitFileChange(path: "C.swift", added: 20, deleted: 2)])
+    // c2 在第二个目录中以相同哈希重复出现，应去重
+    let acts = [
+        RepoActivity(repoPath: "/work/repoA", commits: [c1, c2]),
+        RepoActivity(repoPath: "/work/repoB", commits: [c2, c3]),
+    ]
+
+    let stats = GitScanner.aggregatePeriodStats(acts)
+    #expect(stats.commitCount == 3)
+    #expect(stats.activeRepoCount == 2)
+    #expect(stats.addedLines == 170)
+    #expect(stats.deletedLines == 17)
+    #expect(stats.busiestMonth == "2026-11")
+    #expect(stats.topRepos.first == GitRepoCommitCount(name: "repoA", commits: 2))
+}

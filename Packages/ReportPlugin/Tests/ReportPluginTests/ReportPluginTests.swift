@@ -1461,3 +1461,120 @@ import Testing
     await context.scheduler.runNow(taskID: ReportPlugin.defaultAutoGenerateTaskID)
     #expect(weeklyPlugin.model?.reportContent == "手工精修周报内容")
 }
+
+@MainActor @Test func reviewRangeAnnualReviewGeneratorAndStoreWorkEndToEnd() async throws {
+    let cal = Calendar(identifier: .gregorian)
+    let nov = cal.date(from: DateComponents(year: 2026, month: 11, day: 27))!
+
+    let q4 = ReviewRange.containing(nov, scopeKind: .quarterly)
+    #expect(q4.periodKey == "2026-Q4")
+    #expect(q4.title == "2026年第4季度")
+    #expect(q4.months == [10, 11, 12])
+    #expect(q4.shifted(by: 1).periodKey == "2027-Q1")
+    #expect(q4.shifted(by: -1).periodKey == "2026-Q3")
+    #expect(ReviewRange.fromPeriodKey("2026-Q4") == q4)
+
+    let h2 = ReviewRange.containing(nov, scopeKind: .halfYearly)
+    #expect(h2.periodKey == "2026-H2")
+    #expect(h2.months == [7, 8, 9, 10, 11, 12])
+    #expect(ReviewRange.fromPeriodKey("2026-H2") == h2)
+
+    let y = ReviewRange.containing(nov, scopeKind: .yearly)
+    #expect(y.periodKey == "2026")
+    #expect(y.monthKeys.count == 12)
+    #expect(y.startDateString == "2026-01-01")
+    #expect(y.endDateString == "2026-12-31")
+    #expect(ReviewRange.fromPeriodKey("2026") == y)
+
+    let url = FileManager.default.temporaryDirectory.appending(path: "review-store-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let migrations = ZentaoLogPlugin().migrations + ReportMigrations.all
+    let db = try AppDatabase(url: url, migrations: migrations)
+    let settings = SettingsStore(database: db)
+    let store = ReportStore(db: db)
+
+    let m1 = MonthlyReportRecord(
+        monthKey: "2026-11",
+        periodStart: "2026-11-01",
+        periodEnd: "2026-11-30",
+        title: "2026年11月月报",
+        content: "## 本月重点成果\n\n1. 完成饭碗架构升级",
+        extraNotes: "",
+        style: WeeklyReportStyle.standard.rawValue,
+        providerName: "本地规则汇总",
+        totalHours: 160,
+        generatedAt: Date(),
+        updatedAt: Date()
+    )
+    store.saveMonthly(m1)
+    #expect(store.monthlyReports(matchingMonthKeys: y.monthKeys).count == 1)
+
+    let ledger = WorkLedgerSummary.computeSummary(
+        year: 2026,
+        dates: [nov],
+        workdayFlags: ["2026-11-27": true],
+        itemsByDate: [
+            "2026-11-27": [DailyLogItem(id: "1", date: "2026-11-27", taskID: 1, taskTitle: "述职", projectID: 1, projectName: "饭碗", hours: 10, work: "开发年报", isOvertime: true, isDraft: false)],
+        ],
+        clockInsByDate: [:],
+        plannedOvertimeByDate: ["2026-11-27": 2]
+    )
+    let git = GitPeriodStats(
+        commitCount: 42,
+        activeRepoCount: 2,
+        addedLines: 3200,
+        deletedLines: 450,
+        topRepos: [GitRepoCommitCount(name: "IronBowl", commits: 40)],
+        busiestMonth: "2026-11"
+    )
+    let input = AnnualReviewInput(
+        range: y,
+        style: .performanceSTAR,
+        ledgerSummary: ledger,
+        monthlyReports: [m1],
+        gitStats: git,
+        extraNotes: "主导完成年度重构",
+        promptTemplate: AnnualReviewGenerator.defaultPrompt
+    )
+    let out = await AnnualReviewGenerator.generate(input, provider: nil)
+    #expect(!out.usedAI)
+    #expect(out.content.contains("## 量化工作概览"))
+    #expect(out.content.contains("42 次"))
+    #expect(out.content.contains("完成饭碗架构升级"))
+    #expect(out.content.contains("主导完成年度重构"))
+
+    let reviewRec = ReviewReportRecord(
+        periodKey: y.periodKey,
+        scopeKind: y.scopeKind.rawValue,
+        periodStart: y.startDateString,
+        periodEnd: y.endDateString,
+        title: out.title,
+        content: out.content,
+        extraNotes: "主导完成年度重构",
+        style: AnnualReviewStyle.performanceSTAR.rawValue,
+        providerName: "本地规则汇总",
+        totalHours: ledger.totalHours,
+        overtimeHours: ledger.overtimeHours,
+        commitCount: git.commitCount,
+        generatedAt: Date(),
+        updatedAt: Date()
+    )
+    store.saveReview(reviewRec)
+    #expect(store.reviewReport(forPeriodKey: "2026")?.commitCount == 42)
+    #expect(store.recentReviews().count == 1)
+
+    let context = PluginContext(
+        database: db,
+        settings: settings,
+        reminders: ReminderCenter(database: db),
+        workCalendar: WorkCalendar(database: db, settings: settings),
+        providers: AIProviderStore(settings: settings),
+        openPlugin: { _ in },
+        openSettings: { _ in }
+    )
+    let plugin = AnnualReviewPlugin()
+    plugin.start(context: context)
+    #expect(plugin.canHandleChatIntent("生成今年年报"))
+    #expect(!plugin.canHandleChatIntent("年报代码怎么报错了"))
+    plugin.stop()
+}

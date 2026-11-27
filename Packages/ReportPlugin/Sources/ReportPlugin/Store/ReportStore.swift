@@ -87,6 +87,8 @@ enum ReportKeys {
     static let titaWeeklyTemplateID = SettingKey<Int>("report.tita.weeklyTemplateID", default: 1006)
     static let titaMonthlyTemplateID = SettingKey<Int>("report.tita.monthlyTemplateID", default: 1007)
     static let titaDefaultMood = SettingKey<Int>("report.tita.defaultMood", default: 0)
+    static let annualStyle = SettingKey<AnnualReviewStyle>("report.annual.style", default: .performanceSTAR)
+    static let annualPrompt = SettingKey<String>("report.annual.prompt", default: AnnualReviewGenerator.defaultPrompt)
 }
 
 /// 按周保存的周报持久化记录。
@@ -120,6 +122,27 @@ nonisolated struct MonthlyReportRecord: Sendable, Hashable, Codable, Identifiabl
     var style: String
     var providerName: String
     var totalHours: Double
+    var generatedAt: Date
+    var updatedAt: Date
+}
+
+/// 按季度 / 半年度 / 全年保存的述职总结记录。
+nonisolated struct ReviewReportRecord: Sendable, Hashable, Codable, Identifiable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "reviewReport"
+
+    var id: String { periodKey }
+    var periodKey: String
+    var scopeKind: String
+    var periodStart: String
+    var periodEnd: String
+    var title: String
+    var content: String
+    var extraNotes: String
+    var style: String
+    var providerName: String
+    var totalHours: Double
+    var overtimeHours: Double
+    var commitCount: Int
     var generatedAt: Date
     var updatedAt: Date
 }
@@ -159,7 +182,27 @@ public nonisolated enum ReportMigrations {
         try db.create(index: "idx_monthlyReport_updatedAt", on: "monthlyReport", columns: ["updatedAt"])
     }
 
-    public static let all: [DatabaseMigration] = [weekly, monthly]
+    public static let review = DatabaseMigration("report.v3") { db in
+        try db.create(table: "reviewReport") { t in
+            t.primaryKey("periodKey", .text)
+            t.column("scopeKind", .text).notNull()
+            t.column("periodStart", .text).notNull()
+            t.column("periodEnd", .text).notNull()
+            t.column("title", .text).notNull()
+            t.column("content", .text).notNull()
+            t.column("extraNotes", .text).notNull().defaults(to: "")
+            t.column("style", .text).notNull()
+            t.column("providerName", .text).notNull().defaults(to: "")
+            t.column("totalHours", .double).notNull().defaults(to: 0)
+            t.column("overtimeHours", .double).notNull().defaults(to: 0)
+            t.column("commitCount", .integer).notNull().defaults(to: 0)
+            t.column("generatedAt", .datetime).notNull()
+            t.column("updatedAt", .datetime).notNull()
+        }
+        try db.create(index: "idx_reviewReport_updatedAt", on: "reviewReport", columns: ["updatedAt"])
+    }
+
+    public static let all: [DatabaseMigration] = [weekly, monthly, review]
 }
 
 /// 周报/月报数据库读写。
@@ -225,6 +268,43 @@ nonisolated struct ReportStore {
         (try? db.pool.read { db in
             try MonthlyReportRecord
                 .order(Column("monthKey").desc)
+                .limit(limit)
+                .fetchAll(db)
+        }) ?? []
+    }
+
+    func monthlyReports(matchingMonthKeys monthKeys: [String]) -> [MonthlyReportRecord] {
+        guard !monthKeys.isEmpty else { return [] }
+        return (try? db.pool.read { db in
+            try MonthlyReportRecord
+                .filter(monthKeys.contains(Column("monthKey")))
+                .order(Column("monthKey").asc)
+                .fetchAll(db)
+        }) ?? []
+    }
+
+    func reviewReport(forPeriodKey periodKey: String) -> ReviewReportRecord? {
+        try? db.pool.read { db in
+            try ReviewReportRecord.filter(Column("periodKey") == periodKey).fetchOne(db)
+        }
+    }
+
+    func saveReview(_ record: ReviewReportRecord) {
+        try? db.pool.write { db in
+            try record.save(db)
+        }
+    }
+
+    func deleteReview(periodKey: String) {
+        _ = try? db.pool.write { db in
+            try ReviewReportRecord.filter(Column("periodKey") == periodKey).deleteAll(db)
+        }
+    }
+
+    func recentReviews(limit: Int = 40) -> [ReviewReportRecord] {
+        (try? db.pool.read { db in
+            try ReviewReportRecord
+                .order(Column("periodKey").desc)
                 .limit(limit)
                 .fetchAll(db)
         }) ?? []

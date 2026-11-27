@@ -59,6 +59,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | :--- | :--- | :--- | :--- | :--- |
 | `report.v1` | `weeklyReport` | `weekStart` (TEXT) | `weekEnd`, `title`, `content`, `extraNotes`, `style`, `providerName`, `totalHours`, `generatedAt`, `updatedAt`（索引） | 按周（周一日期 `yyyy-MM-dd`）持久化已生成或手动编辑的周报内容 |
 | `report.v2` | `monthlyReport` | `monthKey` (TEXT) | `periodStart`, `periodEnd`, `title`, `content`, `extraNotes`, `style`, `providerName`, `totalHours`, `generatedAt`, `updatedAt`（索引） | 按自然月（`yyyy-MM`）持久化已生成或手动编辑的月报内容 |
+| `report.v3` | `reviewReport` | `periodKey` (TEXT) | `scopeKind`, `periodStart`, `periodEnd`, `title`, `content`, `extraNotes`, `style`, `providerName`, `totalHours`, `overtimeHours`, `commitCount`, `generatedAt`, `updatedAt`（索引） | 按季度/半年度/全年持久化述职总结报告 |
 
 > 独立版万年历（`Apps/Calendar`）在启动时只传入 `CalendarPlugin.migrations`（当前为空），若库中已有其他插件的数据表也不会冲突；若首次由独立版万年历建库，之后主应用打开时会补跑新增的插件迁移。
 

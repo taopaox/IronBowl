@@ -378,6 +378,112 @@ public final class WorkLedgerPlugin: IronBowlPlugin {
     }
 }
 
+/// 季度/年报插件：聚合月报、工时账本与 Git 统计生成述职报告与牛马年度账单。
+public final class AnnualReviewPlugin: IronBowlPlugin {
+    public static let pluginID = "report.annual"
+    public static let settingsID = "report.annual.settings"
+
+    public let id = AnnualReviewPlugin.pluginID
+    public let title = "季度/年报"
+    public let sidebarSection: String? = "汇报"
+    public let systemImage = "sparkles.rectangle.stack"
+    public var migrations: [DatabaseMigration] { [ReportMigrations.review] }
+
+    var model: AnnualReviewModel?
+
+    public init() {}
+
+    public func start(context: PluginContext) {
+        self.model = AnnualReviewModel(context: context)
+    }
+
+    public func stop() {
+        model = nil
+    }
+
+    public func makeMainView() -> AnyView {
+        guard let model else { return AnyView(ProgressView()) }
+        return AnyView(AnnualReviewView(model: model))
+    }
+
+    public var settingsPages: [SettingsPage] {
+        guard let model else { return [] }
+        return [
+            SettingsPage(id: Self.settingsID, title: "季度与年报", systemImage: "sparkles.rectangle.stack") {
+                AnyView(AnnualReviewSettingsView(model: model))
+            },
+        ]
+    }
+
+    public var quickActions: [QuickAction] {
+        guard let model else { return [] }
+        return [
+            QuickAction(id: "report.annual", title: "生成年度述职", systemImage: "sparkles.rectangle.stack") {
+                model.context.openPlugin(Self.pluginID)
+                Task {
+                    model.goToCurrentPeriod()
+                    await model.generate()
+                }
+            },
+        ]
+    }
+
+    public var homeCards: [HomeCard] {
+        guard let model else { return [] }
+        return [
+            HomeCard(
+                id: "report.annual",
+                label: "年度述职",
+                value: {
+                    model.hasCurrentYearReview ? "已归档" : "待生成"
+                },
+                detail: {
+                    let year = Calendar(identifier: .gregorian).component(.year, from: Date())
+                    return "\(year) 年度总结与牛马账单"
+                },
+                action: {
+                    model.context.openPlugin(Self.pluginID)
+                }
+            ),
+        ]
+    }
+
+    public func canHandleChatIntent(_ text: String) -> Bool {
+        let lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lower.isEmpty, lower.count <= 40 else { return false }
+        let codeSignals = [".swift", "代码", "报错", "修复", "函数", "测试"]
+        if codeSignals.contains(where: { lower.contains($0) }) { return false }
+        return ["年报", "年终总结", "年度总结", "年度述职", "季度总结", "季度复盘", "半年度总结"].contains(where: { lower.contains($0) })
+    }
+
+    public func handleChatIntent(
+        _ text: String,
+        onProgress: @escaping @MainActor (ChatActivityItem) -> Void
+    ) async -> ChatPluginExecutionResult? {
+        guard let model, canHandleChatIntent(text) else { return nil }
+        let lower = text.lowercased()
+        let scope: ReviewScopeKind = lower.contains("季度") ? .quarterly : (lower.contains("半年") ? .halfYearly : .yearly)
+        let targetRange = ReviewRange.containing(Date(), scopeKind: scope)
+
+        onProgress(ChatActivityItem(id: "annual-refresh", kind: .tool, title: "汇总\(targetRange.title)工时、月报与 Git 提交", status: .running))
+        model.selectRange(targetRange)
+        await model.generate()
+        onProgress(ChatActivityItem(
+            id: "annual-refresh",
+            kind: .tool,
+            title: "汇总\(targetRange.title)工时、月报与 Git 提交",
+            subtitle: "\(WorkCalendar.hoursText(model.ledgerSummary.totalHours))h · \(model.gitStats.commitCount) 次提交",
+            status: model.errorMessage == nil ? .completed : .failed,
+            finishedAt: Date()
+        ))
+
+        if !model.hasContent, let err = model.errorMessage {
+            return ChatPluginExecutionResult(replyText: "> ⚠️ \(err)", isError: true)
+        }
+        return ChatPluginExecutionResult(replyText: "### \(model.reportTitle)\n\n\(model.reportContent)")
+    }
+}
+
 @MainActor
 private func executeReportChatIntent(
     model: WeeklyReportModel,

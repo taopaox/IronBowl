@@ -1101,3 +1101,82 @@ import Testing
     #expect(ReportChatHandler.match("ReportPlugin 代码里周报怎么生成的", periodKind: .weekly) == nil)
     #expect(ReportChatHandler.match("分析一下月报测试文件", periodKind: .monthly) == nil)
 }
+
+@Test func workLedgerComputesMonthlyAndYearlyStatsCorrectly() {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = .current
+
+    let d1 = cal.date(from: DateComponents(year: 2026, month: 11, day: 2))!
+    let d2 = cal.date(from: DateComponents(year: 2026, month: 11, day: 3))!
+    let d3 = cal.date(from: DateComponents(year: 2026, month: 11, day: 7))! // 周六加班
+
+    let ds1 = WorkCalendar.dayString(d1)
+    let ds2 = WorkCalendar.dayString(d2)
+    let ds3 = WorkCalendar.dayString(d3)
+
+    let ci1 = cal.date(from: DateComponents(year: 2026, month: 11, day: 2, hour: 8, minute: 40))!
+    let ci2 = cal.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 9, minute: 10))!
+
+    let itemsByDate: [String: [DailyLogItem]] = [
+        ds1: [
+            DailyLogItem(id: "1", date: ds1, taskID: 1, taskTitle: "核心开发", projectID: 10, projectName: "饭碗", hours: 6, work: "开发", isOvertime: false, isDraft: false),
+            DailyLogItem(id: "2", date: ds1, taskID: 2, taskTitle: "支撑", projectID: 20, projectName: "底座", hours: 2, work: "修bug", isOvertime: false, isDraft: false),
+        ],
+        ds2: [
+            DailyLogItem(id: "3", date: ds2, taskID: 1, taskTitle: "核心开发", projectID: 10, projectName: "饭碗", hours: 8, work: "开发", isOvertime: false, isDraft: false),
+            DailyLogItem(id: "4", date: ds2, taskID: 1, taskTitle: "核心开发", projectID: 10, projectName: "饭碗", hours: 2.5, work: "加班发版", isOvertime: true, isDraft: false),
+        ],
+    ]
+
+    let summary = WorkLedgerSummary.computeSummary(
+        year: 2026,
+        dates: [d1, d2, d3],
+        workdayFlags: [ds1: true, ds2: true, ds3: false],
+        itemsByDate: itemsByDate,
+        clockInsByDate: [ds1: ci1, ds2: ci2],
+        plannedOvertimeByDate: [ds3: 3.0],
+        offWorkTextByDate: [ds1: "17:40", ds2: "20:40"]
+    )
+
+    #expect(summary.normalHours == 16)
+    #expect(summary.overtimeHours == 5.5) // 2.5 (d2) + 3.0 (d3 planned)
+    #expect(summary.totalHours == 21.5)
+    #expect(summary.overtimeDaysCount == 2)
+    #expect(summary.loggedDaysCount == 2)
+    #expect(summary.expectedWorkdaysCount == 2)
+    #expect(summary.clockInDaysCount == 2)
+    #expect(summary.averageClockInText == "08:55")
+    #expect(summary.earliestClockInText?.contains("08:40") == true)
+    #expect(summary.latestOffWorkText?.contains("20:40") == true)
+    #expect(summary.projectBreakdown.count == 2)
+    #expect(summary.projectBreakdown[0].projectName == "饭碗")
+    #expect(summary.projectBreakdown[0].hours == 16.5)
+
+    let novBucket = summary.monthlyBuckets.first { $0.month == 11 }
+    #expect(novBucket?.normalHours == 16)
+    #expect(novBucket?.overtimeHours == 5.5)
+}
+
+@MainActor @Test func workLedgerPluginMetadataAndHomeCard() throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "ledger-plugin-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let db = try AppDatabase(url: url, migrations: LogMigrations.all + ReportMigrations.all)
+    let settings = SettingsStore(database: db)
+    let ctx = PluginContext(
+        database: db,
+        settings: settings,
+        reminders: ReminderCenter(),
+        workCalendar: WorkCalendar(database: db, settings: settings),
+        providers: AIProviderStore(settings: settings),
+        openPlugin: { _ in },
+        openSettings: { _ in }
+    )
+    let plugin = WorkLedgerPlugin()
+    #expect(plugin.id == "report.stats")
+    #expect(plugin.title == "牛马账本")
+    #expect(plugin.sidebarSection == "汇报")
+    plugin.start(context: ctx)
+    #expect(plugin.homeCards.count == 1)
+    #expect(plugin.homeCards[0].value() == "0h")
+    plugin.stop()
+}

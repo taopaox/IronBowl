@@ -1,12 +1,14 @@
 # 周报与月报插件（`ReportPlugin` & `MonthlyReportPlugin`）
 
-`Packages/ReportPlugin` 同时提供两个插件——**周报**（`ReportPlugin`，ID：`report`）与 **月报**（`MonthlyReportPlugin`，ID：`report.monthly`），在主窗口左侧栏通过 `sidebarSection = "汇报"` 与 `ZentaoLogPlugin`（「日报」）共同归入「汇报」分组，复用同一套日报查询与生成底座，分别按周（周一至周日）或按自然月（1 日至月末）汇总每日工作日报并生成结构化报告，支持复用禅道远端工时、本地已提交记录、未提交草稿与本月已有周报，提供 AI 智能提炼与本地规则兜底汇总。
+`Packages/ReportPlugin` 同时提供三个插件——**周报**（`ReportPlugin`，ID：`report`）、**月报**（`MonthlyReportPlugin`，ID：`report.monthly`）与 **牛马账本**（`WorkLedgerPlugin`，ID：`report.stats`），在主窗口左侧栏通过 `sidebarSection = "汇报"` 与 `ZentaoLogPlugin`（「日报」）共同归入「汇报」分组。周报与月报复用同一套日报查询与生成底座，分别按周（周一至周日）或按自然月（1 日至月末）汇总每日工作日报并生成结构化报告；牛马账本则按月/年汇总工时、加班、钉钉打卡作息与项目投入占比。
 
 ## 模块组成
 
 | 文件 | 核心符号 | 职责 |
 | :--- | :--- | :--- |
-| `ReportPlugin.swift` | `ReportPlugin`, `MonthlyReportPlugin` | 两个独立侧边栏插件入口：周报（ID：`report`，锁定 `.weekly`，含「Tita 对接」设置页）与月报（ID：`report.monthly`，锁定 `.monthly`），通过 `sidebarBadge` 在侧栏展示「本周未写 / 本月未写 / 待推Tita」角标，各自提供对应生成设置页、首页快捷操作、概览卡片及对话意图路由 |
+| `ReportPlugin.swift` | `ReportPlugin`, `MonthlyReportPlugin`, `WorkLedgerPlugin` | 三个独立侧边栏插件入口：周报（ID：`report`，锁定 `.weekly`，含「Tita 对接」设置页）、月报（ID：`report.monthly`，锁定 `.monthly`）与牛马账本（ID：`report.stats`） |
+| `WorkLedgerModel.swift` | `WorkLedgerModel`, `WorkLedgerSummary`, `LedgerPeriodMode`, `LedgerDayStat`, `LedgerMonthStat`, `LedgerProjectStat` | 按月/年汇总禅道工时、本地加班记录、钉钉上班打卡均值/极值与项目工时占比 |
+| `Views/WorkLedgerView.swift` | `WorkLedgerView` | 「牛马账本」工时热力日历、年度柱状分布、作息极值与项目投入占比看板 |
 | `ReportChatHandler.swift` | `ReportChatHandler`, `ReportChatIntent` | 识别首页对话中的生成/查看周报或月报指令（过滤代码/调试类提问） |
 | `Views/ReportChatCard.swift` | `ReportChatCard` | 在首页聊天流内直接展示并操作的周报/月报卡片（Markdown 预览、展开、重新生成、复制与打开 Tita） |
 | `ReportModel.swift` | `WeeklyReportModel` | `@Observable` 业务状态：支持 `lockedPeriodKind` 锁定周/月模式、上下周与上下月切换、调用 `ZentaoDailyLogService` 查区间日报、生成/编辑/自动保存、历史列表、复制/导出 Markdown 与 Tita 状态查询/草稿保存/提交 |

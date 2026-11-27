@@ -102,6 +102,7 @@ flowchart LR
 5. `SchedulerPlugin`（`scheduler`）
 6. `ReportPlugin`（`report`，周报）
 7. `MonthlyReportPlugin`（`report.monthly`，月报）
-8. `TodoPlugin`（`todo`，待办）
+8. `WorkLedgerPlugin`（`report.stats`，牛马账本）
+9. `TodoPlugin`（`todo`，待办）
 
 当应用版本升级引入新插件 ID 时，`AppModel` 会比对 `app.knownPlugins` 与 `app.enabledPlugins`，自动将新增插件加入已启用列表，避免老用户升级后看不到新插件。

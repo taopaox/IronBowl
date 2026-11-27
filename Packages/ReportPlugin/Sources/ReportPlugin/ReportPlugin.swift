@@ -226,6 +226,66 @@ public final class MonthlyReportPlugin: IronBowlPlugin {
     }
 }
 
+/// 牛马账本插件：按月/年统计工时、加班、打卡作息与各项目投入占比。
+public final class WorkLedgerPlugin: IronBowlPlugin {
+    public static let pluginID = "report.stats"
+
+    public let id = WorkLedgerPlugin.pluginID
+    public let title = "牛马账本"
+    public let sidebarSection: String? = "汇报"
+    public let systemImage = "chart.bar.xaxis"
+
+    var model: WorkLedgerModel?
+
+    public init() {}
+
+    public func start(context: PluginContext) {
+        self.model = WorkLedgerModel(context: context)
+    }
+
+    public func stop() {
+        model = nil
+    }
+
+    public func makeMainView() -> AnyView {
+        guard let model else { return AnyView(ProgressView()) }
+        return AnyView(WorkLedgerView(model: model))
+    }
+
+    public var quickActions: [QuickAction] {
+        guard let model else { return [] }
+        return [
+            QuickAction(id: "report.stats", title: "看工时统计", systemImage: "chart.bar.xaxis") {
+                model.context.openPlugin(Self.pluginID)
+            },
+        ]
+    }
+
+    public var homeCards: [HomeCard] {
+        guard let model else { return [] }
+        return [
+            HomeCard(
+                id: "report.stats",
+                label: "本月账本",
+                value: {
+                    let h = model.summary.totalHours
+                    return h > 0 ? "\(WorkCalendar.hoursText(h))h" : "0h"
+                },
+                detail: {
+                    let ot = model.summary.overtimeHours
+                    if ot > 0 {
+                        return "含加班 \(WorkCalendar.hoursText(ot))h · \(model.summary.loggedDaysCount) 天记录"
+                    }
+                    return "\(model.summary.loggedDaysCount)/\(model.summary.expectedWorkdaysCount) 天已记"
+                },
+                action: {
+                    model.context.openPlugin(Self.pluginID)
+                }
+            ),
+        ]
+    }
+}
+
 @MainActor
 private func executeReportChatIntent(
     model: WeeklyReportModel,

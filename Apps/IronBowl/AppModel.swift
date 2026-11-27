@@ -78,6 +78,7 @@ final class AppModel {
             SchedulerPlugin(),
             ReportPlugin(),
             MonthlyReportPlugin(),
+            WorkLedgerPlugin(),
             TodoPlugin(),
         ]
         self.plugins = plugins

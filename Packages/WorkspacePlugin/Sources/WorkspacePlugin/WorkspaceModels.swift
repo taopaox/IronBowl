@@ -89,8 +89,17 @@ public nonisolated enum ExternalEditorOption: String, Codable, Sendable, CaseIte
     }
 
     @MainActor
+    private static var cachedInstalledOptions: (expiresAt: Date, options: [ExternalEditorOption])?
+
+    @MainActor
     public static func installedOptions() -> [ExternalEditorOption] {
-        allCases.filter { $0 != .auto && $0.resolvedAppURL() != nil }
+        let now = Date()
+        if let cached = cachedInstalledOptions, cached.expiresAt > now {
+            return cached.options
+        }
+        let resolved = allCases.filter { $0 != .auto && $0.resolvedAppURL() != nil }
+        cachedInstalledOptions = (now.addingTimeInterval(60), resolved)
+        return resolved
     }
 }
 
@@ -141,8 +150,17 @@ public nonisolated enum ExternalTerminalOption: String, Codable, Sendable, CaseI
     }
 
     @MainActor
+    private static var cachedInstalledOptions: (expiresAt: Date, options: [ExternalTerminalOption])?
+
+    @MainActor
     public static func installedOptions() -> [ExternalTerminalOption] {
-        allCases.filter { $0 != .auto && $0.resolvedAppURL() != nil }
+        let now = Date()
+        if let cached = cachedInstalledOptions, cached.expiresAt > now {
+            return cached.options
+        }
+        let resolved = allCases.filter { $0 != .auto && $0.resolvedAppURL() != nil }
+        cachedInstalledOptions = (now.addingTimeInterval(60), resolved)
+        return resolved
     }
 }
 

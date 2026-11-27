@@ -579,6 +579,8 @@ public struct DSPageHeader<Leading: View, Actions: View>: View {
 public extension EnvironmentValues {
     /// 主窗口侧边栏是否处于收起状态（收起时内容区左上角要给展开按钮让位置）。
     @Entry var sidebarCollapsed = false
+    /// 页面保活容器内当前页面是否处于前台可见状态。
+    @Entry var isPageActive = true
 }
 
 // MARK: - 品牌标语

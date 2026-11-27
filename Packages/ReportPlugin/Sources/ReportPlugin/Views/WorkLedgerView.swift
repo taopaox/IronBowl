@@ -4,6 +4,7 @@ import SwiftUI
 struct WorkLedgerView: View {
     @Bindable var model: WorkLedgerModel
     @Environment(\.sidebarCollapsed) private var sidebarCollapsed
+    @Environment(\.isPageActive) private var isPageActive
 
     private var palette: JournalPalette {
         JournalPalette(preset: model.context.settings[JournalKeys.paperPreset])
@@ -116,11 +117,21 @@ struct WorkLedgerView: View {
             }
         }
         .background(DS.canvas)
-        .task(id: "\(model.mode.rawValue)-\(model.periodTitle)") {
+        .task(id: model.currentPeriodCacheKey) {
+            await syncIfNeeded()
+        }
+        .onChange(of: isPageActive) { _, active in
+            guard active else { return }
+            Task { await syncIfNeeded() }
+        }
+    }
+
+    private func syncIfNeeded() async {
+        if !model.hasLoadedCurrentPeriod {
             model.loadLocal()
-            if model.isZentaoConfigured && !model.syncedFromZentao {
-                await model.refreshFromZentao()
-            }
+        }
+        if model.isZentaoConfigured && (!model.syncedFromZentao || model.shouldAutoSyncRemote()) {
+            await model.refreshFromZentao()
         }
     }
 

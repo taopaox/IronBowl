@@ -4,6 +4,7 @@ import ZentaoLogPlugin
 
 struct ReportView: View {
     @Bindable var model: WeeklyReportModel
+    @Environment(\.isPageActive) private var isPageActive
     @State private var showHistory = false
     @State private var previewMode: PreviewMode = .preview
     @State private var confirmClear = false
@@ -86,14 +87,13 @@ struct ReportView: View {
             rightJournalPage
         }
         .task(id: "\(model.periodKind.rawValue)-\(model.activePeriodKey)") {
-            model.loadLocalLogs()
-            if model.isZentaoConfigured && !model.syncedFromZentao {
-                await model.refreshLogs()
-            } else if model.periodKind == .monthly && model.includeGitStats && !model.monthGitStats.hasData {
-                await model.refreshMonthGitStats()
-            }
-            if model.isTitaConfigured {
-                await model.refreshTitaStatus()
+            await syncPeriodIfNeeded()
+        }
+        .onChange(of: isPageActive) { _, active in
+            if active {
+                Task { await syncPeriodIfNeeded() }
+            } else {
+                model.saveEditsIfNeeded()
             }
         }
         .onChange(of: model.titaStatus?.state) { _, _ in
@@ -115,6 +115,20 @@ struct ReportView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("将删除本地保存的「\(model.activePeriodTitle)」\(model.periodKind.displayName)内容，不影响每日禅道日报。")
+        }
+    }
+
+    private func syncPeriodIfNeeded() async {
+        if model.days.isEmpty {
+            model.loadLocalLogs()
+        }
+        if model.isZentaoConfigured && (!model.syncedFromZentao || model.shouldAutoSyncLogs()) {
+            await model.refreshLogs()
+        } else if model.periodKind == .monthly && model.includeGitStats && !model.monthGitStats.hasData {
+            await model.refreshMonthGitStats()
+        }
+        if model.isTitaConfigured && (model.titaStatus == nil || model.shouldAutoSyncTita()) {
+            await model.refreshTitaStatus()
         }
     }
 

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct LogView: View {
     @Bindable var model: LogModel
+    @Environment(\.isPageActive) private var isPageActive
     @State private var showOvertime = false
     @State private var confirmSubmit = false
     @State private var stampToken = 0
@@ -73,9 +74,11 @@ struct LogView: View {
             }
         }
         .task {
-            if model.lastScan == nil || model.settings[LogKeys.scanMode] != .manualOnly {
-                await model.refresh()
-            }
+            await refreshIfNeeded()
+        }
+        .onChange(of: isPageActive) { _, active in
+            guard active else { return }
+            Task { await refreshIfNeeded() }
         }
         .sheet(isPresented: $showOvertime) { OvertimeSheet(model: model) }
         .sheet(isPresented: $model.showAssignedSheet) { ZentaoAssignedSheet(model: model) }
@@ -95,6 +98,14 @@ struct LogView: View {
                 Text(base + "\n\n⚠️ 注意：检测到 \(model.dirtyRepoStatuses.map(\.repoName).joined(separator: "、")) 仍有未提交或未 Push 的本地改动。")
             }
         }
+    }
+
+    private func refreshIfNeeded() async {
+        guard model.settings[LogKeys.scanMode] != .manualOnly || model.lastScan == nil else { return }
+        if let lastScan = model.lastScan, Date().timeIntervalSince(lastScan) < 45 {
+            return
+        }
+        await model.refresh()
     }
 
     private var notConfigured: some View {

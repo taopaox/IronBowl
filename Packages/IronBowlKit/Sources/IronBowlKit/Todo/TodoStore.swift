@@ -110,6 +110,7 @@ public final class TodoStore {
 
     @ObservationIgnored private let database: AppDatabase
     @ObservationIgnored nonisolated(unsafe) private var observer: NSObjectProtocol?
+    @ObservationIgnored private var countsByDueDate: [String: (incomplete: Int, completed: Int)] = [:]
     public private(set) var items: [TodoItem] = []
 
     public init(database: AppDatabase) {
@@ -156,6 +157,18 @@ public final class TodoStore {
                 .order(Column("isCompleted").asc, Column("priority").desc, Column("createdAt").desc)
                 .fetchAll(db)
         }) ?? []
+        var counts: [String: (incomplete: Int, completed: Int)] = [:]
+        for item in fetched {
+            guard let due = item.dueDate, !due.isEmpty else { continue }
+            var cur = counts[due] ?? (0, 0)
+            if item.isCompleted {
+                cur.completed += 1
+            } else {
+                cur.incomplete += 1
+            }
+            counts[due] = cur
+        }
+        countsByDueDate = counts
         items = fetched
     }
 
@@ -304,16 +317,7 @@ public final class TodoStore {
 
     public func counts(on date: Date) -> (incomplete: Int, completed: Int) {
         let ds = WorkCalendar.dayString(date)
-        var incomplete = 0
-        var completed = 0
-        for item in items where item.dueDate == ds {
-            if item.isCompleted {
-                completed += 1
-            } else {
-                incomplete += 1
-            }
-        }
-        return (incomplete, completed)
+        return countsByDueDate[ds] ?? (0, 0)
     }
 
     public func todayIncompleteCount(now: Date = Date()) -> Int {

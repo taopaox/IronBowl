@@ -4,6 +4,7 @@ import SwiftUI
 struct AnnualReviewView: View {
     @Bindable var model: AnnualReviewModel
     @Environment(\.sidebarCollapsed) private var sidebarCollapsed
+    @Environment(\.isPageActive) private var isPageActive
     @State private var previewMode: PreviewMode = .preview
     @State private var showPoster = false
     @State private var showHistory = false
@@ -94,8 +95,14 @@ struct AnnualReviewView: View {
             }
         }
         .task(id: model.range.periodKey) {
-            model.loadLocal()
-            await model.refreshAll()
+            await refreshIfNeeded()
+        }
+        .onChange(of: isPageActive) { _, active in
+            if active {
+                Task { await refreshIfNeeded() }
+            } else {
+                model.saveEditsIfNeeded()
+            }
         }
         .onDisappear {
             model.saveEditsIfNeeded()
@@ -108,6 +115,15 @@ struct AnnualReviewView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("将删除「\(model.range.title)」已保存的述职正文，不影响原始日报与月报。")
+        }
+    }
+
+    private func refreshIfNeeded() async {
+        if !model.hasLoadedCurrentPeriod {
+            model.loadLocal()
+        }
+        if model.shouldAutoRefresh() {
+            await model.refreshAll()
         }
     }
 

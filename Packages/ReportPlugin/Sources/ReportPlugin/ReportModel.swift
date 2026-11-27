@@ -52,6 +52,8 @@ final class WeeklyReportModel {
     @ObservationIgnored private var autoSaveTask: Task<Void, Never>?
     @ObservationIgnored private var copiedResetTask: Task<Void, Never>?
     @ObservationIgnored private var cachedTitaClient: (key: TitaClientCacheKey, client: TitaClient)?
+    @ObservationIgnored private var lastLogsSyncedAtByKey: [String: Date] = [:]
+    @ObservationIgnored private var lastTitaSyncedAtByKey: [String: Date] = [:]
 
     private struct TitaClientCacheKey: Equatable {
         let baseURL: String
@@ -73,6 +75,18 @@ final class WeeklyReportModel {
         self.recentMonthlyReports = store.recentMonthlyReports()
         loadSavedReportForActivePeriod()
         loadLocalLogs()
+    }
+
+    func shouldAutoSyncLogs(cooldown: TimeInterval = 60) -> Bool {
+        let key = "\(periodKind.rawValue)-\(activePeriodKey)"
+        guard let last = lastLogsSyncedAtByKey[key] else { return true }
+        return Date().timeIntervalSince(last) >= cooldown
+    }
+
+    func shouldAutoSyncTita(cooldown: TimeInterval = 60) -> Bool {
+        let key = "\(periodKind.rawValue)-\(activePeriodKey)"
+        guard let last = lastTitaSyncedAtByKey[key] else { return true }
+        return Date().timeIntervalSince(last) >= cooldown
     }
 
     var settings: SettingsStore { context.settings }
@@ -487,6 +501,7 @@ final class WeeklyReportModel {
         rawItemsByDate = result.itemsByDate
         syncedFromZentao = result.syncedFromZentao
         remoteError = result.remoteError
+        lastLogsSyncedAtByKey["\(targetKind.rawValue)-\(targetKey)"] = Date()
         if let fetchedGit {
             monthGitStats = fetchedGit
         }
@@ -983,6 +998,7 @@ final class WeeklyReportModel {
             )
             guard periodKind == targetKind && activePeriodKey == targetKey else { return }
             titaStatus = status
+            lastTitaSyncedAtByKey["\(targetKind.rawValue)-\(targetKey)"] = Date()
             if let remoteTid = status.templateID, remoteTid > 0 {
                 switch targetKind {
                 case .weekly: settings[ReportKeys.titaWeeklyTemplateID] = remoteTid

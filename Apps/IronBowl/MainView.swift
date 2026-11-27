@@ -1,4 +1,8 @@
+import AIWebPlugin
+import AppKit
+import FeishuPlugin
 import IronBowlKit
+import Observation
 import SwiftUI
 
 /// 主窗口：左边浅灰侧栏，右边白色内容区（WorkBuddy 风格）。
@@ -67,15 +71,220 @@ struct MainView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if app.selection == AppModel.homeID {
-            HomeView(app: app)
-        } else if app.selection == AppModel.remindersID {
-            RemindersView(app: app)
-        } else if let plugin = app.plugin(app.selection), app.enabledIDs.contains(plugin.id) {
-            plugin.makeMainView().id(plugin.id)
-        } else {
-            HomeView(app: app)
+        let enabledIDs = app.enabledIDs
+        let selectedWebPlugin: IronBowlPlugin? = {
+            guard let selection = app.selection,
+                  selection == FeishuPlugin.pluginID || selection == AIWebPlugin.pluginID,
+                  let plugin = app.plugin(selection),
+                  enabledIDs.contains(plugin.id) else {
+                return nil
+            }
+            return plugin
+        }()
+
+        let activeNativeID: String? = {
+            guard selectedWebPlugin == nil else { return nil }
+            if app.selection == AppModel.remindersID {
+                return AppModel.remindersID
+            }
+            if let plugin = app.plugin(app.selection), enabledIDs.contains(plugin.id) {
+                return plugin.id
+            }
+            return AppModel.homeID
+        }()
+
+        let validNativeIDs: Set<String> = {
+            var set: Set<String> = [AppModel.homeID, AppModel.remindersID]
+            for p in app.enabledPlugins where p.id != FeishuPlugin.pluginID && p.id != AIWebPlugin.pluginID {
+                set.insert(p.id)
+            }
+            return set
+        }()
+
+        ZStack {
+            NativePageDeck(
+                app: app,
+                activePageID: activeNativeID,
+                validPageIDs: validNativeIDs,
+                sidebarCollapsed: collapsed
+            )
+            .id(app.pageDeckResetToken)
+            .allowsHitTesting(selectedWebPlugin == nil)
+            .accessibilityHidden(selectedWebPlugin != nil)
+
+            if let selectedWebPlugin {
+                selectedWebPlugin.makeMainView()
+                    .id(selectedWebPlugin.id)
+            }
         }
+    }
+}
+
+@Observable
+private final class PageDeckEnvironment {
+    var activePageID: String?
+    var sidebarCollapsed = false
+}
+
+private struct PageDeckWrapperView: View {
+    let pageID: String
+    let deckEnv: PageDeckEnvironment
+    let content: AnyView
+
+    var body: some View {
+        content
+            .environment(\.sidebarCollapsed, deckEnv.sidebarCollapsed)
+            .environment(\.isPageActive, deckEnv.activePageID == pageID)
+            .environment(\.locale, CN.locale)
+    }
+}
+
+/// 原生页面 AppKit 保活容器：按 pageID 缓存 NSHostingView（sizingOptions = []），切页仅切换 isHidden，兼顾瞬时切换与滚动/编辑器状态保留。
+private struct NativePageDeck: NSViewRepresentable {
+    let app: AppModel
+    let activePageID: String?
+    let validPageIDs: Set<String>
+    let sidebarCollapsed: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> PageDeckContainerView {
+        let view = PageDeckContainerView()
+        updateView(view, coordinator: context.coordinator)
+        return view
+    }
+
+    func updateNSView(_ nsView: PageDeckContainerView, context: Context) {
+        updateView(nsView, coordinator: context.coordinator)
+    }
+
+    static func dismantleNSView(_ nsView: PageDeckContainerView, coordinator: Coordinator) {
+        nsView.clearAll()
+    }
+
+    private func updateView(_ container: PageDeckContainerView, coordinator: Coordinator) {
+        coordinator.environment.sidebarCollapsed = sidebarCollapsed
+        coordinator.environment.activePageID = activePageID
+        container.syncPages(
+            activePageID: activePageID,
+            validPageIDs: validPageIDs,
+            deckEnv: coordinator.environment
+        ) { pageID in
+            makePageContent(for: pageID)
+        }
+    }
+
+    private func makePageContent(for pageID: String) -> AnyView {
+        if pageID == AppModel.homeID {
+            return AnyView(HomeView(app: app))
+        }
+        if pageID == AppModel.remindersID {
+            return AnyView(RemindersView(app: app))
+        }
+        if let plugin = app.plugin(pageID) {
+            return plugin.makeMainView()
+        }
+        return AnyView(HomeView(app: app))
+    }
+
+    final class Coordinator {
+        let environment = PageDeckEnvironment()
+    }
+}
+
+private final class PageDeckContainerView: NSView {
+    private static let maxCachedPages = 8
+
+    private var cachedHostingViews: [String: NSHostingView<PageDeckWrapperView>] = [:]
+    private var lruOrder: [String] = []
+    private var currentActiveID: String?
+
+    override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        for host in cachedHostingViews.values where !host.isHidden {
+            if host.frame != bounds {
+                host.frame = bounds
+            }
+        }
+    }
+
+    func syncPages(
+        activePageID: String?,
+        validPageIDs: Set<String>,
+        deckEnv: PageDeckEnvironment,
+        makeContent: (String) -> AnyView
+    ) {
+        // 移除已被停用或无效的插件页缓存
+        let obsoleteIDs = cachedHostingViews.keys.filter { !validPageIDs.contains($0) }
+        for id in obsoleteIDs {
+            evictPage(id: id)
+        }
+
+        if let activePageID, cachedHostingViews[activePageID] == nil {
+            let wrapper = PageDeckWrapperView(
+                pageID: activePageID,
+                deckEnv: deckEnv,
+                content: makeContent(activePageID)
+            )
+            let host = NSHostingView(rootView: wrapper)
+            host.sizingOptions = []
+            host.autoresizingMask = [.width, .height]
+            host.frame = bounds
+            host.isHidden = true
+            addSubview(host)
+            cachedHostingViews[activePageID] = host
+        }
+
+        if let activePageID {
+            lruOrder.removeAll { $0 == activePageID }
+            lruOrder.append(activePageID)
+        }
+
+        // 先切换显隐再做淘汰，避免闪烁
+        if currentActiveID != activePageID || activePageID == nil {
+            for (id, host) in cachedHostingViews {
+                let shouldShow = (id == activePageID)
+                if shouldShow && host.frame != bounds {
+                    host.frame = bounds
+                }
+                if host.isHidden == shouldShow {
+                    host.isHidden = !shouldShow
+                }
+            }
+            currentActiveID = activePageID
+        } else if let activePageID, let activeHost = cachedHostingViews[activePageID], activeHost.frame != bounds {
+            activeHost.frame = bounds
+        }
+
+        isHidden = (activePageID == nil)
+
+        while cachedHostingViews.count > Self.maxCachedPages {
+            guard let victim = lruOrder.first(where: { $0 != activePageID && $0 != AppModel.homeID })
+                    ?? lruOrder.first(where: { $0 != activePageID }) else {
+                break
+            }
+            evictPage(id: victim)
+        }
+    }
+
+    func clearAll() {
+        for host in cachedHostingViews.values {
+            host.removeFromSuperview()
+        }
+        cachedHostingViews.removeAll()
+        lruOrder.removeAll()
+        currentActiveID = nil
+    }
+
+    private func evictPage(id: String) {
+        if let host = cachedHostingViews.removeValue(forKey: id) {
+            host.removeFromSuperview()
+        }
+        lruOrder.removeAll { $0 == id }
     }
 }
 

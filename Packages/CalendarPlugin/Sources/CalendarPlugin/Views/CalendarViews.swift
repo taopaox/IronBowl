@@ -100,8 +100,18 @@ struct MonthCard: View {
                 }
                 .padding(.vertical, compact ? 2 : 4)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: compact ? 2 : 4), count: 7), spacing: compact ? 2 : 4) {
+                    let cal = CalendarModel.cal
+                    let todayStart = cal.startOfDay(for: model.now)
+                    let selectedStart = cal.startOfDay(for: model.selected)
                     ForEach(model.cells) { cell in
-                        DayCellView(model: model, cell: cell, compact: compact)
+                        let cellStart = cal.startOfDay(for: cell.date)
+                        DayCellView(
+                            model: model,
+                            cell: cell,
+                            compact: compact,
+                            isToday: cellStart == todayStart,
+                            isSelected: cellStart == selectedStart
+                        )
                     }
                 }
             }
@@ -136,12 +146,12 @@ struct DayCellView: View {
     let model: CalendarModel
     let cell: DayCell
     let compact: Bool
+    let isToday: Bool
+    let isSelected: Bool
     @State private var hovering = false
 
     var body: some View {
         let cal = CalendarModel.cal
-        let isToday = cal.isDate(cell.date, inSameDayAs: model.now)
-        let isSelected = cal.isDate(cell.date, inSameDayAs: model.selected)
         let info = model.workCalendar.dayInfo(cell.date)
         let weekday = cal.component(.weekday, from: cell.date)
         let red = info.kind == .holiday || ((weekday == 1 || weekday == 7) && info.kind != .makeupWorkday)

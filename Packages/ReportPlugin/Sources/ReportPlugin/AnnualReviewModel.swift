@@ -58,6 +58,8 @@ final class AnnualReviewModel {
     @ObservationIgnored private var rawItemsByDate: [String: [DailyLogItem]] = [:]
     @ObservationIgnored private var autoSaveTask: Task<Void, Never>?
     @ObservationIgnored private var copiedResetTask: Task<Void, Never>?
+    @ObservationIgnored private var lastLoadedPeriodKey: String?
+    @ObservationIgnored private var lastRefreshedAtByKey: [String: Date] = [:]
 
     init(context: PluginContext) {
         self.context = context
@@ -67,7 +69,15 @@ final class AnnualReviewModel {
         self.providerKind = context.providers.defaultKind
         self.recentReviews = store.recentReviews()
         loadSavedReview()
-        loadLocal()
+    }
+
+    var hasLoadedCurrentPeriod: Bool {
+        lastLoadedPeriodKey == range.periodKey
+    }
+
+    func shouldAutoRefresh(cooldown: TimeInterval = 120) -> Bool {
+        guard let last = lastRefreshedAtByKey[range.periodKey] else { return true }
+        return Date().timeIntervalSince(last) >= cooldown
     }
 
     var settings: SettingsStore { context.settings }
@@ -147,6 +157,7 @@ final class AnnualReviewModel {
     func loadLocal() {
         let items = dailyLogService.loadLocal(from: range.startDateString, to: range.endDateString, includeDrafts: true)
         rawItemsByDate = items
+        lastLoadedPeriodKey = range.periodKey
         monthlyReports = store.monthlyReports(matchingMonthKeys: range.monthKeys)
         recomputeSummary(with: items)
     }
@@ -171,6 +182,8 @@ final class AnnualReviewModel {
         syncedFromZentao = logs.syncedFromZentao
         remoteError = logs.remoteError
         gitStats = git
+        lastLoadedPeriodKey = targetKey
+        lastRefreshedAtByKey[targetKey] = Date()
         monthlyReports = store.monthlyReports(matchingMonthKeys: range.monthKeys)
         recomputeSummary(with: logs.itemsByDate)
     }

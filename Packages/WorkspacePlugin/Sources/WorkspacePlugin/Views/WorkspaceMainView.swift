@@ -100,9 +100,10 @@ struct WorkspaceMainView: View {
                             .frame(maxWidth: .infinity)
                         }
                     } else {
+                        let installedEditors = ExternalEditorOption.installedOptions()
                         LazyVStack(spacing: 10) {
                             ForEach(model.filteredRepos) { repo in
-                                repoCard(repo)
+                                repoCard(repo, installedEditors: installedEditors)
                             }
                         }
                     }
@@ -120,9 +121,8 @@ struct WorkspaceMainView: View {
         }
     }
 
-    private func repoCard(_ repo: WorkspaceRepoItem) -> some View {
-        let installedEditors = ExternalEditorOption.installedOptions()
-        return DSCard(padding: 14) {
+    private func repoCard(_ repo: WorkspaceRepoItem, installedEditors: [ExternalEditorOption]) -> some View {
+        DSCard(padding: 14) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .center, spacing: 8) {
                     Button {

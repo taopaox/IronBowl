@@ -98,6 +98,7 @@ public final class FeishuModel {
     }
 
     public func selectHome() {
+        guard activePageID != Self.homePageID else { return }
         activePageID = Self.homePageID
         settings[FeishuKeys.lastPageID] = Self.homePageID
     }
@@ -107,6 +108,7 @@ public final class FeishuModel {
             selectHome()
             return
         }
+        guard activePageID != id else { return }
         activePageID = id
         settings[FeishuKeys.lastPageID] = id
     }

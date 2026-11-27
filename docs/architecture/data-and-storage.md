@@ -70,10 +70,11 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 定义于 [`SettingsStore.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/Core/SettingsStore.swift)：
 
 - **强类型键**：`SettingKey<Value: Codable & Sendable>(_ name: String, default: Value)`。
+- **单键级观察与内存解码缓存**：内部按 `key.name` 维护独立的 `@Observable` 信号（`SettingKeySignal`）及强类型解码缓存（`DecodedBox<Value>`，兼容 `Optional` 空值缓存）；修改某个键只会触发订阅该键的视图增量刷新，且热路径读取不再重复执行 `JSONDecoder`。
 - **JSON 包装**：写入时使用内部 `Wrapper(v: newValue)` 编码，使得顶层 `String`、`Int`、`Double`、`Bool`、`Optional` 也能统一合法序列化为 JSON。
-- **去重防循环**：写入 `settings[key] = newValue` 时若 JSON 字符串与内存缓存一致，则直接返回不写库也不触发通知，避免 SwiftUI `Binding` 回写导致死循环。
+- **去重防循环与延迟落盘**：写入 `settings[key] = newValue` 时若 JSON 字符串与内存缓存一致，则直接返回不写库也不触发通知，避免 SwiftUI `Binding` 回写导致死循环。高频导航状态键（如 `app.lastPlugin`）通过 `setDeferred(_:for:)` 立即更新内存并在 300ms 防抖后批量落盘（导出备份前及应用退出时通过 `flushDeferredWrites()` 立即刷盘）。
 - **跨进程通知**：
-  - `SettingsStore` 写入数据库后会通过 `DistributedNotificationCenter` 发送 `com.taopaox.ironbowl.settingsDidChange`，附带 `"\(pid)|\(database.path)"`；另一进程收到且匹配同一数据库路径时自动 `reload()` 并回调 `onExternalChange`（同步外观与字号）。
+  - `SettingsStore` 写入数据库后会通过 `DistributedNotificationCenter` 非阻塞合并发送 `com.taopaox.ironbowl.settingsDidChange`，附带 `"\(pid)|\(database.path)"`；另一进程收到且匹配同一数据库路径时仅针对发生变更的键执行 `reload()` 失效并回调 `onExternalChange`（同步外观与字号）。
   - `WorkCalendar` 修改节假日缓存或手动标记后会发送 `com.taopaox.ironbowl.holidaysDidChange`，另一进程收到后自动重载节假日表。
 
 ## 全部 `SettingKey` 清单

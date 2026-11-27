@@ -217,8 +217,84 @@ public final class SystemMonitor {
         self.timebase = info
     }
 
+    private struct SamplingState: Sendable {
+        var previousCPUTicks: CPUTickSample?
+        var previousProcessCPUNs: [pid_t: UInt64] = [:]
+        var previousSampleWallNs: UInt64?
+        var previousSystemCPUUsage: Double?
+        var previousAppCPUUsage: Double?
+    }
+
+    private struct SampleOutput: Sendable {
+        let snapshot: SystemResourceSnapshot
+        let state: SamplingState
+    }
+
     /// 采样一次当前系统与饭碗资源占用；首次采样建立 CPU 基线，第二次起输出 CPU 百分比。
     public func sampleNow() {
+        let extra = extraProcessesProvider()
+        let prevState = SamplingState(
+            previousCPUTicks: previousCPUTicks,
+            previousProcessCPUNs: previousProcessCPUNs,
+            previousSampleWallNs: previousSampleWallNs,
+            previousSystemCPUUsage: snapshot.systemCPUUsage,
+            previousAppCPUUsage: snapshot.appCPUUsage
+        )
+        let output = Self.collectSample(extra: extra, state: prevState, timebase: timebase)
+        applySampleOutput(output)
+    }
+
+    private func applySampleOutput(_ output: SampleOutput) {
+        previousCPUTicks = output.state.previousCPUTicks
+        previousProcessCPUNs = output.state.previousProcessCPUNs
+        previousSampleWallNs = output.state.previousSampleWallNs
+        if snapshot != output.snapshot {
+            snapshot = output.snapshot
+        }
+    }
+
+    /// 在视图生命周期内持续采样；内核采样置于后台线程执行，避免阻塞主线程切页与交互。
+    public func run(interval: Duration = .seconds(2), initialDelay: Duration = .milliseconds(500)) async {
+        await sampleAsync()
+        try? await Task.sleep(for: initialDelay)
+        guard !Task.isCancelled else { return }
+        await sampleAsync()
+        while !Task.isCancelled {
+            try? await Task.sleep(for: interval)
+            guard !Task.isCancelled else { return }
+            await sampleAsync()
+        }
+    }
+
+    private func sampleAsync() async {
+        let extra = extraProcessesProvider()
+        let prevState = SamplingState(
+            previousCPUTicks: previousCPUTicks,
+            previousProcessCPUNs: previousProcessCPUNs,
+            previousSampleWallNs: previousSampleWallNs,
+            previousSystemCPUUsage: snapshot.systemCPUUsage,
+            previousAppCPUUsage: snapshot.appCPUUsage
+        )
+        let tb = timebase
+        let output = await Self.collectSampleInBackground(extra: extra, state: prevState, timebase: tb)
+        guard !Task.isCancelled else { return }
+        applySampleOutput(output)
+    }
+
+    @concurrent
+    nonisolated private static func collectSampleInBackground(
+        extra: [TrackedProcessDescriptor],
+        state: SamplingState,
+        timebase: mach_timebase_info_data_t
+    ) async -> SampleOutput {
+        collectSample(extra: extra, state: state, timebase: timebase)
+    }
+
+    nonisolated private static func collectSample(
+        extra: [TrackedProcessDescriptor],
+        state: SamplingState,
+        timebase: mach_timebase_info_data_t
+    ) -> SampleOutput {
         let wallNs = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         let totalBytes = ProcessInfo.processInfo.physicalMemory
         let coreCount = max(1, ProcessInfo.processInfo.processorCount)
@@ -226,24 +302,21 @@ public final class SystemMonitor {
         let systemMemoryUsed = sampleSystemMemoryUsedBytes(totalBytes: totalBytes)
         let currentCPUTicks = sampleSystemCPUTicks()
         let systemCPUUsage: Double?
-        if let prev = previousCPUTicks, let curr = currentCPUTicks {
-            systemCPUUsage = Self.computeSystemCPUUsage(previous: prev, current: curr)
+        if let prev = state.previousCPUTicks, let curr = currentCPUTicks {
+            systemCPUUsage = computeSystemCPUUsage(previous: prev, current: curr)
         } else {
-            systemCPUUsage = snapshot.systemCPUUsage
-        }
-        if let currentCPUTicks {
-            previousCPUTicks = currentCPUTicks
+            systemCPUUsage = state.previousSystemCPUUsage
         }
 
         let selfPID = getpid()
-        let childEntries = Self.childPIDs(of: selfPID).map { ($0, Self.processName(for: $0)) }
-        let mergedMeta = Self.mergeProcessDescriptors(
+        let childEntries = childPIDs(of: selfPID).map { ($0, processName(for: $0)) }
+        let mergedMeta = mergeProcessDescriptors(
             selfPID: selfPID,
-            extra: extraProcessesProvider(),
+            extra: extra,
             childPIDs: childEntries
         )
 
-        let elapsedWallNs: UInt64? = if let prevWallNs = previousSampleWallNs, wallNs > prevWallNs {
+        let elapsedWallNs: UInt64? = if let prevWallNs = state.previousSampleWallNs, wallNs > prevWallNs {
             wallNs - prevWallNs
         } else {
             nil
@@ -254,12 +327,12 @@ public final class SystemMonitor {
         var appItems: [AppResourceItem] = []
 
         for (pid, meta) in mergedMeta where pid > 0 {
-            guard let usage = sampleProcessRusage(pid: pid) else { continue }
+            guard let usage = sampleProcessRusage(pid: pid, timebase: timebase) else { continue }
             appMemoryBytes &+= usage.footprintBytes
             currentProcessCPUNs[pid] = usage.cpuNs
             let itemCPU: Double? = if let elapsedWallNs {
-                Self.computeSingleProcessCPUUsage(
-                    previousNs: previousProcessCPUNs[pid],
+                computeSingleProcessCPUUsage(
+                    previousNs: state.previousProcessCPUNs[pid],
                     currentNs: usage.cpuNs,
                     elapsedWallNs: elapsedWallNs,
                     coreCount: coreCount
@@ -296,20 +369,24 @@ public final class SystemMonitor {
 
         let appCPUUsage: Double?
         if let elapsedWallNs {
-            appCPUUsage = Self.computeAppCPUUsage(
-                previousCPUNs: previousProcessCPUNs,
+            appCPUUsage = computeAppCPUUsage(
+                previousCPUNs: state.previousProcessCPUNs,
                 currentCPUNs: currentProcessCPUNs,
                 elapsedWallNs: elapsedWallNs,
                 coreCount: coreCount
             )
         } else {
-            appCPUUsage = snapshot.appCPUUsage
+            appCPUUsage = state.previousAppCPUUsage
         }
 
-        previousProcessCPUNs = currentProcessCPUNs
-        previousSampleWallNs = wallNs
-
-        snapshot = SystemResourceSnapshot(
+        let nextState = SamplingState(
+            previousCPUTicks: currentCPUTicks ?? state.previousCPUTicks,
+            previousProcessCPUNs: currentProcessCPUNs,
+            previousSampleWallNs: wallNs,
+            previousSystemCPUUsage: systemCPUUsage,
+            previousAppCPUUsage: appCPUUsage
+        )
+        let nextSnapshot = SystemResourceSnapshot(
             systemCPUUsage: systemCPUUsage,
             systemMemoryUsedBytes: systemMemoryUsed,
             systemMemoryTotalBytes: totalBytes,
@@ -319,19 +396,7 @@ public final class SystemMonitor {
             appProcessCount: max(1, appItems.count),
             appItems: appItems
         )
-    }
-
-    /// 在视图生命周期内持续采样；首次短暂延迟后再采一次以尽快填充 CPU 占比。
-    public func run(interval: Duration = .seconds(2), initialDelay: Duration = .milliseconds(500)) async {
-        sampleNow()
-        try? await Task.sleep(for: initialDelay)
-        guard !Task.isCancelled else { return }
-        sampleNow()
-        while !Task.isCancelled {
-            try? await Task.sleep(for: interval)
-            guard !Task.isCancelled else { return }
-            sampleNow()
-        }
+        return SampleOutput(snapshot: nextSnapshot, state: nextState)
     }
 
     // MARK: - 可测试的纯计算逻辑
@@ -463,7 +528,7 @@ public final class SystemMonitor {
 
     // MARK: - Darwin / Mach 采样
 
-    private func sampleSystemMemoryUsedBytes(totalBytes: UInt64) -> UInt64 {
+    nonisolated private static func sampleSystemMemoryUsedBytes(totalBytes: UInt64) -> UInt64 {
         let host = mach_host_self()
         var pageSize: vm_size_t = 0
         guard host_page_size(host, &pageSize) == KERN_SUCCESS else { return 0 }
@@ -487,7 +552,7 @@ public final class SystemMonitor {
         )
     }
 
-    private func sampleSystemCPUTicks() -> CPUTickSample? {
+    nonisolated private static func sampleSystemCPUTicks() -> CPUTickSample? {
         var cpuCount: natural_t = 0
         var cpuInfo: processor_info_array_t?
         var cpuInfoCount: mach_msg_type_number_t = 0
@@ -514,7 +579,10 @@ public final class SystemMonitor {
         return CPUTickSample(active: active, idle: idle)
     }
 
-    private func sampleProcessRusage(pid: pid_t) -> (footprintBytes: UInt64, cpuNs: UInt64)? {
+    nonisolated private static func sampleProcessRusage(
+        pid: pid_t,
+        timebase: mach_timebase_info_data_t
+    ) -> (footprintBytes: UInt64, cpuNs: UInt64)? {
         var rusage = rusage_info_v4()
         let result = withUnsafeMutablePointer(to: &rusage) { ptr in
             ptr.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { rusagePtr in
@@ -527,7 +595,7 @@ public final class SystemMonitor {
         return (rusage.ri_phys_footprint, cpuNs)
     }
 
-    private static func processName(for pid: pid_t) -> String {
+    nonisolated private static func processName(for pid: pid_t) -> String {
         var buffer = [CChar](repeating: 0, count: 256)
         let len = buffer.withUnsafeMutableBytes { buf in
             proc_name(pid, buf.baseAddress, UInt32(buf.count))
@@ -541,7 +609,7 @@ public final class SystemMonitor {
         return trimmed.isEmpty ? "子进程 #\(pid)" : trimmed
     }
 
-    private static func childPIDs(of parentPID: pid_t) -> [pid_t] {
+    nonisolated private static func childPIDs(of parentPID: pid_t) -> [pid_t] {
         let initialBytes = proc_listpids(UInt32(PROC_PPID_ONLY), UInt32(parentPID), nil, 0)
         guard initialBytes > 0 else { return [] }
         let capacity = Int(initialBytes) / MemoryLayout<pid_t>.stride + 8

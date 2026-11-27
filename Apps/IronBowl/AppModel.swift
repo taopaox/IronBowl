@@ -67,6 +67,8 @@ final class AppModel {
 
     var selection: String?
     var isMainWindowOpen = false
+    /// 数据恢复后递增，触发原生页面保活容器销毁重建缓存页。
+    var pageDeckResetToken = 0
     /// 菜单栏倒计时用的时钟，每 30 秒更新。
     var now = Date()
     @ObservationIgnored private var clock: Timer?
@@ -206,7 +208,10 @@ final class AppModel {
         Set(settings[AppKeys.enabledPlugins] ?? plugins.map(\.id))
     }
 
-    var enabledPlugins: [IronBowlPlugin] { plugins.filter { enabledIDs.contains($0.id) } }
+    var enabledPlugins: [IronBowlPlugin] {
+        let ids = enabledIDs
+        return plugins.filter { ids.contains($0.id) }
+    }
 
     func setEnabled(_ id: String, _ enabled: Bool) {
         var ids = enabledIDs
@@ -235,8 +240,9 @@ final class AppModel {
     func plugin(_ id: String?) -> IronBowlPlugin? { plugins.first { $0.id == id } }
 
     func select(_ id: String) {
+        guard selection != id else { return }
         selection = id
-        settings[AppKeys.lastPlugin] = id
+        settings.setDeferred(id, for: AppKeys.lastPlugin)
     }
 
     func open(plugin id: String) {
@@ -467,5 +473,6 @@ final class AppModel {
             started.remove(p.id)
         }
         syncPlugins()
+        pageDeckResetToken &+= 1
     }
 }

@@ -17,6 +17,13 @@ final class DevToolsModel {
     var portStatusMessage: String?
     var portErrorMessage: String?
 
+    @ObservationIgnored private var cachedDevDirsKey: (gitRoot: String, extra: [String], custom: [String])?
+    @ObservationIgnored private var cachedDevDirEntries: [DevDirectoryEntry] = []
+    @ObservationIgnored private var cachedAllPartitionKey: (ports: [ListeningPortItem], dirPaths: [String])?
+    @ObservationIgnored private var cachedAllPartitionValue: PortPartition?
+    @ObservationIgnored private var cachedFilteredPartitionKey: (ports: [ListeningPortItem], query: String, dirPaths: [String])?
+    @ObservationIgnored private var cachedFilteredPartitionValue: PortPartition?
+
     init(context: PluginContext) {
         self.context = context
     }
@@ -32,15 +39,22 @@ final class DevToolsModel {
     }
 
     var effectiveDevDirectoryEntries: [DevDirectoryEntry] {
-        var candidates: [(String, DevDirectorySource)] = []
         let gitRoot = GitScanner.configuredGitRoot(settings: context.settings)
+        let extra = context.settings[Self.workspaceExtraReposKey]
+        let custom = customDevDirectories
+        if let cachedKey = cachedDevDirsKey,
+           cachedKey.gitRoot == gitRoot && cachedKey.extra == extra && cachedKey.custom == custom {
+            return cachedDevDirEntries
+        }
+
+        var candidates: [(String, DevDirectorySource)] = []
         if !gitRoot.isEmpty {
             candidates.append((gitRoot, .gitRoot))
         }
-        for repo in context.settings[Self.workspaceExtraReposKey] {
+        for repo in extra {
             candidates.append((repo, .workspaceExtra))
         }
-        for dir in customDevDirectories {
+        for dir in custom {
             candidates.append((dir, .custom))
         }
 
@@ -54,6 +68,8 @@ final class DevToolsModel {
             }
             result.append(DevDirectoryEntry(path: normalized, source: source))
         }
+        cachedDevDirsKey = (gitRoot, extra, custom)
+        cachedDevDirEntries = result
         return result
     }
 
@@ -67,7 +83,17 @@ final class DevToolsModel {
     }
 
     var allPartition: PortPartition {
-        PortDirectoryMatcher.partition(ports, devDirectories: effectiveDevDirectoryPaths)
+        let currentPorts = ports
+        let dirPaths = effectiveDevDirectoryPaths
+        if let key = cachedAllPartitionKey,
+           let val = cachedAllPartitionValue,
+           key.ports == currentPorts && key.dirPaths == dirPaths {
+            return val
+        }
+        let computed = PortDirectoryMatcher.partition(currentPorts, devDirectories: dirPaths)
+        cachedAllPartitionKey = (currentPorts, dirPaths)
+        cachedAllPartitionValue = computed
+        return computed
     }
 
     var filteredPorts: [ListeningPortItem] {
@@ -92,7 +118,21 @@ final class DevToolsModel {
     }
 
     var filteredPartition: PortPartition {
-        PortDirectoryMatcher.partition(filteredPorts, devDirectories: effectiveDevDirectoryPaths)
+        let currentPorts = ports
+        let q = portQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dirPaths = effectiveDevDirectoryPaths
+        if q.isEmpty {
+            return allPartition
+        }
+        if let key = cachedFilteredPartitionKey,
+           let val = cachedFilteredPartitionValue,
+           key.ports == currentPorts && key.query == q && key.dirPaths == dirPaths {
+            return val
+        }
+        let computed = PortDirectoryMatcher.partition(filteredPorts, devDirectories: dirPaths)
+        cachedFilteredPartitionKey = (currentPorts, q, dirPaths)
+        cachedFilteredPartitionValue = computed
+        return computed
     }
 
     func refreshPorts() async {

@@ -268,6 +268,7 @@ private struct DataBackupSettingsSection: View {
 
         isBusy = true
         feedback = nil
+        app.settings.flushDeferredWrites()
         let db = app.database
         let version = Bundle.main.displayVersion
         Task {
@@ -293,6 +294,7 @@ private struct DataBackupSettingsSection: View {
     private func performRestore(from url: URL) {
         isBusy = true
         feedback = nil
+        app.settings.flushDeferredWrites()
         let db = app.database
         let migrations = app.plugins.flatMap(\.migrations)
         Task {

@@ -106,4 +106,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 关掉主窗口不退出，菜单栏图标常驻。
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        app?.settings.flushDeferredWrites()
+    }
 }

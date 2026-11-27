@@ -95,6 +95,16 @@ public nonisolated struct WorkLedgerSummary: Sendable, Equatable {
         anomalyDays: []
     )
 
+    private static let sharedTimeFormatter: DateFormatter = {
+        let cal = Calendar(identifier: .gregorian)
+        let f = DateFormatter()
+        f.calendar = cal
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
     public static func computeSummary(
         year: Int,
         dates: [Date],
@@ -108,11 +118,7 @@ public nonisolated struct WorkLedgerSummary: Sendable, Equatable {
         offWorkTextByDate: [String: String] = [:]
     ) -> WorkLedgerSummary {
         let cal = Calendar(identifier: .gregorian)
-        let timeFmt = DateFormatter()
-        timeFmt.calendar = cal
-        timeFmt.locale = Locale(identifier: "en_US_POSIX")
-        timeFmt.timeZone = .current
-        timeFmt.dateFormat = "HH:mm"
+        let timeFmt = sharedTimeFormatter
 
         var totalNormal = 0.0
         var totalOvertime = 0.0
@@ -321,11 +327,25 @@ final class WorkLedgerModel {
     var attendanceSyncError: String?
 
     @ObservationIgnored private var rawItemsByDate: [String: [DailyLogItem]] = [:]
+    @ObservationIgnored private var lastLoadedPeriodKey: String?
+    @ObservationIgnored private var lastRemoteSyncAtByKey: [String: Date] = [:]
 
     init(context: PluginContext) {
         self.context = context
         self.dailyLogService = ZentaoDailyLogService(database: context.database, settings: context.settings)
-        loadLocal()
+    }
+
+    var currentPeriodCacheKey: String {
+        "\(mode.rawValue)-\(periodTitle)"
+    }
+
+    var hasLoadedCurrentPeriod: Bool {
+        lastLoadedPeriodKey == currentPeriodCacheKey
+    }
+
+    func shouldAutoSyncRemote(cooldown: TimeInterval = 60) -> Bool {
+        guard let last = lastRemoteSyncAtByKey[currentPeriodCacheKey] else { return true }
+        return Date().timeIntervalSince(last) >= cooldown
     }
 
     var isZentaoConfigured: Bool { dailyLogService.isZentaoConfigured }
@@ -394,6 +414,7 @@ final class WorkLedgerModel {
         let (start, end) = activeRangeStrings()
         let items = dailyLogService.loadLocal(from: start, to: end, includeDrafts: includeDrafts)
         rawItemsByDate = items
+        lastLoadedPeriodKey = currentPeriodCacheKey
         recomputeSummary(with: items)
     }
 
@@ -401,11 +422,14 @@ final class WorkLedgerModel {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
+        let targetKey = currentPeriodCacheKey
         let (start, end) = activeRangeStrings()
         let result = await dailyLogService.fetch(from: start, to: end, includeDrafts: includeDrafts)
         rawItemsByDate = result.itemsByDate
         syncedFromZentao = result.syncedFromZentao
         remoteError = result.remoteError
+        lastLoadedPeriodKey = targetKey
+        lastRemoteSyncAtByKey[targetKey] = Date()
         recomputeSummary(with: result.itemsByDate)
     }
 

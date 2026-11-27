@@ -6,6 +6,7 @@ import ZentaoLogPlugin
 struct ScratchpadMainView: View {
     let context: PluginContext
     @Environment(\.sidebarCollapsed) private var sidebarCollapsed
+    @Environment(\.isPageActive) private var isPageActive
 
     enum SectionTab: String, CaseIterable, Hashable {
         case notes = "便签笔记"
@@ -136,6 +137,11 @@ struct ScratchpadMainView: View {
             }
             if selectedSnippetID == nil {
                 selectSnippet(clipboardStore.snippetItems.first)
+            }
+        }
+        .onChange(of: isPageActive) { _, active in
+            if !active {
+                flushSave()
             }
         }
         .onDisappear {

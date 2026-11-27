@@ -106,7 +106,8 @@ struct MainView: View {
                 app: app,
                 activePageID: activeNativeID,
                 validPageIDs: validNativeIDs,
-                sidebarCollapsed: collapsed
+                sidebarCollapsed: collapsed,
+                trimToken: app.pageDeckTrimToken
             )
             .id(app.pageDeckResetToken)
             .allowsHitTesting(selectedWebPlugin == nil)
@@ -145,6 +146,7 @@ private struct NativePageDeck: NSViewRepresentable {
     let activePageID: String?
     let validPageIDs: Set<String>
     let sidebarCollapsed: Bool
+    let trimToken: Int
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -167,6 +169,10 @@ private struct NativePageDeck: NSViewRepresentable {
     private func updateView(_ container: PageDeckContainerView, coordinator: Coordinator) {
         coordinator.environment.sidebarCollapsed = sidebarCollapsed
         coordinator.environment.activePageID = activePageID
+        if coordinator.lastTrimToken != trimToken {
+            coordinator.lastTrimToken = trimToken
+            container.trimInactivePages(keepActiveID: activePageID)
+        }
         container.syncPages(
             activePageID: activePageID,
             validPageIDs: validPageIDs,
@@ -191,6 +197,7 @@ private struct NativePageDeck: NSViewRepresentable {
 
     final class Coordinator {
         let environment = PageDeckEnvironment()
+        var lastTrimToken = 0
     }
 }
 
@@ -268,6 +275,13 @@ private final class PageDeckContainerView: NSView {
                 break
             }
             evictPage(id: victim)
+        }
+    }
+
+    func trimInactivePages(keepActiveID: String?) {
+        let toRemove = cachedHostingViews.keys.filter { $0 != AppModel.homeID && $0 != keepActiveID }
+        for id in toRemove {
+            evictPage(id: id)
         }
     }
 

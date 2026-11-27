@@ -90,22 +90,31 @@ public nonisolated struct WorkspaceSearchHit: Identifiable, Sendable, Equatable 
 
 /// 跨模块 SQLite 历史全文搜索引擎（安全兼容可选插件表）。
 public nonisolated enum WorkspaceSearchEngine {
+    @concurrent
+    public static func searchAsync(
+        database: AppDatabase,
+        query: String,
+        limit: Int = 30
+    ) async -> [WorkspaceSearchHit] {
+        search(database: database, query: query, limit: limit)
+    }
+
     public static func search(database: AppDatabase, query: String, limit: Int = 30) -> [WorkspaceSearchHit] {
         let tokens = query
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .split(whereSeparator: \.isWhitespace)
-            .map { $0.lowercased() }
+            .map(String.init)
         guard !tokens.isEmpty, limit > 0 else { return [] }
 
         var hits: [WorkspaceSearchHit] = []
-        let dayFormatter = DateFormatter()
-        dayFormatter.calendar = Calendar(identifier: .gregorian)
-        dayFormatter.locale = Locale(identifier: "en_US_POSIX")
-        dayFormatter.dateFormat = "yyyy-MM-dd"
 
         try? database.pool.read { db in
+            let existingTables = Set(
+                (try? String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'")) ?? []
+            )
+
             // 1. 已提交禅道日报
-            if try db.tableExists("zentaoSubmission") {
+            if existingTables.contains("zentaoSubmission") {
                 let rows = try Row.fetchAll(
                     db,
                     sql: "SELECT id, date, taskID, hours, work FROM zentaoSubmission ORDER BY date DESC, id DESC LIMIT 400"
@@ -132,7 +141,7 @@ public nonisolated enum WorkspaceSearchEngine {
             }
 
             // 2. 待提交禅道草稿
-            if try db.tableExists("zentaoPendingDraft") {
+            if existingTables.contains("zentaoPendingDraft") {
                 let rows = try Row.fetchAll(
                     db,
                     sql: "SELECT date, payload FROM zentaoPendingDraft ORDER BY date DESC LIMIT 120"
@@ -165,7 +174,7 @@ public nonisolated enum WorkspaceSearchEngine {
             }
 
             // 3. 周报
-            if try db.tableExists("weeklyReport") {
+            if existingTables.contains("weeklyReport") {
                 let rows = try Row.fetchAll(
                     db,
                     sql: "SELECT weekStart, weekEnd, title, content, extraNotes FROM weeklyReport ORDER BY weekStart DESC LIMIT 120"
@@ -191,7 +200,7 @@ public nonisolated enum WorkspaceSearchEngine {
             }
 
             // 4. 月报
-            if try db.tableExists("monthlyReport") {
+            if existingTables.contains("monthlyReport") {
                 let rows = try Row.fetchAll(
                     db,
                     sql: "SELECT monthKey, title, content, extraNotes FROM monthlyReport ORDER BY monthKey DESC LIMIT 60"
@@ -216,7 +225,7 @@ public nonisolated enum WorkspaceSearchEngine {
             }
 
             // 5. 季度与年度述职总结
-            if try db.tableExists("reviewReport") {
+            if existingTables.contains("reviewReport") {
                 let rows = try Row.fetchAll(
                     db,
                     sql: "SELECT periodKey, periodStart, periodEnd, title, content, extraNotes FROM reviewReport ORDER BY updatedAt DESC LIMIT 60"
@@ -243,7 +252,7 @@ public nonisolated enum WorkspaceSearchEngine {
             }
 
             // 6. 待办与备忘
-            if try db.tableExists("todoItem") {
+            if existingTables.contains("todoItem") {
                 let rows = try Row.fetchAll(
                     db,
                     sql: "SELECT id, title, notes, dueDate, isCompleted, updatedAt FROM todoItem ORDER BY isCompleted ASC, updatedAt DESC LIMIT 400"
@@ -256,7 +265,7 @@ public nonisolated enum WorkspaceSearchEngine {
                     let isCompleted: Bool = row["isCompleted"] ?? false
                     let updatedAt: Date? = row["updatedAt"]
                     let statusText = isCompleted ? "已完成" : "待完成"
-                    let dateLabel = dueDate.map { "截止 \($0) · \(statusText)" } ?? (updatedAt.map { "\(dayFormatter.string(from: $0)) · \(statusText)" } ?? statusText)
+                    let dateLabel = dueDate.map { "截止 \($0) · \(statusText)" } ?? (updatedAt.map { "\(WorkCalendar.dayString($0)) · \(statusText)" } ?? statusText)
                     if let hit = buildHit(
                         id: "todo.\(id)",
                         source: .todo,
@@ -272,7 +281,7 @@ public nonisolated enum WorkspaceSearchEngine {
             }
 
             // 7. 随手便签
-            if try db.tableExists("scratchpadNote") {
+            if existingTables.contains("scratchpadNote") {
                 let rows = try Row.fetchAll(
                     db,
                     sql: "SELECT id, title, content, updatedAt FROM scratchpadNote ORDER BY isPinned DESC, updatedAt DESC LIMIT 300"
@@ -289,7 +298,7 @@ public nonisolated enum WorkspaceSearchEngine {
                         source: .scratchpad,
                         title: displayTitle,
                         body: content,
-                        dateText: updatedAt.map { dayFormatter.string(from: $0) },
+                        dateText: updatedAt.map { WorkCalendar.dayString($0) },
                         copyText: content,
                         tokens: tokens,
                         baseBonus: 25
@@ -300,7 +309,7 @@ public nonisolated enum WorkspaceSearchEngine {
             }
 
             // 8. 剪贴板历史与常用片段
-            if try db.tableExists("clipboardHistory") {
+            if existingTables.contains("clipboardHistory") {
                 let rows = try Row.fetchAll(
                     db,
                     sql: "SELECT id, snippetTitle, content, isSnippet, sourceApp, copiedAt FROM clipboardHistory ORDER BY isSnippet DESC, copiedAt DESC LIMIT 300"
@@ -314,7 +323,7 @@ public nonisolated enum WorkspaceSearchEngine {
                     let copiedAt: Date? = row["copiedAt"]
                     let cleanTitle = snippetTitle.trimmingCharacters(in: .whitespacesAndNewlines)
                     let displayTitle = cleanTitle.isEmpty ? firstNonEmptyLine(of: content, fallback: "剪贴板文本") : cleanTitle
-                    let datePart = copiedAt.map { dayFormatter.string(from: $0) } ?? ""
+                    let datePart = copiedAt.map { WorkCalendar.dayString($0) } ?? ""
                     let meta = [isSnippet ? "常用片段" : (sourceApp.isEmpty ? "剪贴板" : sourceApp), datePart]
                         .filter { !$0.isEmpty }
                         .joined(separator: " · ")
@@ -334,7 +343,7 @@ public nonisolated enum WorkspaceSearchEngine {
             }
 
             // 9. 首页 AI 对话消息
-            if try db.tableExists("chatMessage"), try db.tableExists("chatThread") {
+            if existingTables.contains("chatMessage"), existingTables.contains("chatThread") {
                 let rows = try Row.fetchAll(
                     db,
                     sql: """
@@ -354,7 +363,7 @@ public nonisolated enum WorkspaceSearchEngine {
                     let threadTitle: String = row["threadTitle"] ?? "工作台对话"
                     let createdAt: Date? = row["createdAt"]
                     let roleLabel = role == "user" ? "提问" : "回复"
-                    let dateLabel = [roleLabel, createdAt.map { dayFormatter.string(from: $0) } ?? ""]
+                    let dateLabel = [roleLabel, createdAt.map { WorkCalendar.dayString($0) } ?? ""]
                         .filter { !$0.isEmpty }
                         .joined(separator: " · ")
                     if let hit = buildHit(
@@ -392,22 +401,20 @@ public nonisolated enum WorkspaceSearchEngine {
         tokens: [String],
         baseBonus: Int
     ) -> WorkspaceSearchHit? {
-        let lowerTitle = title.lowercased()
-        let lowerBody = body.lowercased()
-        let lowerDate = (dateText ?? "").lowercased()
-
         var score = baseBonus
         for token in tokens {
-            let inTitle = lowerTitle.contains(token)
-            let inBody = lowerBody.contains(token)
-            let inDate = lowerDate.contains(token)
-            guard inTitle || inBody || inDate else { return nil }
-            if lowerTitle == token {
-                score += 120
-            } else if lowerTitle.hasPrefix(token) {
-                score += 75
-            } else if inTitle {
-                score += 45
+            let titleRange = title.range(of: token, options: [.caseInsensitive])
+            let inBody = body.range(of: token, options: [.caseInsensitive]) != nil
+            let inDate = dateText?.range(of: token, options: [.caseInsensitive]) != nil
+            guard titleRange != nil || inBody || inDate else { return nil }
+            if let titleRange {
+                if titleRange.lowerBound == title.startIndex && titleRange.upperBound == title.endIndex {
+                    score += 120
+                } else if titleRange.lowerBound == title.startIndex {
+                    score += 75
+                } else {
+                    score += 45
+                }
             }
             if inBody { score += 20 }
             if inDate { score += 10 }
@@ -437,8 +444,7 @@ public nonisolated enum WorkspaceSearchEngine {
         guard !singleLine.isEmpty else { return "" }
         guard singleLine.count > maxLength else { return singleLine }
 
-        let lower = singleLine.lowercased()
-        if let firstRange = tokens.compactMap({ lower.range(of: $0) }).min(by: { $0.lowerBound < $1.lowerBound }) {
+        if let firstRange = tokens.compactMap({ singleLine.range(of: $0, options: [.caseInsensitive]) }).min(by: { $0.lowerBound < $1.lowerBound }) {
             let matchPos = singleLine.distance(from: singleLine.startIndex, to: firstRange.lowerBound)
             let startOffset = max(0, matchPos - 22)
             let endOffset = min(singleLine.count, startOffset + maxLength)

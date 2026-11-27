@@ -429,7 +429,7 @@ struct HomeView: View {
     }
 
     private var greeting: String {
-        let h = Calendar.current.component(.hour, from: app.now)
+        let h = Calendar.current.component(.hour, from: Date())
         let part = switch h {
         case 5..<11: "早上好"
         case 11..<13: "中午好"

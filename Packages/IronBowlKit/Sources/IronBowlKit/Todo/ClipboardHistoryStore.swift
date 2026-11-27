@@ -118,14 +118,8 @@ public final class ClipboardHistoryStore {
     @ObservationIgnored private var ignoredChangeCount: Int?
 
     public private(set) var items: [ClipboardHistoryItem] = []
-
-    public var historyItems: [ClipboardHistoryItem] {
-        items.filter { !$0.isSnippet }
-    }
-
-    public var snippetItems: [ClipboardHistoryItem] {
-        items.filter(\.isSnippet)
-    }
+    public private(set) var historyItems: [ClipboardHistoryItem] = []
+    public private(set) var snippetItems: [ClipboardHistoryItem] = []
 
     public init(database: AppDatabase, settings: SettingsStore) {
         self.database = database
@@ -146,6 +140,18 @@ public final class ClipboardHistoryStore {
                 .fetchAll(db)
         }) ?? []
         items = fetched
+        var nextHistory: [ClipboardHistoryItem] = []
+        var nextSnippets: [ClipboardHistoryItem] = []
+        nextHistory.reserveCapacity(fetched.count)
+        for item in fetched {
+            if item.isSnippet {
+                nextSnippets.append(item)
+            } else {
+                nextHistory.append(item)
+            }
+        }
+        historyItems = nextHistory
+        snippetItems = nextSnippets
     }
 
     // MARK: - 剪贴板监听
@@ -185,7 +191,7 @@ public final class ClipboardHistoryStore {
         }
         guard let text = pb.string(forType: .string) else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, text.count <= 200_000 else { return }
+        guard !trimmed.isEmpty, text.count <= 100_000 else { return }
 
         let appName = frontApp?.localizedName ?? ""
         recordCopy(text, sourceApp: appName)

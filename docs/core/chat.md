@@ -10,12 +10,16 @@
 | `WorkbenchBridgeCLI.swift` | `WorkbenchBridgeCLI` | 生成并维护 `~/Library/Application Support/IronBowl/bin/ironbowl-cli` 本地桥接脚本，让首页 AI 可查询与联动工作台全库数据 |
 | `AIChatStreamParser.swift` | `AIChatStreamParser`, `AIChatStreamEvent` | 将 `agy --output-format stream-json` 与 `codex exec --json` 的 NDJSON 行解析为统一事件流 |
 | `AIChatRunner.swift` | `AIChatRunner` | 组装首次/续聊命令行参数并通过 `Shell.streamLines` 在指定工作目录流式执行 |
-| `ChatStore.swift` | `ChatStore` | 管理对话列表、当前选中对话、后台并行任务、中止/重试及 GRDB 持久化 |
+| `ChatStore.swift` | `ChatStore` | 管理对话列表、当前选中对话、会话消息按需懒加载（`ensureMessagesLoaded(for:)`）、后台并行任务、~30fps 流式增量节流与后台异步 Checkpoint、中止/重试及 GRDB 持久化 |
 
 ## 流式执行与会话续聊
 
 1. **进程流式管道**：[`Shell.streamLines`](../../Packages/IronBowlKit/Sources/IronBowlKit/Core/Shell.swift) 通过 `Pipe.readabilityHandler` 与 `LineCollector` 按行实时回调 stdout/stderr，并暴露 `ShellProcessHandle` 供界面随时终止子进程（`SIGTERM` 后超时补 `SIGKILL`）。
-2. **命令行参数策略（`AIChatRunner.buildArguments`）**：
+2. **会话按需懒加载与流式渲染节流**：
+   - `ChatStore.loadThreads()` 冷启动仅修正遗留 `streaming` 消息并加载 `chatThread` 列表与当前选中对话的消息；其余历史对话在 `selectThread(_:)` 或写入消息时通过 `ensureMessagesLoaded(for:)` 按需查询。
+   - 流式运行期间的高频 `.textDelta` / `.activityUpsert` 先累积到 `ActiveRun.workingMessage`，再按约 `32ms`（~30fps）合并写回 `@Observable` 数组并在终止或完成时强制全量刷回；`0.8s` 节流的中间落盘通过 `Task.detached` 执行带 `WHERE status = 'streaming'` 条件的异步更新。
+   - 对话正文的 [`DSMarkdown`](../../Packages/IronBowlKit/Sources/IronBowlKit/UI/DSMarkdown.swift) 内置线程安全（`NSLock`）的块级与行内解析缓存，配合 `Equatable` 块视图行减少长文流式重绘开销。
+3. **命令行参数策略（`AIChatRunner.buildArguments`）**：
    - **`agy`**：使用 `-p <prompt> --output-format stream-json`，续聊时追加 `--resume <conversation_id>`；`ChatPermissionMode.agent` 传 `--dangerously-skip-permissions`，`.readOnly` 传 `--sandbox`。
    - **`codex`**：首次会话使用 `exec --skip-git-repo-check -s <workspace-write|read-only> -c approval_policy="never" --json -C <workspacePath>`；续聊使用 `exec resume --skip-git-repo-check --json -c sandbox_mode="..." -c approval_policy="never" <thread_id> <prompt>`（工作目录通过子进程 `cwd` 传入）。
 3. **上下文兜底与对话级模型**：

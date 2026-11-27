@@ -15,6 +15,7 @@ public final class ChatStore {
     public var runningThreadIDs: Set<String> = []
 
     @ObservationIgnored private var activeRuns: [String: ActiveRun] = [:]
+    @ObservationIgnored private var loadedMessageThreadIDs: Set<String> = []
     @ObservationIgnored public var onTurnCompleted: (() -> Void)?
 
     public init(database: AppDatabase, settings: SettingsStore, providers: AIProviderStore) {
@@ -88,44 +89,51 @@ public final class ChatStore {
 
     // MARK: - 加载与增删改
 
+    public func ensureMessagesLoaded(for threadID: String) {
+        guard !loadedMessageThreadIDs.contains(threadID) else { return }
+        loadedMessageThreadIDs.insert(threadID)
+        let loaded = (try? database.pool.read { db in
+            try ChatMessageRow.fetchAll(
+                db,
+                sql: "SELECT * FROM chatMessage WHERE threadID = ? ORDER BY createdAt ASC",
+                arguments: [threadID]
+            ).map { $0.toMessage() }
+        }) ?? []
+
+        if let existing = messagesByThread[threadID], !existing.isEmpty {
+            let existingIDs = Set(existing.map(\.id))
+            let merged = loaded.filter { !existingIDs.contains($0.id) } + existing
+            messagesByThread[threadID] = merged.sorted { $0.createdAt < $1.createdAt }
+        } else {
+            messagesByThread[threadID] = loaded
+        }
+    }
+
     public func loadThreads() {
-        let loaded = (try? database.pool.read { db -> ([ChatThread], [String: [ChatMessage]]) in
+        let loadedThreads = (try? database.pool.write { db -> [ChatThread] in
+            // 仅修正上次异常退出的流式消息，避免冷启动全表反序列化历史消息。
+            try db.execute(
+                sql: """
+                UPDATE chatMessage
+                SET status = 'cancelled',
+                    errorMessage = COALESCE(errorMessage, '上次生成在完成前被中断。')
+                WHERE status = 'streaming'
+                """
+            )
             let threadRows = try ChatThreadRow.fetchAll(
                 db,
                 sql: "SELECT * FROM chatThread ORDER BY isPinned DESC, updatedAt DESC"
             )
-            let msgRows = try ChatMessageRow.fetchAll(
-                db,
-                sql: "SELECT * FROM chatMessage ORDER BY createdAt ASC"
-            )
-            let threads = threadRows.map { $0.toThread() }
-            var grouped: [String: [ChatMessage]] = [:]
-            for row in msgRows {
-                var msg = row.toMessage()
-                if msg.status == .streaming {
-                    msg.status = .cancelled
-                    msg.errorMessage = msg.errorMessage ?? "上次生成在完成前被中断。"
-                }
-                grouped[msg.threadID, default: []].append(msg)
-            }
-            return (threads, grouped)
-        }) ?? ([], [:])
+            return threadRows.map { $0.toThread() }
+        }) ?? []
 
-        self.threads = loaded.0
-        self.messagesByThread = loaded.1
-
-        // 若上次存在异常退出的流式消息，写回修正状态。
-        let staleMessages = loaded.1.values.flatMap { $0 }.filter { $0.status == .cancelled && $0.errorMessage == "上次生成在完成前被中断。" }
-        if !staleMessages.isEmpty {
-            try? database.pool.write { db in
-                for m in staleMessages {
-                    try ChatMessageRow(from: m).save(db)
-                }
-            }
-        }
+        self.threads = loadedThreads
+        self.messagesByThread = [:]
+        self.loadedMessageThreadIDs = []
 
         if let lastID = settings[ChatKeys.lastThreadID], threads.contains(where: { $0.id == lastID }) {
             selectedThreadID = lastID
+            ensureMessagesLoaded(for: lastID)
         } else {
             selectedThreadID = nil
         }
@@ -163,6 +171,7 @@ public final class ChatStore {
         threads.append(thread)
         sortThreads()
         messagesByThread[thread.id] = []
+        loadedMessageThreadIDs.insert(thread.id)
         persistThread(thread)
         selectThread(thread.id)
         return thread
@@ -171,6 +180,9 @@ public final class ChatStore {
     public func selectThread(_ id: String?) {
         selectedThreadID = id
         settings[ChatKeys.lastThreadID] = id
+        if let id {
+            ensureMessagesLoaded(for: id)
+        }
     }
 
     public func renameThread(_ id: String, title: String) {
@@ -242,6 +254,7 @@ public final class ChatStore {
         stopGeneration(threadID: id)
         threads.removeAll { $0.id == id }
         messagesByThread.removeValue(forKey: id)
+        loadedMessageThreadIDs.remove(id)
         try? database.pool.write { db in
             try db.execute(sql: "DELETE FROM chatThread WHERE id = ?", arguments: [id])
         }
@@ -259,6 +272,7 @@ public final class ChatStore {
         let targetThread: ChatThread
         if let tid = threadID ?? selectedThreadID, let existing = threads.first(where: { $0.id == tid }) {
             targetThread = existing
+            ensureMessagesLoaded(for: existing.id)
         } else {
             let title = cards.count == 1 ? "\(cards[0].label)卡片" : "今日功能卡片"
             targetThread = createThread(title: title)
@@ -285,6 +299,7 @@ public final class ChatStore {
         let targetThread: ChatThread
         if let tid = threadID ?? selectedThreadID, let existing = threads.first(where: { $0.id == tid }) {
             targetThread = existing
+            ensureMessagesLoaded(for: existing.id)
         } else {
             targetThread = createThread(title: Self.makeTitle(from: userText))
         }
@@ -356,6 +371,7 @@ public final class ChatStore {
         runningThreadIDs.insert(threadID)
 
         let runState = ActiveRun()
+        runState.workingMessage = assistantMessage
         activeRuns[threadID] = runState
         let startedAt = Date()
 
@@ -448,6 +464,7 @@ public final class ChatStore {
         runningThreadIDs.insert(threadID)
 
         let runState = ActiveRun()
+        runState.workingMessage = assistantMessage
         activeRuns[threadID] = runState
 
         let task = Task { [weak self] in
@@ -500,7 +517,14 @@ public final class ChatStore {
     }
 
     public func stopGeneration(threadID: String) {
+        ensureMessagesLoaded(for: threadID)
         guard let run = activeRuns[threadID] else { return }
+        run.uiFlushTask?.cancel()
+        run.uiFlushTask = nil
+        if let working = run.workingMessage,
+           let idx = messagesByThread[threadID]?.firstIndex(where: { $0.id == working.id }) {
+            messagesByThread[threadID]?[idx] = working
+        }
         run.handle?.cancel()
         run.task?.cancel()
         activeRuns.removeValue(forKey: threadID)
@@ -514,8 +538,9 @@ public final class ChatStore {
 
     public func retryMessage(_ assistantMessageID: String, in threadID: String) {
         guard !runningThreadIDs.contains(threadID),
-              let thread = threads.first(where: { $0.id == threadID }),
-              let messages = messagesByThread[threadID],
+              let thread = threads.first(where: { $0.id == threadID }) else { return }
+        ensureMessagesLoaded(for: threadID)
+        guard let messages = messagesByThread[threadID],
               let targetIdx = messages.firstIndex(where: { $0.id == assistantMessageID }) else { return }
 
         guard let userMsg = messages[..<targetIdx].last(where: { $0.role == .user }) else { return }
@@ -532,6 +557,18 @@ public final class ChatStore {
 
     // MARK: - 流式事件处理
 
+    private func flushWorkingMessageToUI(threadID: String, messageID: String) {
+        guard let runState = activeRuns[threadID] else { return }
+        runState.uiFlushTask?.cancel()
+        runState.uiFlushTask = nil
+        guard let working = runState.workingMessage,
+              let msgIndex = messagesByThread[threadID]?.firstIndex(where: { $0.id == messageID }) else {
+            return
+        }
+        runState.lastUIFlushedAt = Date()
+        messagesByThread[threadID]?[msgIndex] = working
+    }
+
     private func handleStreamEvent(
         _ event: AIChatStreamEvent?,
         rawLine: String,
@@ -539,8 +576,8 @@ public final class ChatStore {
         messageID: String
     ) {
         guard let msgIndex = messagesByThread[threadID]?.firstIndex(where: { $0.id == messageID }) else { return }
-        guard var msg = messagesByThread[threadID]?[msgIndex] else { return }
         let runState = activeRuns[threadID]
+        guard var msg = runState?.workingMessage ?? messagesByThread[threadID]?[msgIndex] else { return }
 
         if !rawLine.isEmpty {
             msg.rawEvents.append(rawLine)
@@ -549,9 +586,11 @@ public final class ChatStore {
             }
         }
 
+        var isImmediateUIEvent = false
         if let event {
             switch event {
             case .sessionStarted(let sessionID, _):
+                isImmediateUIEvent = true
                 if let tIdx = threads.firstIndex(where: { $0.id == threadID }) {
                     threads[tIdx].remoteSessionID = sessionID
                     persistThread(threads[tIdx])
@@ -595,6 +634,7 @@ public final class ChatStore {
                 upsertActivity(item, into: &msg.activities)
 
             case .completed(let duration, let usage, let finalText):
+                isImmediateUIEvent = true
                 if msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                    let finalText, !finalText.isEmpty {
                     msg.content = finalText
@@ -605,24 +645,53 @@ public final class ChatStore {
                 msg.status = .completed
 
             case .failed(let errorMsg):
+                isImmediateUIEvent = true
                 msg.errorMessage = errorMsg
                 markActivitiesFinished(&msg.activities, succeeded: false)
                 msg.status = .failed
             }
         }
 
-        msg.updatedAt = Date()
-        messagesByThread[threadID]?[msgIndex] = msg
-
         let now = Date()
-        if msg.status != .streaming || now.timeIntervalSince(runState?.lastPersistedAt ?? .distantPast) >= 0.8 {
+        msg.updatedAt = now
+        runState?.workingMessage = msg
+
+        // 对高频流式增量以 ~30fps（32ms）节流合并写回 @Observable 数组，降低 SwiftUI 重排与 Markdown 重解析频率。
+        if let runState, msg.status == .streaming, !isImmediateUIEvent {
+            let elapsed = now.timeIntervalSince(runState.lastUIFlushedAt)
+            let uiInterval: TimeInterval = 0.032
+            if elapsed >= uiInterval {
+                runState.uiFlushTask?.cancel()
+                runState.uiFlushTask = nil
+                runState.lastUIFlushedAt = now
+                messagesByThread[threadID]?[msgIndex] = msg
+            } else if runState.uiFlushTask == nil {
+                let remainingMs = max(1, Int(((uiInterval - elapsed) * 1000).rounded(.up)))
+                runState.uiFlushTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(remainingMs))
+                    guard !Task.isCancelled else { return }
+                    self?.flushWorkingMessageToUI(threadID: threadID, messageID: messageID)
+                }
+            }
+        } else {
+            runState?.uiFlushTask?.cancel()
+            runState?.uiFlushTask = nil
+            runState?.lastUIFlushedAt = now
+            messagesByThread[threadID]?[msgIndex] = msg
+        }
+
+        if msg.status != .streaming {
             runState?.lastPersistedAt = now
             persistMessage(msg)
+        } else if now.timeIntervalSince(runState?.lastPersistedAt ?? .distantPast) >= 0.8 {
+            runState?.lastPersistedAt = now
+            persistStreamingCheckpointAsync(msg)
         }
     }
 
     private func finalizeRun(threadID: String, messageID: String, result: ShellStreamResult) {
-        activeRuns.removeValue(forKey: threadID)
+        flushWorkingMessageToUI(threadID: threadID, messageID: messageID)
+        activeRuns.removeValue(forKey: threadID)?.uiFlushTask?.cancel()
         runningThreadIDs.remove(threadID)
 
         guard let msgIndex = messagesByThread[threadID]?.firstIndex(where: { $0.id == messageID }),
@@ -667,7 +736,8 @@ public final class ChatStore {
     }
 
     private func markCancelled(threadID: String, messageID: String) {
-        activeRuns.removeValue(forKey: threadID)
+        flushWorkingMessageToUI(threadID: threadID, messageID: messageID)
+        activeRuns.removeValue(forKey: threadID)?.uiFlushTask?.cancel()
         runningThreadIDs.remove(threadID)
         guard let msgIndex = messagesByThread[threadID]?.firstIndex(where: { $0.id == messageID }),
               var msg = messagesByThread[threadID]?[msgIndex] else { return }
@@ -683,7 +753,8 @@ public final class ChatStore {
     }
 
     private func markFailed(threadID: String, messageID: String, errorText: String) {
-        activeRuns.removeValue(forKey: threadID)
+        flushWorkingMessageToUI(threadID: threadID, messageID: messageID)
+        activeRuns.removeValue(forKey: threadID)?.uiFlushTask?.cancel()
         runningThreadIDs.remove(threadID)
         guard let msgIndex = messagesByThread[threadID]?.firstIndex(where: { $0.id == messageID }),
               var msg = messagesByThread[threadID]?[msgIndex] else { return }
@@ -705,6 +776,7 @@ public final class ChatStore {
     ) -> ChatThread {
         if let tid = explicitThreadID ?? selectedThreadID,
            let existing = threads.first(where: { $0.id == tid }) {
+            ensureMessagesLoaded(for: existing.id)
             var thread = existing
             if thread.providerKind != providerKind || thread.model != model || thread.workspacePath != workspacePath || thread.permissionMode != permissionMode {
                 updateThread(tid, providerKind: providerKind, model: model, workspacePath: workspacePath, permissionMode: permissionMode)
@@ -792,6 +864,7 @@ public final class ChatStore {
     }
 
     private func appendMessage(_ message: ChatMessage, to threadID: String) {
+        ensureMessagesLoaded(for: threadID)
         messagesByThread[threadID, default: []].append(message)
         persistMessage(message)
         if let idx = threads.firstIndex(where: { $0.id == threadID }) {
@@ -820,6 +893,31 @@ public final class ChatStore {
         let row = ChatMessageRow(from: message)
         try? database.pool.write { db in
             try row.save(db)
+        }
+    }
+
+    private func persistStreamingCheckpointAsync(_ message: ChatMessage) {
+        let row = ChatMessageRow(from: message)
+        let db = database
+        Task.detached(priority: .utility) {
+            // 仅在仍处于 streaming 状态时落盘中间态，避免覆盖终态记录。
+            try? db.pool.write { dbConn in
+                try dbConn.execute(
+                    sql: """
+                    UPDATE chatMessage
+                    SET content = ?, usageJSON = ?, activitiesJSON = ?, rawEventsJSON = ?, updatedAt = ?
+                    WHERE id = ? AND status = 'streaming'
+                    """,
+                    arguments: [
+                        row.content,
+                        row.usageJSON,
+                        row.activitiesJSON,
+                        row.rawEventsJSON,
+                        row.updatedAt,
+                        row.id
+                    ]
+                )
+            }
         }
     }
 
@@ -880,6 +978,9 @@ public final class ChatStore {
 private final class ActiveRun {
     var task: Task<Void, Never>?
     var handle: ShellProcessHandle?
+    var workingMessage: ChatMessage?
+    var uiFlushTask: Task<Void, Never>?
+    var lastUIFlushedAt: Date = .distantPast
     var lastPersistedAt: Date = .distantPast
     var sawActivitySinceText = false
     var activeCodexTextItemID: String?

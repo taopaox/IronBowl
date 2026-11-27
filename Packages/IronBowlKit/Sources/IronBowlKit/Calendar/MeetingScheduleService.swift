@@ -22,6 +22,45 @@ public nonisolated enum MeetingKeys {
     public static let hideAllDayEvents = SettingKey<Bool>("calendar.events.hideAllDay", default: true)
 }
 
+private nonisolated final class FlexibleDateParsers: @unchecked Sendable {
+    static let shared = FlexibleDateParsers()
+
+    private let lock = NSLock()
+    private let isoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private let iso: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+    private let dayFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+    private let dtFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return f
+    }()
+
+    func parse(_ str: String) -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let d = isoFrac.date(from: str) { return d }
+        if let d = iso.date(from: str) { return d }
+        if let d = dayFmt.date(from: str) { return d }
+        return dtFmt.date(from: str)
+    }
+}
+
 /// 单条会议或日程记录。
 public nonisolated struct MeetingEvent: Identifiable, Sendable, Equatable {
     public let id: String
@@ -223,25 +262,7 @@ public nonisolated struct MeetingEvent: Identifiable, Sendable, Equatable {
         guard let str = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !str.isEmpty else {
             return nil
         }
-        let isoFrac = ISO8601DateFormatter()
-        isoFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = isoFrac.date(from: str) { return d }
-
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        if let d = iso.date(from: str) { return d }
-
-        let dayFmt = DateFormatter()
-        dayFmt.calendar = Calendar(identifier: .gregorian)
-        dayFmt.locale = Locale(identifier: "en_US_POSIX")
-        dayFmt.dateFormat = "yyyy-MM-dd"
-        if let d = dayFmt.date(from: str) { return d }
-
-        let dtFmt = DateFormatter()
-        dtFmt.calendar = Calendar(identifier: .gregorian)
-        dtFmt.locale = Locale(identifier: "en_US_POSIX")
-        dtFmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return dtFmt.date(from: str)
+        return FlexibleDateParsers.shared.parse(str)
     }
 }
 

@@ -147,16 +147,57 @@ public final class WorkCalendar {
     @ObservationIgnored private var attendanceLastAttempt: Date?
     @ObservationIgnored private var dingtalkUserID: String?
 
-    nonisolated static let dayFormatter: DateFormatter = {
+    private nonisolated static let lunarFormatterLock = NSLock()
+    private nonisolated static let lunarFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .current
-        f.dateFormat = "yyyy-MM-dd"
+        f.calendar = Calendar(identifier: .chinese)
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "MMMd"
         return f
     }()
 
-    public nonisolated static func dayString(_ date: Date) -> String { dayFormatter.string(from: date) }
+    public nonisolated static func dayString(_ date: Date) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let c = cal.dateComponents([.year, .month, .day], from: date)
+        let y = c.year ?? 1970
+        let m = c.month ?? 1
+        let d = c.day ?? 1
+        let mm = m < 10 ? "0\(m)" : "\(m)"
+        let dd = d < 10 ? "0\(d)" : "\(d)"
+        return String(format: "%04d-%@-%@", y, mm, dd)
+    }
+
+    public nonisolated static func parseDay(_ key: String) -> Date? {
+        let parts = key.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              let y = Int(parts[0]),
+              let m = Int(parts[1]),
+              let d = Int(parts[2]),
+              (1...12).contains(m),
+              (1...31).contains(d) else {
+            return nil
+        }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        var dc = DateComponents()
+        dc.year = y
+        dc.month = m
+        dc.day = d
+        guard let date = cal.date(from: dc) else { return nil }
+        let check = cal.dateComponents([.year, .month, .day], from: date)
+        guard check.year == y, check.month == m, check.day == d else { return nil }
+        return date
+    }
+
+    private nonisolated static func hmText(_ date: Date) -> String {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+        let h = c.hour ?? 0
+        let m = c.minute ?? 0
+        let hh = h < 10 ? "0\(h)" : "\(h)"
+        let mm = m < 10 ? "0\(m)" : "\(m)"
+        return "\(hh):\(mm)"
+    }
 
     public init(database: AppDatabase, settings: SettingsStore) {
         self.database = database
@@ -327,18 +368,14 @@ public final class WorkCalendar {
     /// 某天的实际下班时间文字，比如「18:00」或跨零点时的「次日 00:30」。
     public func offWorkTimeText(on date: Date = Date()) -> String? {
         guard let end = effectiveWorkEnd(on: date) else { return nil }
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        let hhmm = f.string(from: end)
+        let hhmm = Self.hmText(end)
         return Calendar.current.isDate(end, inSameDayAs: date) ? hhmm : "次日 \(hhmm)"
     }
 
     /// 某天的上班时间文字：当天有打卡记录时显示实际打卡时间（HH:mm），否则显示配置的固定上班时间（work.start）。
     public func onWorkTimeText(on date: Date = Date()) -> String {
         if let clockIn = clockIn(on: date) {
-            let f = DateFormatter()
-            f.dateFormat = "HH:mm"
-            return f.string(from: clockIn)
+            return Self.hmText(clockIn)
         }
         return settings[Self.startKey]
     }
@@ -374,15 +411,13 @@ public final class WorkCalendar {
 
     /// 某天的上下班说明，比如「打卡 08:29 · 17:29 下班」、「打卡 08:55–18:06（已下班打卡）」、「打卡 08:29 · 19:29 下班（加班 2h）」或「08:30–17:30」。
     public func scheduleText(on date: Date = Date()) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
         let ot = overtimeHours(on: date)
         let otSuffix = ot > 0 ? "（加班 \(Self.hoursText(ot))h）" : ""
         if let ci = self.clockIn(on: date), let co = self.clockOut(on: date) {
-            return "打卡 \(f.string(from: ci))–\(f.string(from: co))（已下班打卡）"
+            return "打卡 \(Self.hmText(ci))–\(Self.hmText(co))（已下班打卡）"
         }
         if let clockIn = self.clockIn(on: date), let endText = offWorkTimeText(on: date) {
-            return "打卡 \(f.string(from: clockIn)) · \(endText) 下班\(otSuffix)"
+            return "打卡 \(Self.hmText(clockIn)) · \(endText) 下班\(otSuffix)"
         }
         if ot > 0, let endText = offWorkTimeText(on: date) {
             return "\(settings[Self.startKey])–\(endText)\(otSuffix)"
@@ -741,7 +776,7 @@ public final class WorkCalendar {
         let firsts = holidays.filter { $0.value.isOffDay && $0.key > today }
             .sorted { $0.key < $1.key }
             .filter { seen.insert($0.value.name).inserted }
-        guard let first = firsts.first, let d = Self.dayFormatter.date(from: first.key) else { return nil }
+        guard let first = firsts.first, let d = Self.parseDay(first.key) else { return nil }
         return (first.value.name, d)
     }
 
@@ -751,16 +786,14 @@ public final class WorkCalendar {
         return holidays.filter { $0.value.isOffDay && $0.key.hasPrefix("\(year)-") }
             .sorted { $0.key < $1.key }
             .filter { seen.insert($0.value.name).inserted }
-            .compactMap { kv in Self.dayFormatter.date(from: kv.key).map { (kv.value.name, $0) } }
+            .compactMap { kv in Self.parseDay(kv.key).map { (kv.value.name, $0) } }
     }
 
     /// 农历日期，比如"十月十七"。
     public nonisolated static func lunarString(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .chinese)
-        f.locale = Locale(identifier: "zh_CN")
-        f.dateFormat = "MMMd"
-        return f.string(from: date)
+        lunarFormatterLock.lock()
+        defer { lunarFormatterLock.unlock() }
+        return lunarFormatter.string(from: date)
     }
 
     /// 已缓存数据覆盖到的年份。

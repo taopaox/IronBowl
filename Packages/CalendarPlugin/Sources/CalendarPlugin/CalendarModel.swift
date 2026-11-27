@@ -741,8 +741,6 @@ public final class CalendarModel {
     func countdownText(for d: Date) -> String {
         let today = Self.cal.startOfDay(for: Date())
         let days = Self.cal.dateComponents([.day], from: today, to: Self.cal.startOfDay(for: d)).day ?? 0
-        let f = DateFormatter()
-        f.dateFormat = "yyyy年M月d日"
         if days == 0 {
             if let h = workCalendar.nextHoliday(after: today) {
                 let n = Self.cal.dateComponents([.day], from: today, to: h.date).day ?? 0
@@ -750,7 +748,9 @@ public final class CalendarModel {
             }
             return "今天"
         }
-        return days > 0 ? "距离 \(f.string(from: d)) 还有 \(days) 天" : "距离 \(f.string(from: d)) 已经过去 \(-days) 天"
+        let c = Self.cal.dateComponents([.year, .month, .day], from: d)
+        let dateText = "\(c.year ?? 1970)年\(c.month ?? 1)月\(c.day ?? 1)日"
+        return days > 0 ? "距离 \(dateText) 还有 \(days) 天" : "距离 \(dateText) 已经过去 \(-days) 天"
     }
 
     func dayBadge(_ d: Date) -> String? {

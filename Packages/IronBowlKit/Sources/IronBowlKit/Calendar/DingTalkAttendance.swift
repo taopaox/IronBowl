@@ -119,8 +119,8 @@ public enum DingTalkAttendance {
         startDay: String,
         endDay: String
     ) async throws -> [String: DingTalkDayAttendance] {
-        guard let startDate = WorkCalendar.dayFormatter.date(from: startDay),
-              let endDate = WorkCalendar.dayFormatter.date(from: endDay),
+        guard let startDate = WorkCalendar.parseDay(startDay),
+              let endDate = WorkCalendar.parseDay(endDay),
               startDate <= endDate else {
             return [:]
         }

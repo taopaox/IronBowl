@@ -164,3 +164,23 @@ import Testing
     #expect(diff.contains { $0.kind == .removed && $0.text.contains("2") })
     #expect(diff.contains { $0.kind == .added && $0.text.contains("3") })
 }
+
+@Test func devConvertersLineDiffTrimsPrefixSuffixAndLargeFallback() {
+    let left = (["h1", "h2", "old-mid-1", "old-mid-2", "t1", "t2"]).joined(separator: "\n")
+    let right = (["h1", "h2", "new-mid", "t1", "t2"]).joined(separator: "\n")
+    let diff = DevConverters.computeLineDiff(left: left, right: right)
+
+    #expect(diff.map(\.kind) == [.unchanged, .unchanged, .removed, .removed, .added, .unchanged, .unchanged])
+    #expect(diff[0].leftLineNumber == 1 && diff[0].rightLineNumber == 1)
+    #expect(diff[1].leftLineNumber == 2 && diff[1].rightLineNumber == 2)
+    #expect(diff[5].leftLineNumber == 5 && diff[5].rightLineNumber == 4 && diff[5].text == "t1")
+    #expect(diff[6].leftLineNumber == 6 && diff[6].rightLineNumber == 5 && diff[6].text == "t2")
+
+    // 超出 LCS DP 阈值（n * m > 1_500_000）时平稳退化为线性输出且保持行号精确
+    let largeLeft = (0..<1300).map { "L\($0)" }.joined(separator: "\n")
+    let largeRight = (0..<1300).map { "R\($0)" }.joined(separator: "\n")
+    let largeDiff = DevConverters.computeLineDiff(left: largeLeft, right: largeRight)
+    #expect(largeDiff.count == 2600)
+    #expect(largeDiff.first?.kind == .removed && largeDiff.first?.leftLineNumber == 1)
+    #expect(largeDiff.last?.kind == .added && largeDiff.last?.rightLineNumber == 1300)
+}

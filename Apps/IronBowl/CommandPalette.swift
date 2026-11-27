@@ -24,6 +24,7 @@ final class CommandPaletteController {
     @ObservationIgnored private var handler: EventHandlerRef?
     @ObservationIgnored private var panel: CommandPalettePanel?
     @ObservationIgnored private var resignObserver: NSObjectProtocol?
+    @ObservationIgnored private var searchTask: Task<Void, Never>?
 
     var query = ""
     var selectedIndex = 0
@@ -51,10 +52,7 @@ final class CommandPaletteController {
             matchedCommands = Array(commands.prefix(12))
         } else {
             matchedCommands = commands.filter { cmd in
-                let haystack = ([cmd.title, cmd.subtitle ?? "", cmd.badge ?? ""] + cmd.keywords)
-                    .joined(separator: " ")
-                    .lowercased()
-                return tokens.allSatisfy { haystack.contains($0) }
+                tokens.allSatisfy { cmd.searchHaystack.contains($0) }
             }
         }
 
@@ -128,6 +126,8 @@ final class CommandPaletteController {
     }
 
     func show() {
+        searchTask?.cancel()
+        searchTask = nil
         query = ""
         selectedIndex = 0
         rebuildCommands()
@@ -173,18 +173,38 @@ final class CommandPaletteController {
     }
 
     func dismiss() {
+        searchTask?.cancel()
+        searchTask = nil
         panel?.orderOut(nil)
     }
 
     func updateQuery(_ newValue: String) {
         query = newValue
         selectedIndex = 0
+        searchTask?.cancel()
+        searchTask = nil
+
         let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let app else {
             hits = []
             return
         }
-        hits = WorkspaceSearchEngine.search(database: app.database, query: trimmed, limit: 24)
+
+        let database = app.database
+        searchTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled else { return }
+            let results = await WorkspaceSearchEngine.searchAsync(database: database, query: trimmed, limit: 24)
+            guard let self, !Task.isCancelled else { return }
+            guard self.query.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
+            self.hits = results
+            let count = self.visibleEntries.count
+            if count == 0 {
+                self.selectedIndex = 0
+            } else if self.selectedIndex >= count {
+                self.selectedIndex = count - 1
+            }
+        }
     }
 
     func moveSelection(_ delta: Int) {

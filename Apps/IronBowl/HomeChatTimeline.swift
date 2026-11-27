@@ -11,10 +11,43 @@ struct HomeChatTimeline: View {
     let onRetry: (String) -> Void
 
     @State private var isNearBottom = true
+    @State private var lastAutoScrollAt: Date = .distantPast
+    @State private var pendingScrollTask: Task<Void, Never>?
 
     private var lastMessageSignature: String {
         guard let last = messages.last else { return "" }
         return "\(last.id)|\(last.content.count)|\(last.activities.count)|\(last.status.rawValue)"
+    }
+
+    private func scheduleStreamingScroll(proxy: ScrollViewProxy) {
+        guard isNearBottom else { return }
+        if messages.last?.status != .streaming {
+            pendingScrollTask?.cancel()
+            pendingScrollTask = nil
+            lastAutoScrollAt = Date()
+            proxy.scrollTo("chat-bottom", anchor: .bottom)
+            return
+        }
+
+        let now = Date()
+        let interval: TimeInterval = 0.06
+        let elapsed = now.timeIntervalSince(lastAutoScrollAt)
+        if elapsed >= interval {
+            pendingScrollTask?.cancel()
+            pendingScrollTask = nil
+            lastAutoScrollAt = now
+            proxy.scrollTo("chat-bottom", anchor: .bottom)
+        } else if pendingScrollTask == nil {
+            let remainingMs = max(1, Int(((interval - elapsed) * 1000).rounded(.up)))
+            pendingScrollTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(remainingMs))
+                guard !Task.isCancelled else { return }
+                pendingScrollTask = nil
+                guard isNearBottom else { return }
+                lastAutoScrollAt = Date()
+                proxy.scrollTo("chat-bottom", anchor: .bottom)
+            }
+        }
     }
 
     var body: some View {
@@ -55,14 +88,15 @@ struct HomeChatTimeline: View {
                     isNearBottom = near
                 }
                 .onChange(of: messages.count) { _, _ in
+                    pendingScrollTask?.cancel()
+                    pendingScrollTask = nil
+                    lastAutoScrollAt = Date()
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo("chat-bottom", anchor: .bottom)
                     }
                 }
                 .onChange(of: lastMessageSignature) { _, _ in
-                    if isNearBottom {
-                        proxy.scrollTo("chat-bottom", anchor: .bottom)
-                    }
+                    scheduleStreamingScroll(proxy: proxy)
                 }
                 .onAppear {
                     proxy.scrollTo("chat-bottom", anchor: .bottom)

@@ -1187,73 +1187,84 @@ private struct JournalMarkdownReportView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(blocks) { block in
-                switch block {
-                case .heading(_, let level, let text):
-                    if level == 2 {
-                        HStack(spacing: 8) {
-                            RoundedRectangle(cornerRadius: 1.5)
-                                .fill(chapterColor)
-                                .frame(width: 3.5, height: DS.s(16))
-                            Text(ReportMarkdown.attributedInline(text))
-                                .font(JournalPalette.serif(16.5, .bold))
-                                .foregroundStyle(palette.ink)
-                        }
-                        .padding(.top, 10)
-                        .padding(.bottom, 2)
-                    } else {
-                        Text(ReportMarkdown.attributedInline(text))
-                            .font(level == 1 ? JournalPalette.serif(19, .bold) : DS.font(14.5, .semibold))
-                            .foregroundStyle(palette.ink)
-                            .padding(.top, level == 1 ? 4 : 6)
-                    }
-                case .bullet(_, let indentLevel, let marker, let text):
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(marker)
-                            .font(DS.body.monospacedDigit())
-                            .foregroundStyle(palette.inkSecondary)
-                            .frame(minWidth: DS.s(18), alignment: .trailing)
-                        Text(ReportMarkdown.attributedInline(text))
-                            .font(DS.body)
-                            .foregroundStyle(palette.ink)
-                            .lineSpacing(6)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.leading, CGFloat(4 + indentLevel * 18))
-                case .blockquote(_, let text):
-                    HStack(alignment: .top, spacing: 10) {
-                        RoundedRectangle(cornerRadius: 1.5)
-                            .fill(palette.borderStrong)
-                            .frame(width: 3)
-                        Text(ReportMarkdown.attributedInline(text))
-                            .font(DS.body)
-                            .foregroundStyle(palette.inkSecondary)
-                            .lineSpacing(6)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.vertical, 2)
-                case .codeBlock(_, let code):
-                    Text(code)
-                        .font(DS.mono(12.5))
-                        .foregroundStyle(palette.ink)
-                        .lineSpacing(4)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(palette.paperAlt, in: .rect(cornerRadius: 8))
-                case .divider:
-                    Divider()
-                        .overlay(palette.borderStrong)
-                        .padding(.vertical, 4)
-                case .paragraph(_, let text):
-                    Text(ReportMarkdown.attributedInline(text))
-                        .font(DS.body)
-                        .foregroundStyle(palette.ink)
-                        .lineSpacing(6)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                JournalMarkdownBlockRow(block: block, palette: palette, chapterColor: chapterColor)
+                    .equatable()
             }
         }
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct JournalMarkdownBlockRow: View, Equatable {
+    let block: ReportMarkdownBlock
+    let palette: JournalPalette
+    let chapterColor: Color
+
+    var body: some View {
+        switch block {
+        case .heading(_, let level, let text):
+            if level == 2 {
+                HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(chapterColor)
+                        .frame(width: 3.5, height: DS.s(16))
+                    Text(ReportMarkdown.attributedInline(text))
+                        .font(JournalPalette.serif(16.5, .bold))
+                        .foregroundStyle(palette.ink)
+                }
+                .padding(.top, 10)
+                .padding(.bottom, 2)
+            } else {
+                Text(ReportMarkdown.attributedInline(text))
+                    .font(level == 1 ? JournalPalette.serif(19, .bold) : DS.font(14.5, .semibold))
+                    .foregroundStyle(palette.ink)
+                    .padding(.top, level == 1 ? 4 : 6)
+            }
+        case .bullet(_, let indentLevel, let marker, let text):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(marker)
+                    .font(DS.body.monospacedDigit())
+                    .foregroundStyle(palette.inkSecondary)
+                    .frame(minWidth: DS.s(18), alignment: .trailing)
+                Text(ReportMarkdown.attributedInline(text))
+                    .font(DS.body)
+                    .foregroundStyle(palette.ink)
+                    .lineSpacing(6)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.leading, CGFloat(4 + indentLevel * 18))
+        case .blockquote(_, let text):
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(palette.borderStrong)
+                    .frame(width: 3)
+                Text(ReportMarkdown.attributedInline(text))
+                    .font(DS.body)
+                    .foregroundStyle(palette.inkSecondary)
+                    .lineSpacing(6)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 2)
+        case .codeBlock(_, let code):
+            Text(code)
+                .font(DS.mono(12.5))
+                .foregroundStyle(palette.ink)
+                .lineSpacing(4)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(palette.paperAlt, in: .rect(cornerRadius: 8))
+        case .divider:
+            Divider()
+                .overlay(palette.borderStrong)
+                .padding(.vertical, 4)
+        case .paragraph(_, let text):
+            Text(ReportMarkdown.attributedInline(text))
+                .font(DS.body)
+                .foregroundStyle(palette.ink)
+                .lineSpacing(6)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

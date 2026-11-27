@@ -47,6 +47,41 @@ public nonisolated enum MenuBarCardSegment: Sendable, Equatable {
     case inline(text: String, tone: MenuBarCardTone)
 }
 
+private nonisolated final class MenuBarCardImageCache: @unchecked Sendable {
+    struct Key: Equatable {
+        let segments: [MenuBarCardSegment]
+        let icon: String
+        let iconImageID: ObjectIdentifier?
+        let isDark: Bool
+        let scale: CGFloat
+    }
+
+    static let shared = MenuBarCardImageCache()
+
+    private let lock = NSLock()
+    private let maxEntries = 6
+    private var entries: [(key: Key, image: NSImage)] = []
+
+    func image(for key: Key) -> NSImage? {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries.first { $0.key == key }?.image
+    }
+
+    func store(_ image: NSImage, for key: Key) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let idx = entries.firstIndex(where: { $0.key == key }) {
+            entries[idx] = (key, image)
+            return
+        }
+        if entries.count >= maxEntries {
+            entries.removeFirst()
+        }
+        entries.append((key, image))
+    }
+}
+
 /// 主状态栏「双行微缩仪表卡」离线渲染器。
 /// 绘制为 22pt 高的透明底全彩非模板 `NSImage`（`isTemplate = false`），无深色底框，并根据深浅色自适应高对比度文字色调。
 public enum MenuBarCardRenderer {
@@ -72,6 +107,16 @@ public enum MenuBarCardRenderer {
         scale: CGFloat? = nil
     ) -> NSImage {
         let resolvedScale = max(1.0, scale ?? max(2.0, NSScreen.screens.map(\.backingScaleFactor).max() ?? 2.0))
+        let cacheKey = MenuBarCardImageCache.Key(
+            segments: segments,
+            icon: icon,
+            iconImageID: iconImage.map(ObjectIdentifier.init),
+            isDark: isDark,
+            scale: resolvedScale
+        )
+        if let cached = MenuBarCardImageCache.shared.image(for: cacheKey) {
+            return cached
+        }
         let iconFont = NSFont.systemFont(ofSize: 12)
         let topFont = NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .semibold)
         let bottomFont = NSFont.monospacedDigitSystemFont(ofSize: 10.0, weight: .bold)
@@ -203,6 +248,7 @@ public enum MenuBarCardRenderer {
         let image = NSImage(size: logicalSize)
         image.addRepresentation(rep)
         image.isTemplate = false
+        MenuBarCardImageCache.shared.store(image, for: cacheKey)
         return image
     }
 }

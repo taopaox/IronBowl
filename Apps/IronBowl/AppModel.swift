@@ -69,9 +69,12 @@ final class AppModel {
     var isMainWindowOpen = false
     /// 数据恢复后递增，触发原生页面保活容器销毁重建缓存页。
     var pageDeckResetToken = 0
+    /// 主窗口关闭后闲置收缩后台页面缓存的触发令牌。
+    var pageDeckTrimToken = 0
     /// 菜单栏倒计时用的时钟，每 30 秒更新。
     var now = Date()
     @ObservationIgnored private var clock: Timer?
+    @ObservationIgnored private var backgroundTrimTask: Task<Void, Never>?
     @ObservationIgnored var openMainWindow: (() -> Void)?
     @ObservationIgnored private var started = Set<String>()
 
@@ -445,8 +448,15 @@ final class AppModel {
 
     func mainWindow(isOpen: Bool) {
         isMainWindowOpen = isOpen
+        backgroundTrimTask?.cancel()
+        backgroundTrimTask = nil
         if !isOpen {
             webSessions.detachAllDisplays()
+            backgroundTrimTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(180))
+                guard let self, !Task.isCancelled, !self.isMainWindowOpen else { return }
+                self.pageDeckTrimToken &+= 1
+            }
         }
         applyDockMode()
         if isOpen { NSApp.activate() }

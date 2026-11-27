@@ -256,7 +256,12 @@ public nonisolated enum DevConverters {
         }
     }
 
-    // MARK: - 行级 Diff（LCS）
+    // MARK: - 行级 Diff（前后缀剪枝 + 扁平数组 LCS）
+
+    @concurrent
+    public static func computeLineDiffAsync(left: String, right: String, prettyJSON: Bool = false) async -> [DiffLine] {
+        computeLineDiff(left: left, right: right, prettyJSON: prettyJSON)
+    }
 
     public static func computeLineDiff(left: String, right: String, prettyJSON: Bool = false) -> [DiffLine] {
         let lText = prettyJSON ? (formatJSONString(left) ?? left) : left
@@ -264,44 +269,108 @@ public nonisolated enum DevConverters {
         let a = lText.components(separatedBy: .newlines)
         let b = rText.components(separatedBy: .newlines)
 
-        let n = a.count
-        let m = b.count
-        var dp = Array(repeating: Array(repeating: 0, count: m + 1), count: n + 1)
+        let totalA = a.count
+        let totalB = b.count
+
+        // 1. O(N) 裁剪公共前缀与公共后缀，大幅缩小 LCS DP 问题规模
+        var prefixCount = 0
+        let minCount = min(totalA, totalB)
+        while prefixCount < minCount && a[prefixCount] == b[prefixCount] {
+            prefixCount += 1
+        }
+
+        var suffixCount = 0
+        let remainingA = totalA - prefixCount
+        let remainingB = totalB - prefixCount
+        let maxSuffix = min(remainingA, remainingB)
+        while suffixCount < maxSuffix && a[totalA - 1 - suffixCount] == b[totalB - 1 - suffixCount] {
+            suffixCount += 1
+        }
+
+        let midEndA = totalA - suffixCount
+        let midEndB = totalB - suffixCount
+        let n = midEndA - prefixCount
+        let m = midEndB - prefixCount
+
+        var raw: [(DiffLine.Kind, Int?, Int?, String)] = []
+        raw.reserveCapacity(max(totalA, totalB) + 8)
+
+        for idx in 0..<prefixCount {
+            raw.append((.unchanged, idx + 1, idx + 1, a[idx]))
+        }
+
         if n > 0 && m > 0 {
-            for i in stride(from: n - 1, through: 0, by: -1) {
-                for j in stride(from: m - 1, through: 0, by: -1) {
-                    if a[i] == b[j] {
-                        dp[i][j] = dp[i + 1][j + 1] + 1
-                    } else {
-                        dp[i][j] = max(dp[i + 1][j], dp[i][j + 1])
+            if n * m <= 1_500_000 {
+                let strideWidth = m + 1
+                var dp = [Int](repeating: 0, count: (n + 1) * strideWidth)
+                for i in stride(from: n - 1, through: 0, by: -1) {
+                    let rowBase = i * strideWidth
+                    let nextRowBase = (i + 1) * strideWidth
+                    let leftLine = a[prefixCount + i]
+                    for j in stride(from: m - 1, through: 0, by: -1) {
+                        if leftLine == b[prefixCount + j] {
+                            dp[rowBase + j] = dp[nextRowBase + j + 1] + 1
+                        } else {
+                            let down = dp[nextRowBase + j]
+                            let rightVal = dp[rowBase + j + 1]
+                            dp[rowBase + j] = down >= rightVal ? down : rightVal
+                        }
                     }
                 }
+
+                var i = 0
+                var j = 0
+                while i < n && j < m {
+                    let absLeft = prefixCount + i
+                    let absRight = prefixCount + j
+                    if a[absLeft] == b[absRight] {
+                        raw.append((.unchanged, absLeft + 1, absRight + 1, a[absLeft]))
+                        i += 1
+                        j += 1
+                    } else if dp[(i + 1) * strideWidth + j] >= dp[i * strideWidth + j + 1] {
+                        raw.append((.removed, absLeft + 1, nil, a[absLeft]))
+                        i += 1
+                    } else {
+                        raw.append((.added, nil, absRight + 1, b[absRight]))
+                        j += 1
+                    }
+                }
+                while i < n {
+                    let absLeft = prefixCount + i
+                    raw.append((.removed, absLeft + 1, nil, a[absLeft]))
+                    i += 1
+                }
+                while j < m {
+                    let absRight = prefixCount + j
+                    raw.append((.added, nil, absRight + 1, b[absRight]))
+                    j += 1
+                }
+            } else {
+                // 超大完全不同文本降级为线性输出，防止 DP 分配过大致卡顿
+                for i in 0..<n {
+                    let absLeft = prefixCount + i
+                    raw.append((.removed, absLeft + 1, nil, a[absLeft]))
+                }
+                for j in 0..<m {
+                    let absRight = prefixCount + j
+                    raw.append((.added, nil, absRight + 1, b[absRight]))
+                }
+            }
+        } else {
+            for i in 0..<n {
+                let absLeft = prefixCount + i
+                raw.append((.removed, absLeft + 1, nil, a[absLeft]))
+            }
+            for j in 0..<m {
+                let absRight = prefixCount + j
+                raw.append((.added, nil, absRight + 1, b[absRight]))
             }
         }
 
-        var raw: [(DiffLine.Kind, Int?, Int?, String)] = []
-        var i = 0
-        var j = 0
-        while i < n && j < m {
-            if a[i] == b[j] {
-                raw.append((.unchanged, i + 1, j + 1, a[i]))
-                i += 1
-                j += 1
-            } else if dp[i + 1][j] >= dp[i][j + 1] {
-                raw.append((.removed, i + 1, nil, a[i]))
-                i += 1
-            } else {
-                raw.append((.added, nil, j + 1, b[j]))
-                j += 1
-            }
-        }
-        while i < n {
-            raw.append((.removed, i + 1, nil, a[i]))
-            i += 1
-        }
-        while j < m {
-            raw.append((.added, nil, j + 1, b[j]))
-            j += 1
+        for offset in 0..<suffixCount {
+            let absLeft = midEndA + offset
+            let absRight = midEndB + offset
+            raw.append((.unchanged, absLeft + 1, absRight + 1, a[absLeft]))
         }
 
         return raw.enumerated().map { idx, tuple in

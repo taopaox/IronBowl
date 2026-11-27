@@ -37,6 +37,13 @@ struct DevToolsMainView: View {
     @State private var diffLeft = ""
     @State private var diffRight = ""
     @State private var diffPrettyJSON = false
+    @State private var diffLines: [DiffLine] = []
+
+    private struct DiffTaskKey: Equatable {
+        let left: String
+        let right: String
+        let pretty: Bool
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -714,8 +721,7 @@ struct DevToolsMainView: View {
     // MARK: - 文本 Diff
 
     private var diffPane: some View {
-        let lines = DevConverters.computeLineDiff(left: diffLeft, right: diffRight, prettyJSON: diffPrettyJSON)
-        return VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Toggle("对比前自动美化两侧 JSON", isOn: $diffPrettyJSON)
                     .toggleStyle(.checkbox)
@@ -756,11 +762,11 @@ struct DevToolsMainView: View {
             }
 
             DSCard(padding: 12) {
-                VStack(alignment: .leading, spacing: 2) {
+                LazyVStack(alignment: .leading, spacing: 2) {
                     Text("行级差异对比")
                         .font(DS.sectionTitle)
                         .padding(.bottom, 6)
-                    ForEach(lines) { line in
+                    ForEach(diffLines) { line in
                         HStack(spacing: 8) {
                             Text(line.kind == .removed ? "-" : (line.kind == .added ? "+" : " "))
                                 .font(DS.mono(12))
@@ -781,6 +787,18 @@ struct DevToolsMainView: View {
                     }
                 }
             }
+        }
+        .task(id: DiffTaskKey(left: diffLeft, right: diffRight, pretty: diffPrettyJSON)) {
+            let left = diffLeft
+            let right = diffRight
+            let pretty = diffPrettyJSON
+            if left.utf8.count + right.utf8.count > 2_000 {
+                try? await Task.sleep(for: .milliseconds(80))
+                guard !Task.isCancelled else { return }
+            }
+            let computed = await DevConverters.computeLineDiffAsync(left: left, right: right, prettyJSON: pretty)
+            guard !Task.isCancelled else { return }
+            diffLines = computed
         }
     }
 }

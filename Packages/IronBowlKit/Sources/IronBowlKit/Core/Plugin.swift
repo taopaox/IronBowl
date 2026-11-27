@@ -262,6 +262,7 @@ public struct PaletteCommand: Identifiable {
     public let keywords: [String]
     public let systemImage: String
     public let badge: String?
+    public let searchHaystack: String
     public let action: () -> Void
 
     public init(
@@ -279,6 +280,9 @@ public struct PaletteCommand: Identifiable {
         self.keywords = keywords
         self.systemImage = systemImage
         self.badge = badge
+        self.searchHaystack = ([title, subtitle ?? "", badge ?? ""] + keywords)
+            .joined(separator: " ")
+            .lowercased()
         self.action = action
     }
 }

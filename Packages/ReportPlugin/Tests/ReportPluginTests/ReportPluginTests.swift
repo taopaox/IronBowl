@@ -1409,3 +1409,55 @@ import Testing
     #expect(summary.anomalyDays[0].reasons == "缺上班卡、缺下班卡")
     #expect(summary.dailyCells[0].clockOutText == "18:10")
 }
+
+@MainActor @Test func reportPluginRegistersScheduledAutoGenerateActionsAndProtectsExistingDrafts() async throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "report-sched-\(UUID().uuidString).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let migrations = ZentaoLogPlugin().migrations + ReportMigrations.all
+    let db = try AppDatabase(url: url, migrations: migrations)
+    let settings = SettingsStore(database: db)
+    let workCalendar = WorkCalendar(database: db, settings: settings)
+    let context = PluginContext(
+        database: db,
+        settings: settings,
+        reminders: ReminderCenter(database: db),
+        workCalendar: workCalendar,
+        providers: AIProviderStore(settings: settings),
+        openPlugin: { _ in },
+        openSettings: { _ in }
+    )
+
+    let weeklyPlugin = ReportPlugin()
+    let monthlyPlugin = MonthlyReportPlugin()
+    weeklyPlugin.start(context: context)
+    monthlyPlugin.start(context: context)
+    defer {
+        weeklyPlugin.stop()
+        monthlyPlugin.stop()
+    }
+
+    #expect(context.scheduler.action(id: ReportPlugin.autoGenerateActionID) != nil)
+    #expect(context.scheduler.action(id: MonthlyReportPlugin.autoGenerateActionID) != nil)
+    #expect(context.scheduler.tasks.contains { $0.id == ReportPlugin.defaultAutoGenerateTaskID })
+
+    // 1. 本周无任何日报时，自动跳过
+    await context.scheduler.runNow(taskID: ReportPlugin.defaultAutoGenerateTaskID)
+    #expect(context.scheduler.recentRuns.first?.status == .skipped)
+
+    // 2. 写入本周日志后运行，自动规则汇总生成周报
+    let logStore = LogStore(db: db)
+    let week = WeekRange.containing(Date())
+    logStore.add(Submission(id: nil, date: week.dayStrings[0], taskID: 1, hours: 8, left: 0, work: "1. 完成定时期末汇总", isOvertime: false, submittedAt: Date()))
+
+    await context.scheduler.runNow(taskID: ReportPlugin.defaultAutoGenerateTaskID)
+    #expect(context.scheduler.recentRuns.first?.status == .succeeded)
+    #expect(weeklyPlugin.model?.hasCurrentWeekReport == true)
+    #expect(weeklyPlugin.model?.reportContent.contains("完成定时期末汇总") == true)
+
+    // 3. 手动修改后再次不带覆盖标志运行，应保留既有内容
+    weeklyPlugin.model?.reportContent = "手工精修周报内容"
+    weeklyPlugin.model?.saveEditsIfNeeded()
+    await context.scheduler.runNow(taskID: ReportPlugin.defaultAutoGenerateTaskID)
+    #expect(weeklyPlugin.model?.reportContent == "手工精修周报内容")
+}

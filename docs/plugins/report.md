@@ -83,3 +83,11 @@
    - 在「设置 → 周报 → Tita 对接」点击「一键同步全部历史」，或在周报/月报页面历史弹层点击「同步 Tita」。
    - `TitaHistorySyncService` 调用 `POST summary/search`（`relation = 1`、`startTime/endTime = ""`）自动翻页拉取全部历史周报与月报，`TitaProseMirrorParser` 将 `dailyContent[].richContent` 的 ProseMirror JSON（兼容旧版 HTML）转换为 Markdown，`TitaPeriodCode.weekRange(fromSummaryDate:)` / `monthRange(fromSummaryDate:)` 反向映射为 `WeekRange` / `MonthRange`，合并写入 `weeklyReport` / `monthlyReport`（`providerName = "Tita 同步"`）。
    - 冲突保护：默认跳过已有非空且非 `"Tita 同步"` 来源的本地报告，仅补齐缺失周期或刷新先前由 Tita 同步的记录；设置页可选开启「覆盖本地已编辑的报告」。
+
+## 定时自动生成与 Tita 未交提醒
+
+`ReportPlugin` 与 `MonthlyReportPlugin` 在启动时分别向 `context.scheduler` 注册 `report.autoGenerateWeekly` 与 `report.autoGenerateMonthly` 定时动作，并在首次安装时写入内置默认任务 `builtin.report.weeklyAutoGenerate`：
+
+- **默认调度**：每周五 `17:30`（`MisfirePolicy.runIfMissedToday`），汇总本周每日日报（无日报时自动 `.skipped` 跳过）。
+- **防覆盖保护（`overwriteExisting`）**：默认 `false`，若本周已存在非空周报则保留既有内容不覆盖；开启后重新汇总生成。
+- **Tita 未交提醒（`remindIfTitaUnsubmitted`）**：默认 `true`，若已配置 Tita 且检测到当前周期尚未正式提交，则通过 `ReminderCenter` 弹出 `report.tita.unsubmitted.*` 提醒，支持一键跳转周报/月报页预览推送。

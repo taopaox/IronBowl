@@ -1151,4 +1151,80 @@ final class WeeklyReportModel {
         message = "Tita 历史同步完成：\(result.summaryText)"
         return result
     }
+
+    // MARK: - 定时自动生成与 Tita 未交提醒
+
+    func runScheduledAutoGenerate(
+        overwriteExisting: Bool,
+        remindIfTitaUnsubmitted: Bool,
+        notifyStyle: ReminderStyle,
+        now: Date = Date()
+    ) async -> ScheduledTaskOutcome {
+        let targetPluginID = periodKind == .weekly ? ReportPlugin.pluginID : MonthlyReportPlugin.pluginID
+        let noun = periodKind.displayName
+
+        switch periodKind {
+        case .weekly:
+            await selectWeek(WeekRange.containing(now))
+        case .monthly:
+            await selectMonth(MonthRange.containing(now))
+        }
+
+        let hasExtra = !extraNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard totalLogCount > 0 || hasExtra else {
+            return .skipped(
+                summary: "本周期暂无日报记录，跳过生成\(noun)",
+                detail: "区间 \(activePeriodRangeText) 暂未查到已提交工时或草稿记录。",
+                shouldNotifyOverride: false,
+                actionTitle: "打开\(noun)",
+                actionPluginID: targetPluginID
+            )
+        }
+
+        let hadExisting = hasReportContent
+        if !hadExisting || overwriteExisting {
+            await generate()
+            if !hasReportContent, let err = errorMessage {
+                return .failed(
+                    summary: "自动生成\(noun)失败",
+                    detail: err,
+                    actionTitle: "打开\(noun)",
+                    actionPluginID: targetPluginID
+                )
+            }
+        }
+
+        var titaHint = ""
+        if remindIfTitaUnsubmitted && isTitaConfigured {
+            await refreshTitaStatus()
+            if let status = titaStatus, !status.state.isSubmitted {
+                titaHint = "，Tita 尚未提交"
+                let reminder = ReminderContent(
+                    id: "report.tita.unsubmitted.\(periodKind.rawValue)",
+                    title: "「\(activePeriodTitle)」\(noun)尚未提交 Tita",
+                    message: "本地\(noun)草稿已备好（\(loggedDaysCount) 天 · \(WorkCalendar.hoursText(totalHours))h），点击即可预览并推送 Tita。",
+                    systemImage: "paperplane.fill",
+                    source: .scheduler,
+                    targetPluginID: targetPluginID,
+                    actions: [
+                        ReminderAction(id: "later", title: "稍后处理") {},
+                        ReminderAction(id: "push", title: "去预览并推送 Tita", isPrimary: true) { [weak self] in
+                            self?.context.openPlugin(targetPluginID)
+                        },
+                    ]
+                )
+                context.reminders.show(reminder, style: notifyStyle)
+            } else if titaStatus?.state.isSubmitted == true {
+                titaHint = "，Tita 已提交"
+            }
+        }
+
+        let verb = (hadExisting && !overwriteExisting) ? "已保留既有\(noun)草稿" : "已自动生成\(noun)草稿"
+        return .succeeded(
+            summary: "\(verb)（\(loggedDaysCount) 天 · \(WorkCalendar.hoursText(totalHours))h\(titaHint)）",
+            detail: "\(activePeriodTitle)（\(activePeriodRangeText)）",
+            actionTitle: "查看\(noun)",
+            actionPluginID: targetPluginID
+        )
+    }
 }

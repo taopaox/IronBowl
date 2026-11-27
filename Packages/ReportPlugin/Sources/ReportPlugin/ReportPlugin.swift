@@ -7,6 +7,8 @@ public final class ReportPlugin: IronBowlPlugin {
     public static let pluginID = "report"
     public static let settingsGenerateID = "report.generate"
     public static let settingsTitaID = "report.tita"
+    public static let autoGenerateActionID = "report.autoGenerateWeekly"
+    public static let defaultAutoGenerateTaskID = "builtin.report.weeklyAutoGenerate"
 
     public let id = ReportPlugin.pluginID
     public let title = "周报"
@@ -35,10 +37,63 @@ public final class ReportPlugin: IronBowlPlugin {
 
     public func start(context: PluginContext) {
         self.context = context
-        self.model = WeeklyReportModel(context: context, lockedPeriodKind: .weekly)
+        let model = WeeklyReportModel(context: context, lockedPeriodKind: .weekly)
+        self.model = model
+        context.scheduler.register(action: ScheduledTaskAction(
+            id: Self.autoGenerateActionID,
+            title: "自动生成本周周报并检查 Tita 状态",
+            subtitle: "汇总本周每日日报生成周报草稿；若已配置 Tita 且本周尚未提交，则弹出推送提醒。",
+            pluginID: Self.pluginID,
+            systemImage: "doc.text",
+            defaultName: "每周自动生成周报草稿",
+            parameterSpecs: [
+                ScheduledActionParameterSpec(
+                    key: "overwriteExisting",
+                    title: "覆盖已有周报内容",
+                    description: "关闭时若本周已有手动编辑或生成的周报，则保留原文不覆盖。",
+                    kind: .bool,
+                    defaultValue: "false"
+                ),
+                ScheduledActionParameterSpec(
+                    key: "remindIfTitaUnsubmitted",
+                    title: "Tita 未交时弹窗提醒",
+                    description: "开启后若已绑定 Tita 且本周尚未正式提交，会弹出前往推送的提醒。",
+                    kind: .bool,
+                    defaultValue: "true"
+                ),
+            ]
+        ) { [weak model] ctx in
+            guard let model else {
+                return .failed(summary: "周报插件未就绪", detail: "请先在设置中启用「周报」插件。")
+            }
+            return await model.runScheduledAutoGenerate(
+                overwriteExisting: ctx.bool("overwriteExisting", default: false),
+                remindIfTitaUnsubmitted: ctx.bool("remindIfTitaUnsubmitted", default: true),
+                notifyStyle: ctx.task.notifyStyle,
+                now: ctx.now
+            )
+        })
+
+        context.scheduler.seedDefaultTaskIfNeeded({
+            ScheduledTask(
+                id: Self.defaultAutoGenerateTaskID,
+                name: "每周自动生成周报草稿",
+                actionID: Self.autoGenerateActionID,
+                isEnabled: true,
+                schedule: TaskSchedule(kind: .weekly, hour: 17, minute: 30, weekdays: [6]),
+                misfirePolicy: .runIfMissedToday,
+                notifyPolicy: .onSuccessAndFailure,
+                notifyStyle: .cornerCard,
+                parameters: [
+                    "overwriteExisting": "false",
+                    "remindIfTitaUnsubmitted": "true",
+                ]
+            )
+        }, seedID: Self.defaultAutoGenerateTaskID)
     }
 
     public func stop() {
+        context?.scheduler.unregister(actionID: Self.autoGenerateActionID)
         model = nil
         context = nil
     }
@@ -120,6 +175,7 @@ public final class ReportPlugin: IronBowlPlugin {
 public final class MonthlyReportPlugin: IronBowlPlugin {
     public static let pluginID = "report.monthly"
     public static let settingsGenerateID = "report.monthly.generate"
+    public static let autoGenerateActionID = "report.autoGenerateMonthly"
 
     public let id = MonthlyReportPlugin.pluginID
     public let title = "月报"
@@ -148,10 +204,46 @@ public final class MonthlyReportPlugin: IronBowlPlugin {
 
     public func start(context: PluginContext) {
         self.context = context
-        self.model = WeeklyReportModel(context: context, lockedPeriodKind: .monthly)
+        let model = WeeklyReportModel(context: context, lockedPeriodKind: .monthly)
+        self.model = model
+        context.scheduler.register(action: ScheduledTaskAction(
+            id: Self.autoGenerateActionID,
+            title: "自动生成本月月报并检查 Tita 状态",
+            subtitle: "汇总本月每日日报与周报生成月报草稿；若已配置 Tita 且尚未提交，则弹出推送提醒。",
+            pluginID: Self.pluginID,
+            systemImage: "doc.richtext",
+            defaultName: "每月自动生成月报草稿",
+            parameterSpecs: [
+                ScheduledActionParameterSpec(
+                    key: "overwriteExisting",
+                    title: "覆盖已有月报内容",
+                    description: "关闭时若本月已有内容则保留原文不覆盖。",
+                    kind: .bool,
+                    defaultValue: "false"
+                ),
+                ScheduledActionParameterSpec(
+                    key: "remindIfTitaUnsubmitted",
+                    title: "Tita 未交时弹窗提醒",
+                    description: "开启后若已绑定 Tita 且本月尚未正式提交，会弹出前往推送的提醒。",
+                    kind: .bool,
+                    defaultValue: "true"
+                ),
+            ]
+        ) { [weak model] ctx in
+            guard let model else {
+                return .failed(summary: "月报插件未就绪", detail: "请先在设置中启用「月报」插件。")
+            }
+            return await model.runScheduledAutoGenerate(
+                overwriteExisting: ctx.bool("overwriteExisting", default: false),
+                remindIfTitaUnsubmitted: ctx.bool("remindIfTitaUnsubmitted", default: true),
+                notifyStyle: ctx.task.notifyStyle,
+                now: ctx.now
+            )
+        })
     }
 
     public func stop() {
+        context?.scheduler.unregister(actionID: Self.autoGenerateActionID)
         model = nil
         context = nil
     }

@@ -147,6 +147,7 @@ struct DayCellView: View {
         let red = info.kind == .holiday || ((weekday == 1 || weekday == 7) && info.kind != .makeupWorkday)
         let label = Lunar.cellLabel(cell.date)
         let badge = model.dayBadge(cell.date)
+        let todoCounts = model.context.todos.counts(on: cell.date)
 
         Button { model.select(cell.date) } label: {
             VStack(spacing: compact ? 0 : 2) {
@@ -194,6 +195,15 @@ struct DayCellView: View {
                         .padding(3)
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                if todoCounts.incomplete + todoCounts.completed > 0 {
+                    Circle()
+                        .fill(todoCounts.incomplete > 0 ? DS.brand : DS.success)
+                        .frame(width: compact ? 4 : 5, height: compact ? 4 : 5)
+                        .opacity(cell.inMonth ? 1 : 0.5)
+                        .padding(compact ? 3 : 5)
+                }
+            }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -225,12 +235,14 @@ struct DayCellView: View {
 struct DayDetailCard: View {
     let model: CalendarModel
     let compact: Bool
+    @State private var newTodoTitle = ""
 
     var body: some View {
         let d = model.selected
         let l = Lunar.lunar(d)
         let info = model.workCalendar.dayInfo(d)
         let extra = [Lunar.festival(d), Lunar.solarTerm(d)].compactMap { $0 }
+        let dayTodos = model.context.todos.items(on: d)
         DSCard(padding: compact ? 12 : 16) {
             VStack(alignment: .leading, spacing: compact ? 6 : 10) {
                 HStack(alignment: .firstTextBaseline) {
@@ -256,7 +268,84 @@ struct DayDetailCard: View {
                 Divider().overlay(DS.border)
                 Label(model.countdownText(for: d), systemImage: "clock")
                     .font(DS.caption).foregroundStyle(DS.textSecondary)
+
+                if !compact {
+                    Divider().overlay(DS.border)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("当日待办与备忘")
+                                .font(DS.font(13, .semibold))
+                                .foregroundStyle(DS.textSecondary)
+                            Spacer()
+                            if !dayTodos.isEmpty {
+                                let doneCount = dayTodos.filter(\.isCompleted).count
+                                Text("\(doneCount)/\(dayTodos.count)")
+                                    .font(DS.caption.monospacedDigit())
+                                    .foregroundStyle(DS.textTertiary)
+                            }
+                        }
+
+                        if dayTodos.isEmpty {
+                            Text("当天暂无待办安排")
+                                .font(DS.caption)
+                                .foregroundStyle(DS.textTertiary)
+                        } else {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(dayTodos) { item in
+                                    HStack(spacing: 8) {
+                                        Button {
+                                            model.context.todos.toggleCompleted(id: item.id)
+                                        } label: {
+                                            Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                                                .font(DS.font(14))
+                                                .foregroundStyle(item.isCompleted ? DS.success : DS.textTertiary)
+                                        }
+                                        .buttonStyle(.plain)
+
+                                        Text(item.title)
+                                            .font(DS.font(13))
+                                            .strikethrough(item.isCompleted)
+                                            .foregroundStyle(item.isCompleted ? DS.textTertiary : DS.text)
+                                            .lineLimit(2)
+
+                                        Spacer(minLength: 4)
+
+                                        if item.priorityLevel != .normal && !item.isCompleted {
+                                            Tag(item.priorityLevel.displayName, color: item.priorityLevel.tint)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        HStack(spacing: 6) {
+                            TextField("添加当天待办或备忘…", text: $newTodoTitle)
+                                .textFieldStyle(.ds)
+                                .onSubmit { addTodo(on: d) }
+                            Button {
+                                addTodo(on: d)
+                            } label: {
+                                Image(systemName: "plus")
+                            }
+                            .buttonStyle(.dsSecondary)
+                            .disabled(newTodoTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
+                } else if !dayTodos.isEmpty {
+                    let pendingCount = dayTodos.filter { !$0.isCompleted }.count
+                    Label(pendingCount > 0 ? "当日待办 \(pendingCount) 项未完成" : "当日 \(dayTodos.count) 项待办均已完成", systemImage: "checklist")
+                        .font(DS.caption)
+                        .foregroundStyle(pendingCount > 0 ? DS.brand : DS.success)
+                }
             }
+        }
+    }
+
+    private func addTodo(on date: Date) {
+        let trimmed = newTodoTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if model.context.todos.add(title: trimmed, dueDate: WorkCalendar.dayString(date)) != nil {
+            newTodoTitle = ""
         }
     }
 

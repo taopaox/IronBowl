@@ -352,6 +352,7 @@ private struct PopoverDayCell: View {
         let red = info.kind == .holiday || ((weekday == 1 || weekday == 7) && info.kind != .makeupWorkday)
         let label = Lunar.cellLabel(cell.date)
         let badge = model.dayBadge(cell.date)
+        let todoCounts = model.context.todos.counts(on: cell.date)
 
         Button { model.select(cell.date) } label: {
             VStack(spacing: 1) {
@@ -401,6 +402,15 @@ private struct PopoverDayCell: View {
                         .frame(width: DS.s(15), height: DS.s(15))
                         .background(palette.todayBadgeBackground, in: .rect(cornerRadius: 3))
                         .padding(2)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if todoCounts.incomplete + todoCounts.completed > 0 {
+                    Circle()
+                        .fill(todoCounts.incomplete > 0 ? DS.brand : DS.success)
+                        .frame(width: 4, height: 4)
+                        .opacity(cell.inMonth ? 1 : 0.5)
+                        .padding(3)
                 }
             }
             .contentShape(.rect)

@@ -208,6 +208,12 @@ struct LogView: View {
         // 3. 工时刻度与加班卡
         JournalWorkHoursCard(model: model, palette: p)
 
+        // 3.5 当日待办与备忘联动
+        let dayTodos = model.todosForCurrentDate()
+        if !dayTodos.isEmpty {
+            JournalTodoCard(model: model, items: dayTodos, palette: p)
+        }
+
         // 4. Git 提交小票
         let commitCount = model.activities.reduce(0) { $0 + $1.commits.count }
         HStack(spacing: 6) {
@@ -634,6 +640,74 @@ private struct JournalWorkHoursCard: View {
                     Text("休息日默认目标 0h；如需填报加班，点上方 +1h~+4h 或右上角「记加班」。")
                         .font(DS.font(11))
                         .foregroundStyle(palette.inkTertiary)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 当日待办联动卡
+
+private struct JournalTodoCard: View {
+    let model: LogModel
+    let items: [TodoItem]
+    let palette: JournalPalette
+
+    var body: some View {
+        let readyCompletedCount = items.filter { $0.isCompleted && $0.loggedDate == nil }.count
+        JournalPaperCard(palette: palette, padding: 11) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "checklist")
+                        .font(DS.font(12, .bold))
+                        .foregroundStyle(palette.stampGreen)
+                    Text("当日待办（\(items.count)）")
+                        .font(DS.font(12.5, .bold))
+                        .foregroundStyle(palette.ink)
+                    Spacer()
+                    if readyCompletedCount > 0 {
+                        Button("一键带入已完(\(readyCompletedCount))") {
+                            model.importAllCompletedTodosToDrafts()
+                        }
+                        .buttonStyle(.plain)
+                        .font(DS.font(11, .semibold))
+                        .foregroundStyle(palette.stampGreen)
+                    }
+                }
+
+                ForEach(items) { item in
+                    HStack(alignment: .center, spacing: 6) {
+                        Button {
+                            model.context.todos.toggleCompleted(id: item.id)
+                        } label: {
+                            Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                                .font(DS.font(13))
+                                .foregroundStyle(item.isCompleted ? palette.stampGreen : palette.inkTertiary)
+                        }
+                        .buttonStyle(.plain)
+
+                        Text(item.title)
+                            .font(DS.font(12))
+                            .strikethrough(item.isCompleted)
+                            .foregroundStyle(item.isCompleted ? palette.inkSecondary : palette.ink)
+                            .lineLimit(2)
+
+                        Spacer(minLength: 4)
+
+                        if item.loggedDate != nil {
+                            Tag("已入草稿", color: palette.stampGreen)
+                        } else {
+                            Button("+ 记入草稿") {
+                                model.importTodoToDraft(item)
+                            }
+                            .buttonStyle(.plain)
+                            .font(DS.font(11, .semibold))
+                            .foregroundStyle(palette.stampRed)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(palette.stampRed.opacity(0.10), in: .rect(cornerRadius: 5))
+                        }
+                    }
                 }
             }
         }

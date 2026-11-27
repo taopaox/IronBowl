@@ -24,6 +24,7 @@ flowchart LR
     IronBowl --> AIWebPlugin["Packages/AIWebPlugin<br/>(AI 网页目录)"]
     IronBowl --> SchedulerPlugin["Packages/SchedulerPlugin<br/>(定时任务)"]
     IronBowl --> ReportPlugin["Packages/ReportPlugin<br/>(周报月报)"]
+    IronBowl --> TodoPlugin["Packages/TodoPlugin<br/>(待办备忘)"]
 
     CalendarApp["Apps/Calendar<br/>(独立版万年历)"] --> IronBowlKit
     CalendarApp --> CalendarPlugin
@@ -35,6 +36,8 @@ flowchart LR
     SchedulerPlugin --> IronBowlKit
     ReportPlugin --> IronBowlKit
     ReportPlugin --> ZentaoLogPlugin
+    TodoPlugin --> IronBowlKit
+    TodoPlugin --> ZentaoLogPlugin
 ```
 
 ## 目录职责划分
@@ -50,6 +53,7 @@ flowchart LR
 | `Packages/AIWebPlugin` | Swift Package | 20 个内置 AI 网站目录、可折叠侧栏子项、官方 Logo 与自定义图标抓取 |
 | `Packages/SchedulerPlugin` | Swift Package | 定时任务管理页面、任务编辑弹窗、执行日志审计与调度引擎生命周期控制 |
 | `Packages/ReportPlugin` | Swift Package | 按周/月查询每日日报（禅道/本地提交/草稿）、AI 与规则汇总生成周报和月报、预览编辑及 Markdown 导出 |
+| `Packages/TodoPlugin` | Swift Package | 待办与日程备忘管理、定时提醒与一键转入禅道日报草稿 |
 
 ## 插件协议与生命周期
 
@@ -84,6 +88,7 @@ flowchart LR
 | `providers` | `AIProviderStore` | 读取默认与各 AI CLI 配置 |
 | `webSessions` | `WebSessionManager` | 创建与复用受全局墓碑策略托管的网页会话 |
 | `scheduler` | `TaskScheduler` | 注册定时任务动作、写入默认定时任务并统一调度执行 |
+| `todos` | `TodoStore` | 读写跨应用共享的待办与备忘数据并触发跨进程同步 |
 | `openPlugin` | `(String) -> Void` | 跳转到指定插件主视图并激活主窗口 |
 | `openSettings` | `(String?) -> Void` | 打开设置窗口并定位到指定设置页 ID |
 
@@ -97,6 +102,6 @@ flowchart LR
 5. `SchedulerPlugin`（`scheduler`）
 6. `ReportPlugin`（`report`，周报）
 7. `MonthlyReportPlugin`（`report.monthly`，月报）
-8. `ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist")`
+8. `TodoPlugin`（`todo`，待办）
 
 当应用版本升级引入新插件 ID 时，`AppModel` 会比对 `app.knownPlugins` 与 `app.enabledPlugins`，自动将新增插件加入已启用列表，避免老用户升级后看不到新插件。

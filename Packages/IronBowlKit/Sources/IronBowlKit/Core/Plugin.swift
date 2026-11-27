@@ -277,6 +277,7 @@ public final class PluginContext {
     public let providers: AIProviderStore
     public let webSessions: WebSessionManager
     public let scheduler: TaskScheduler
+    public let todos: TodoStore
     /// 打开主窗口并切到某个插件页。
     public let openPlugin: (String) -> Void
     /// 打开设置窗口，可指定页面 id。
@@ -290,6 +291,7 @@ public final class PluginContext {
         providers: AIProviderStore,
         webSessions: WebSessionManager? = nil,
         scheduler: TaskScheduler? = nil,
+        todos: TodoStore? = nil,
         openPlugin: @escaping (String) -> Void,
         openSettings: @escaping (String?) -> Void
     ) {
@@ -307,6 +309,7 @@ public final class PluginContext {
             openPlugin: openPlugin,
             openSettings: openSettings
         )
+        self.todos = todos ?? TodoStore(database: database)
         self.openPlugin = openPlugin
         self.openSettings = openSettings
     }

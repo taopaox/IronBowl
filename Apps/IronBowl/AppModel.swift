@@ -7,6 +7,7 @@ import Observation
 import ReportPlugin
 import SchedulerPlugin
 import SwiftUI
+import TodoPlugin
 import ZentaoLogPlugin
 
 enum DockMode: String, Codable, Sendable, CaseIterable, Identifiable {
@@ -77,7 +78,7 @@ final class AppModel {
             SchedulerPlugin(),
             ReportPlugin(),
             MonthlyReportPlugin(),
-            ComingSoonPlugin(id: "todo", title: "待办", systemImage: "checklist"),
+            TodoPlugin(),
         ]
         self.plugins = plugins
         defer { AppModel.shared = self }

@@ -7,6 +7,37 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
     public static let pluginID = "zentao.log"
     public static let autoSubmitActionID = "zentao.autoSubmitLog"
     public static let defaultAutoSubmitTaskID = "builtin.zentao.dailyAutoSubmit"
+    public static let externalDraftAddedNotification = Notification.Name("com.taopaox.ironbowl.zentao.externalDraftAdded")
+
+    /// 从其他插件（如待办、随手便签）向指定日期的禅道日报草稿追加一条记录。
+    @discardableResult
+    public static func appendExternalDraft(
+        work: String,
+        hours: Double = 1.0,
+        taskID: Int? = nil,
+        on date: Date = Date(),
+        database: AppDatabase,
+        settings: SettingsStore
+    ) -> Bool {
+        let trimmed = work.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, hours.isFinite, hours > 0 else { return false }
+        let normalizedHours = max(0.5, (hours * 2).rounded() / 2)
+        let ds = WorkCalendar.dayString(date)
+        let store = LogStore(db: database)
+        let resolvedTaskID = taskID ?? settings[LogKeys.fallbackTaskID]
+        var entries = store.pendingDrafts(from: ds, to: ds)[ds] ?? []
+        entries.append(DraftEntry(
+            taskID: resolvedTaskID,
+            hours: normalizedHours,
+            left: 0,
+            work: trimmed,
+            isFallback: resolvedTaskID != nil && resolvedTaskID == settings[LogKeys.fallbackTaskID],
+            isManual: true
+        ))
+        guard store.savePendingDrafts(entries, for: ds) else { return false }
+        NotificationCenter.default.post(name: externalDraftAddedNotification, object: ds)
+        return true
+    }
     public let id = ZentaoLogPlugin.pluginID
     public let title = "禅道日志"
     public let sidebarTitle = "日报"

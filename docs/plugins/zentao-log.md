@@ -22,7 +22,7 @@
 
 1. **手账式当日工时刻度与快捷加班设置**：
    - `LogView` 使用 `IronBowlKit` 的 `JournalSpreadShell` 呈现双页活页手账（支持「暖米手账 / 清爽象牙」纸感切换，以及右缘「日报 / 周报 / 月报」索引签一键翻页）。
-   - 左页展示手账撕历头（日期、工作日/休息日标签、预计下班时刻 `WorkCalendar.offWorkTimeText(on:)` 与剩余缺口徽章）、`JournalDayRingStrip` 7 天圆环打卡条、`JournalWorkHoursCard`（`JournalProgressBar` 三段彩色工时刻度条 + `+1h`/`+2h`/`+3h`/`+4h` 快捷加班按钮与「清除」）以及按仓库分组的 Git 提交小票（支持点击 `+ 摘录` 调用 `LogModel.addDraftFromCommit(activity:commit:)` 直接生成一条草稿）。
+   - 左页展示手账撕历头（日期、工作日/休息日标签、预计下班时刻 `WorkCalendar.offWorkTimeText(on:)` 与剩余缺口徽章）、`JournalDayRingStrip` 7 天圆环打卡条、`JournalWorkHoursCard`（`JournalProgressBar` 三段彩色工时刻度条 + `+1h`/`+2h`/`+3h`/`+4h` 快捷加班按钮与「清除」）、当日待办联动卡 `JournalTodoCard`（展示当天相关待办，支持勾选及一键带入草稿）以及按仓库分组的 Git 提交小票（支持点击 `+ 摘录` 调用 `LogModel.addDraftFromCommit(activity:commit:)` 直接生成一条草稿）。
    - 右页右上角展示 `JournalStampBadge` 橡皮印章（待提交草稿 / 已入账 / 待填报），顶部配备 `JournalSpreadShell` 状态胶囊、右页贯通状态色带与 `JournalStatusBanner` 横幅（明显区分「今日未写」「草稿待交」「今日已写」与「休息日」），提供单一聚焦操作栏（`生成草稿`、`手写一条`、朱红主按钮 `盖章提交禅道`）；同时通过 `ZentaoLogPlugin.sidebarBadge` 在左侧栏显示「今日未写」或「草稿」角标；每条草稿与已入账记录支持通过 `JournalHighlight.toggle` 使用荧光笔标黄重点，并自动同步至周报/月报的每日摘录高亮显示。
    - 每日加班时长通过 `WorkCalendar.setOvertimeHours(_:on:)` 持久化到核心表 `dailyOvertime`（`core.v4`），选择或清除加班后会立即顺延或恢复左页工时刻度、侧栏 `TodayCard`、首页下班卡及菜单栏「离下班还有多久」的实际下班时间。
 2. **正常上班时间与加班工时分别生成独立日志**（`DraftGenerator.generate`）：

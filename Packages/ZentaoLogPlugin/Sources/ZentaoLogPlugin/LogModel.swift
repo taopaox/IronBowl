@@ -66,6 +66,7 @@ final class LogModel {
 
     @ObservationIgnored private var client: ZentaoClient?
     @ObservationIgnored private var clientKey = ""
+    @ObservationIgnored nonisolated(unsafe) private var externalDraftObserver: NSObjectProtocol?
 
     init(context: PluginContext) {
         self.context = context
@@ -76,6 +77,23 @@ final class LogModel {
         reloadLocalPending()
         loadDraftsForCurrentDate()
         refreshTodaySubmitted()
+        externalDraftObserver = NotificationCenter.default.addObserver(
+            forName: ZentaoLogPlugin.externalDraftAddedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.reloadLocalPending()
+                self.loadDraftsForCurrentDate()
+            }
+        }
+    }
+
+    deinit {
+        if let externalDraftObserver {
+            NotificationCenter.default.removeObserver(externalDraftObserver)
+        }
     }
 
     var dateString: String { WorkCalendar.dayString(date) }
@@ -922,6 +940,41 @@ final class LogModel {
         guard setPending(entries, for: key) else { return false }
         if dateString == key { loadDraftsForCurrentDate() }
         return true
+    }
+
+    // MARK: 待办联动
+
+    func todosForCurrentDate() -> [TodoItem] {
+        context.todos.items(forDateString: dateString)
+    }
+
+    @discardableResult
+    func importTodoToDraft(_ item: TodoItem, on targetDate: Date? = nil) -> Bool {
+        let day = targetDate ?? date
+        let ds = WorkCalendar.dayString(day)
+        let trimmedNotes = item.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let work = trimmedNotes.isEmpty ? "1. \(item.title)" : "1. \(item.title)（\(trimmedNotes)）"
+        let linkedTaskID = (item.zentaoObjectType == "task" ? item.zentaoObjectID : nil) ?? settings[LogKeys.fallbackTaskID]
+        guard appendQuickLog(work: work, hours: max(0.5, item.estimatedHours), taskID: linkedTaskID, on: day) else {
+            return false
+        }
+        context.todos.markLogged(id: item.id, dateString: ds)
+        message = "已将「\(item.title)」带入 \(ds) 草稿"
+        return true
+    }
+
+    func importAllCompletedTodosToDrafts() {
+        let candidates = todosForCurrentDate().filter { $0.isCompleted && $0.loggedDate == nil }
+        guard !candidates.isEmpty else { return }
+        var imported = 0
+        for item in candidates {
+            if importTodoToDraft(item, on: date) {
+                imported += 1
+            }
+        }
+        if imported > 0 {
+            message = "已将 \(imported) 条已完成待办带入今日草稿"
+        }
     }
 
     // MARK: 映射

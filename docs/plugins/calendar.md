@@ -23,6 +23,7 @@
 - **状态栏渲染（20 套可选风格）**：`CalendarMenuBarLabel` 从 `CalendarModel.menuBarSnapshot` 与 `CalendarModel.menuBarStyle` 获取数据与当前风格，调用 `CalendarMenuBarRenderer` 离线绘制为高度 `22pt` 的 Retina `NSImage`，避免 macOS `MenuBarExtra` 动态文本插值在切换显示项时截断或消失；支持 5 大分类（极简原生、双行高密、徽章卡片、国风创意、仪表科技）共 20 套视觉风格（`#01` 双行微缩仪表卡～`#20` 呼吸大时钟）。默认「原生极简排印（`.nativeMinimal`）」在未开启全彩 Logo 且未显示休/班角标时输出模板图像（`isTemplate = true`），其余风格及含全彩元素场景输出非模板图像（`isTemplate = false`）并自适应系统浅/深色。`CalendarStatusBarSettings` 内置按分类筛选与深浅背景切换的 20 套风格卡片选择器与实时预览胶囊。
 - **双进程状态栏自动避让**：由于 `IronBowlCalendar`（`com.taopaox.ironbowl.calendar`）为 `LSUIElement` 后台/状态栏应用，macOS 不会对其派发 `NSWorkspace` 启停通知，因此 `CalendarMenuBarPolicy` 与 `StandaloneCalendarPresenceState` 结合了 `NSWorkspace.shared.observe(\.runningApplications)` KVO 监听、`DistributedNotificationCenter` 生命周期与探针握手（`standaloneLifecycleNotification` / `standaloneProbeNotification`）、系统休眠唤醒监听以及定时核验与 PID 存活检查（`isProcessAlive`），无论先开哪一方或异常退出都能及时切换状态；主工作台通过 `CalendarModel.shouldShowEmbeddedMenuBar` 自动隐藏内置状态栏日历（保留 `calendar.menuBar.enabled` 设置值不覆盖），并在 `CalendarStatusBarSettings` 展示提示横幅，独立版退出后自动恢复。
 - **休/班标识与倒计时**：直接读取共享 `WorkCalendar` 数据，显示「休」「班」角标，并支持百度风格倒计时（今天显示距下一个法定节假日天数）。
+- **待办日程联动**：直接读取共享 `TodoStore`（`core.v8`）数据，在月历格子与状态栏弹层格子底部展示当日待办状态圆点，并在大窗口日期详情卡中支持查看、勾选完成与快速新建当日待办。
 - **弹出面板交互与主题**：
   - 在 `CalendarPopover` 中点击会离开弹层的操作（城市/天气设置、打开大窗口、日历设置、退出万年历）时，会通过 `\.dismissMenuBarPopover` 立即收起弹出面板；面板内月历浏览（年/月下拉切换、前后翻月、返回今天、选日期）与弹出样式实时预览（`PopoverStyleDropdown`）则保留弹层打开。
   - 支持 6 套样式——「跟随系统」（直接随 macOS 系统深浅模式切换，不受主应用强制外观影响）、「跟随外观」（随共享设置 `app.appearance` 切换）以及「简约白」「深邃黑」「经典红」「经典蓝」固定 sRGB 配色。

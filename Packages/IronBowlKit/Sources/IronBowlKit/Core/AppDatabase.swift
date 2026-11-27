@@ -183,5 +183,24 @@ public nonisolated final class AppDatabase: Sendable {
                 t.column("createdAt", .datetime).notNull().indexed()
             }
         },
+        DatabaseMigration("core.v8") { db in
+            try db.create(table: "todoItem") { t in
+                t.primaryKey("id", .text)
+                t.column("title", .text).notNull()
+                t.column("notes", .text).notNull().defaults(to: "")
+                t.column("dueDate", .text).indexed()
+                t.column("remindAt", .datetime)
+                t.column("remindedAt", .datetime)
+                t.column("priority", .integer).notNull().defaults(to: 0)
+                t.column("estimatedHours", .double).notNull().defaults(to: 1.0)
+                t.column("isCompleted", .boolean).notNull().defaults(to: false).indexed()
+                t.column("completedAt", .datetime)
+                t.column("loggedDate", .text)
+                t.column("zentaoObjectType", .text)
+                t.column("zentaoObjectID", .integer)
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull().indexed()
+            }
+        },
     ]
 }

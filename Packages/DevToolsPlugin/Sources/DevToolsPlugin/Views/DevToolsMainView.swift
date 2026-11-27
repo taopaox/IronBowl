@@ -15,6 +15,9 @@ struct DevToolsMainView: View {
     }
 
     @State private var activeTab: ToolTab = .ports
+    @State private var showDevGroupExpanded = true
+    @State private var showOtherGroupExpanded = true
+    @State private var showDirectoryPopover = false
 
     // 时间戳
     @State private var tsInput = String(Int64(Date().timeIntervalSince1970))
@@ -92,19 +95,33 @@ struct DevToolsMainView: View {
     // MARK: - 端口管家
 
     private var portsPane: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let partition = model.filteredPartition
+        let devEntries = model.effectiveDevDirectoryEntries
+
+        return VStack(alignment: .leading, spacing: 14) {
             if let err = model.portErrorMessage {
                 DSBanner(.danger, err)
             } else if let msg = model.portStatusMessage {
                 DSBanner(.success, msg)
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
+                DSTabs(
+                    selection: $model.portGroupScope,
+                    options: [
+                        (.all, "全部分组 (\(partition.totalCount))"),
+                        (.devDirectory, "我的开发目录 (\(partition.devDirectoryItems.count))"),
+                        (.other, "其他端口 (\(partition.otherItems.count))"),
+                    ]
+                )
+
+                Spacer(minLength: 8)
+
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .font(DS.font(12))
                         .foregroundStyle(DS.textTertiary)
-                    TextField("搜索端口号、进程名、PID 或命令行", text: $model.portQuery)
+                    TextField("搜索端口、进程、目录、PID 或命令行", text: $model.portQuery)
                         .textFieldStyle(.plain)
                         .font(DS.body)
                     if !model.portQuery.isEmpty {
@@ -117,79 +134,382 @@ struct DevToolsMainView: View {
                     }
                 }
                 .padding(.horizontal, 10)
-                .frame(width: DS.s(290), height: DS.s(30))
+                .frame(width: DS.s(260), height: DS.s(30))
                 .background(DS.card, in: .rect(cornerRadius: DS.controlRadius))
                 .overlay { RoundedRectangle(cornerRadius: DS.controlRadius).strokeBorder(DS.borderStrong) }
 
+                Button {
+                    showDirectoryPopover.toggle()
+                } label: {
+                    Label("开发目录", systemImage: "folder.badge.gearshape")
+                }
+                .buttonStyle(.dsSecondary)
+                .popover(isPresented: $showDirectoryPopover, arrowEdge: .bottom) {
+                    devDirectoryPopoverContent(devEntries)
+                }
+            }
+
+            HStack(spacing: 8) {
                 ForEach(model.watchedPorts, id: \.self) { port in
+                    let isSelected = model.portQuery == "\(port)"
                     Button(":\(port)") {
-                        model.portQuery = "\(port)"
+                        model.portQuery = isSelected ? "" : "\(port)"
                     }
-                    .buttonStyle(.dsChip(selected: model.portQuery == "\(port)"))
+                    .buttonStyle(.dsChip(selected: isSelected))
+                }
+
+                Spacer(minLength: 8)
+
+                Text(directorySummaryText(devEntries))
+                    .font(DS.caption)
+                    .foregroundStyle(DS.textSecondary)
+                    .lineLimit(1)
+            }
+
+            if model.portGroupScope == .all || model.portGroupScope == .devDirectory {
+                devDirectorySection(partition: partition, devEntries: devEntries)
+            }
+
+            if model.portGroupScope == .all || model.portGroupScope == .other {
+                otherPortsSection(partition: partition)
+            }
+        }
+    }
+
+    private func directorySummaryText(_ entries: [DevDirectoryEntry]) -> String {
+        guard let first = entries.first else { return "未配置开发目录" }
+        if entries.count == 1 {
+            return "监控目录：\(first.displayName)"
+        }
+        return "监控目录：\(first.displayName) 等 \(entries.count) 个"
+    }
+
+    @ViewBuilder
+    private func devDirectorySection(partition: PortPartition, devEntries: [DevDirectoryEntry]) -> some View {
+        let items = partition.devDirectoryItems
+        let uniqueProjectCount = Set(items.compactMap { $0.directoryMatch?.projectLabel }).count
+        let isAllScope = model.portGroupScope == .all
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Button {
+                    if isAllScope { showDevGroupExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isAllScope {
+                            Image(systemName: showDevGroupExpanded ? "chevron.down" : "chevron.right")
+                                .font(DS.font(11, .semibold))
+                                .foregroundStyle(DS.textSecondary)
+                                .frame(width: 12)
+                        }
+                        Image(systemName: "folder.fill")
+                            .font(DS.font(13))
+                            .foregroundStyle(DS.success)
+                        Text("我的开发目录")
+                            .font(DS.sectionTitle)
+                            .foregroundStyle(DS.text)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                countCapsule("\(items.count) 项监听", tint: items.isEmpty ? DS.textSecondary : DS.success)
+
+                if uniqueProjectCount > 0 {
+                    countCapsule("\(uniqueProjectCount) 个项目", tint: DS.brand)
                 }
 
                 Spacer()
-                Text("共 \(model.filteredPorts.count) 项监听")
-                    .font(DS.caption.monospacedDigit())
-                    .foregroundStyle(DS.textSecondary)
+
+                Button {
+                    pickAndAddDevDirectory()
+                } label: {
+                    Label("添加目录", systemImage: "plus")
+                }
+                .buttonStyle(.dsGhost)
             }
 
-            if model.filteredPorts.isEmpty {
-                DSCard(padding: 24) {
-                    Text("没有匹配的 TCP 监听端口")
-                        .font(DS.body)
-                        .foregroundStyle(DS.textSecondary)
-                        .frame(maxWidth: .infinity)
-                }
-            } else {
-                LazyVStack(spacing: 8) {
-                    ForEach(model.filteredPorts) { item in
-                        DSCard(padding: 12) {
-                            HStack(spacing: 12) {
-                                Text(":\(item.port)")
-                                    .font(DS.font(16, .bold).monospacedDigit())
-                                    .foregroundStyle(model.watchedPorts.contains(item.port) ? DS.brand : DS.text)
-                                    .frame(width: DS.s(76), alignment: .leading)
-
-                                VStack(alignment: .leading, spacing: 3) {
-                                    HStack(spacing: 8) {
-                                        Text(item.processName)
-                                            .font(DS.font(14, .semibold))
-                                        Text("PID \(item.pid)")
-                                            .font(DS.caption.monospacedDigit())
-                                            .foregroundStyle(DS.textSecondary)
-                                        Text(item.bindAddress)
-                                            .font(DS.mono(11.5))
-                                            .foregroundStyle(DS.textTertiary)
-                                    }
-                                    if !item.commandLine.isEmpty {
-                                        Text(item.commandLine)
-                                            .font(DS.mono(11.5))
-                                            .foregroundStyle(DS.textSecondary)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                            .textSelection(.enabled)
-                                    }
-                                }
-
-                                Spacer(minLength: 8)
-
-                                Button("结束 (TERM)") {
-                                    Task { await model.killPort(item, force: false) }
-                                }
-                                .buttonStyle(.dsSecondary)
-
-                                Button("强杀 (KILL)") {
-                                    Task { await model.killPort(item, force: true) }
-                                }
-                                .buttonStyle(.dsGhost)
-                                .foregroundStyle(DS.danger)
+            if !isAllScope || showDevGroupExpanded {
+                if devEntries.isEmpty {
+                    DSCard(padding: 18, dashed: true) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "folder.badge.plus")
+                                .font(DS.font(20))
+                                .foregroundStyle(DS.textTertiary)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("尚未配置开发目录")
+                                    .font(DS.rowTitle)
+                                Text("自动读取禅道日志根目录与代码仓库配置，也可以手动添加本地项目目录进行端口隔离检查。")
+                                    .font(DS.caption)
+                                    .foregroundStyle(DS.textSecondary)
                             }
+                            Spacer()
+                            Button("添加开发目录…") {
+                                pickAndAddDevDirectory()
+                            }
+                            .buttonStyle(.dsSecondary)
+                        }
+                    }
+                } else if items.isEmpty {
+                    DSCard(padding: 16) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(model.portQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? "当前开发目录下暂无匹配的 TCP 监听端口"
+                                : "当前开发目录下没有符合搜索条件的监听端口")
+                                .font(DS.body)
+                                .foregroundStyle(DS.textSecondary)
+                            Text("已纳管目录：\(devEntries.map(\.path).joined(separator: " · "))")
+                                .font(DS.mono(11.5))
+                                .foregroundStyle(DS.textTertiary)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    LazyVStack(spacing: 8) {
+                        ForEach(items) { entry in
+                            portRowCard(entry)
                         }
                     }
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func otherPortsSection(partition: PortPartition) -> some View {
+        let items = partition.otherItems
+        let isAllScope = model.portGroupScope == .all
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Button {
+                    if isAllScope { showOtherGroupExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isAllScope {
+                            Image(systemName: showOtherGroupExpanded ? "chevron.down" : "chevron.right")
+                                .font(DS.font(11, .semibold))
+                                .foregroundStyle(DS.textSecondary)
+                                .frame(width: 12)
+                        }
+                        Image(systemName: "network")
+                            .font(DS.font(13))
+                            .foregroundStyle(DS.textSecondary)
+                        Text("其他监听端口")
+                            .font(DS.sectionTitle)
+                            .foregroundStyle(DS.text)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                countCapsule("\(items.count) 项", tint: DS.textSecondary)
+
+                Spacer()
+            }
+
+            if !isAllScope || showOtherGroupExpanded {
+                if items.isEmpty {
+                    DSCard(padding: 16) {
+                        Text("没有其他匹配的 TCP 监听端口")
+                            .font(DS.body)
+                            .foregroundStyle(DS.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    LazyVStack(spacing: 8) {
+                        ForEach(items) { entry in
+                            portRowCard(entry)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func portRowCard(_ entry: GroupedListeningPort) -> some View {
+        let item = entry.item
+        let match = entry.directoryMatch
+        let isWatched = model.watchedPorts.contains(item.port)
+        let portColor = isWatched ? DS.brand : (match != nil ? DS.success : DS.text)
+        let revealPath: String? = {
+            if let dir = match?.matchedDirectory, !dir.isEmpty { return dir }
+            if !item.workingDirectory.isEmpty, item.workingDirectory != "/" { return item.workingDirectory }
+            return nil
+        }()
+
+        return DSCard(padding: 12) {
+            HStack(spacing: 12) {
+                Text(":\(item.port)")
+                    .font(DS.font(16, .bold).monospacedDigit())
+                    .foregroundStyle(portColor)
+                    .frame(width: DS.s(76), alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(item.processName)
+                            .font(DS.font(14, .semibold))
+                        Text("PID \(item.pid)")
+                            .font(DS.caption.monospacedDigit())
+                            .foregroundStyle(DS.textSecondary)
+                        Text(item.bindAddress)
+                            .font(DS.mono(11.5))
+                            .foregroundStyle(DS.textTertiary)
+
+                        if let match {
+                            HStack(spacing: 4) {
+                                Image(systemName: "folder")
+                                    .font(DS.font(10))
+                                Text(match.projectLabel)
+                                    .font(DS.font(11, .medium))
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(DS.success)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(DS.success.opacity(0.12), in: .capsule)
+                            .help("命中开发目录（\(match.basis.displayLabel)）：\(match.matchedDirectory)")
+                        }
+                    }
+
+                    let secondaryLine = !item.commandLine.isEmpty
+                        ? item.commandLine
+                        : (match?.matchedDirectory ?? "")
+                    if !secondaryLine.isEmpty {
+                        Text(secondaryLine)
+                            .font(DS.mono(11.5))
+                            .foregroundStyle(DS.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                if let revealPath {
+                    Button {
+                        model.revealDirectory(revealPath)
+                    } label: {
+                        Image(systemName: "folder")
+                    }
+                    .buttonStyle(.dsGhost)
+                    .help("在访达中打开目录：\(revealPath)")
+                }
+
+                Button("结束 (TERM)") {
+                    Task { await model.killPort(item, force: false) }
+                }
+                .buttonStyle(.dsSecondary)
+
+                Button("强杀 (KILL)") {
+                    Task { await model.killPort(item, force: true) }
+                }
+                .buttonStyle(.dsGhost)
+                .foregroundStyle(DS.danger)
+            }
+        }
+    }
+
+    private func countCapsule(_ text: String, tint: Color) -> some View {
+        Text(text)
+            .font(DS.font(11, .medium).monospacedDigit())
+            .foregroundStyle(tint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(tint.opacity(0.12), in: .capsule)
+    }
+
+    private func devDirectoryPopoverContent(_ entries: [DevDirectoryEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("我的开发目录")
+                    .font(DS.sectionTitle)
+                Spacer()
+                Button("仓库设置") {
+                    showDirectoryPopover = false
+                    model.openRepoRootSettings()
+                }
+                .buttonStyle(.dsGhost)
+                .font(DS.caption)
+            }
+
+            Text("自动同步「仓库根目录」与「额外仓库」，也可单独添加本地开发目录。")
+                .font(DS.caption)
+                .foregroundStyle(DS.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            if entries.isEmpty {
+                Text("暂无有效开发目录")
+                    .font(DS.caption)
+                    .foregroundStyle(DS.textTertiary)
+                    .padding(.vertical, 6)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(entries) { entry in
+                            HStack(spacing: 8) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 6) {
+                                        Text(entry.displayName)
+                                            .font(DS.font(13, .medium))
+                                        countCapsule(
+                                            entry.source.displayLabel,
+                                            tint: entry.source == .custom ? DS.brand : DS.textSecondary
+                                        )
+                                    }
+                                    Text(entry.path)
+                                        .font(DS.mono(11))
+                                        .foregroundStyle(DS.textTertiary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                                Spacer(minLength: 8)
+                                if entry.source == .custom {
+                                    Button {
+                                        model.removeDevDirectory(entry.path)
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .foregroundStyle(DS.danger)
+                                    }
+                                    .buttonStyle(.dsGhost)
+                                    .help("移除此自定义目录")
+                                }
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 220)
+            }
+
+            Divider()
+
+            HStack {
+                Button {
+                    showDirectoryPopover = false
+                    pickAndAddDevDirectory()
+                } label: {
+                    Label("添加开发目录…", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.dsSecondary)
+
+                Spacer()
+            }
+        }
+        .padding(14)
+        .frame(width: 390)
+    }
+
+    private func pickAndAddDevDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "设为开发目录"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        model.addDevDirectory(url.path)
     }
 
     // MARK: - 时间戳
@@ -462,5 +782,117 @@ struct DevToolsMainView: View {
                 }
             }
         }
+    }
+}
+
+struct DevToolsSettingsView: View {
+    @Bindable var model: DevToolsModel
+    @State private var portsInput = ""
+    @State private var portsNotice: String?
+
+    var body: some View {
+        let syncedEntries = model.effectiveDevDirectoryEntries.filter { $0.source != .custom }
+        let customEntries = model.effectiveDevDirectoryEntries.filter { $0.source == .custom }
+
+        DSSection("我的开发目录", footer: "端口管家会自动识别工作目录或启动命令命中以下目录的本地监听进程，并归入「我的开发目录」分组。") {
+            if syncedEntries.isEmpty {
+                DSRow("同步目录", description: "暂未配置禅道仓库根目录或额外仓库") {
+                    Button("前往仓库设置") {
+                        model.openRepoRootSettings()
+                    }
+                    .buttonStyle(.dsSecondary)
+                }
+            } else {
+                ForEach(syncedEntries) { entry in
+                    DSRow("\(entry.displayName)（\(entry.source.displayLabel)）", description: entry.path) {
+                        if entry.source == .gitRoot {
+                            Button("仓库设置") {
+                                model.openRepoRootSettings()
+                            }
+                            .buttonStyle(.dsGhost)
+                        } else {
+                            Button("访达") {
+                                model.revealDirectory(entry.path)
+                            }
+                            .buttonStyle(.dsGhost)
+                        }
+                    }
+                }
+            }
+
+            ForEach(customEntries) { entry in
+                DSRow("\(entry.displayName)（自定义）", description: entry.path) {
+                    Button("移除", role: .destructive) {
+                        model.removeDevDirectory(entry.path)
+                    }
+                    .buttonStyle(.dsGhost)
+                }
+            }
+
+            DSRow("添加开发目录", description: "追加除仓库根目录之外常驻运行服务的代码目录。") {
+                Button("选择目录…") {
+                    let panel = NSOpenPanel()
+                    panel.canChooseDirectories = true
+                    panel.canChooseFiles = false
+                    panel.allowsMultipleSelection = false
+                    panel.prompt = "添加开发目录"
+                    guard panel.runModal() == .OK, let url = panel.url else { return }
+                    model.addDevDirectory(url.path)
+                }
+                .buttonStyle(.dsSecondary)
+            }
+        }
+
+        DSSection("常用关注端口", footer: "逗号分隔端口号（1–65535），将在端口管家顶部显示快捷筛选胶囊并在菜单栏统计活跃数。") {
+            DSBlockRow {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        TextField("例如：3000, 5173, 8000, 8080, 8888", text: $portsInput)
+                            .textFieldStyle(.ds)
+                            .font(DS.mono(13))
+                        Button("保存") {
+                            saveWatchedPorts()
+                        }
+                        .buttonStyle(.dsPrimary)
+                        Button("恢复默认") {
+                            let defaults = DevToolsKeys.watchedPorts.defaultValue
+                            model.watchedPorts = defaults
+                            portsInput = defaults.map(String.init).joined(separator: ", ")
+                            portsNotice = "已恢复默认关注端口"
+                        }
+                        .buttonStyle(.dsSecondary)
+                    }
+                    if let portsNotice {
+                        Text(portsNotice)
+                            .font(DS.caption)
+                            .foregroundStyle(DS.textSecondary)
+                    }
+                }
+            }
+        }
+        .onAppear {
+            if portsInput.isEmpty {
+                portsInput = model.watchedPorts.map(String.init).joined(separator: ", ")
+            }
+        }
+    }
+
+    private func saveWatchedPorts() {
+        let parts = portsInput.split { $0 == "," || $0 == "，" || $0.isWhitespace }
+        var seen = Set<Int>()
+        var parsed: [Int] = []
+        for raw in parts {
+            if let port = Int(raw), (1...65535).contains(port), seen.insert(port).inserted {
+                parsed.append(port)
+            }
+        }
+        guard !parsed.isEmpty else {
+            portsNotice = "请输入至少一个有效的端口号（1–65535）"
+            return
+        }
+        let sorted = parsed.sorted()
+        model.watchedPorts = sorted
+        portsInput = sorted.map(String.init).joined(separator: ", ")
+        portsNotice = "已保存 \(sorted.count) 个常用关注端口"
     }
 }

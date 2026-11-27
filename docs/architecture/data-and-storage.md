@@ -108,4 +108,4 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `AIWebKeys` | `aiweb.apps` / `aiweb.activeAppID` | `nil` / `nil` | AI 目录应用列表与当前选中 AI |
 | `ClipboardKeys` | `clipboard.enabled` / `clipboard.maxCount` | `true` / `200` | 剪贴板历史监听开关与非片段历史保留条数上限 |
 | `WorkspaceKeys` | `workspace.*` | 见 [代码仓库文档](../plugins/workspace.md) | 默认外部编辑器/终端、收藏置顶仓库与额外纳管仓库路径 |
-| `DevToolsKeys` | `devtools.watchedPorts` | `[3000, 5173, 8000, 8080, 8888]` | 端口管家常用关注端口列表 |
+| `DevToolsKeys` | `devtools.watchedPorts` / `devtools.devDirectories` | `[3000, 5173, 8000, 8080, 8888]` / `[]` | 端口管家常用关注端口列表与自定义开发目录列表 |

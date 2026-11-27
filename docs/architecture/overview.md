@@ -43,6 +43,7 @@ flowchart LR
     WorkspacePlugin --> IronBowlKit
     WorkspacePlugin --> ZentaoLogPlugin
     DevToolsPlugin --> IronBowlKit
+    DevToolsPlugin --> ZentaoLogPlugin
 ```
 
 ## 目录职责划分

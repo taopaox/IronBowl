@@ -41,6 +41,92 @@ import Testing
     }
 }
 
+@Test func parsesLsofCwdOutputAndMatchesDevDirectoriesAccurately() throws {
+    let lsofOutput = """
+    p18920
+    cnode
+    Lalice
+    n127.0.0.1:5173
+    p39035
+    cadb
+    Lalice
+    n127.0.0.1:5037
+    p3707
+    credis-server
+    Lalice
+    n127.0.0.1:6379
+    p40100
+    cjava
+    Lalice
+    n*:8080
+    """
+    let cwdOutput = """
+    p18920
+    fcwd
+    n/Users/alice/huanwei/huanost/huanost-web/apps/student-pc
+    p39035
+    fcwd
+    n/Users/alice/huanwei-backup/tools
+    p3707
+    fcwd
+    n/opt/homebrew/var/db/redis
+    p40100
+    fcwd
+    n/
+    """
+    let psOutput = """
+     18920 node /Users/alice/huanwei/huanost/huanost-web/apps/student-pc/node_modules/.bin/vite --port 5173
+     39035 adb -L tcp:5037 fork-server server --reply-fd 4
+     3707 /opt/homebrew/opt/redis/bin/redis-server 127.0.0.1:6379
+     40100 /usr/bin/java -jar /Users/alice/huanwei/backend/orders/target/orders.jar --server.port=8080
+    """
+
+    let cwds = PortScanner.parseLsofCwdOutput(cwdOutput)
+    #expect(cwds[18920] == "/Users/alice/huanwei/huanost/huanost-web/apps/student-pc")
+    #expect(cwds[3707] == "/opt/homebrew/var/db/redis")
+
+    let items = PortScanner.parseLsofOutput(
+        lsofOutput,
+        psCommands: PortScanner.parsePsOutput(psOutput),
+        workingDirectories: cwds
+    )
+    #expect(items.count == 4)
+
+    let devDirs = [
+        "/",
+        NSHomeDirectory(),
+        "/Users/alice/huanwei/",
+        "/Users/alice/huanwei/huanost",
+    ]
+    let partition = PortDirectoryMatcher.partition(items, devDirectories: devDirs)
+
+    // 18920 应命中更具体的嵌套根目录 /Users/alice/huanwei/huanost
+    // 40100 虽 cwd 为 /，但命令行命中 /Users/alice/huanwei/backend/orders/target/orders.jar 并裁剪到项目目录
+    // 39035 cwd 为 /Users/alice/huanwei-backup/tools（前缀相似但非子目录），不能误命中
+    // 3707 为 redis，归入其他端口
+    #expect(partition.devDirectoryItems.count == 2)
+    #expect(partition.otherItems.count == 2)
+
+    let firstDev = try #require(partition.devDirectoryItems.first { $0.item.pid == 18920 })
+    #expect(firstDev.directoryMatch?.rootDirectory == "/Users/alice/huanwei/huanost")
+    #expect(firstDev.directoryMatch?.projectLabel == "huanost-web/apps/student-pc")
+    #expect(firstDev.directoryMatch?.basis == .workingDirectory)
+
+    let secondDev = try #require(partition.devDirectoryItems.first { $0.item.pid == 40100 })
+    #expect(secondDev.directoryMatch?.rootDirectory == "/Users/alice/huanwei")
+    #expect(secondDev.directoryMatch?.matchedDirectory == "/Users/alice/huanwei/backend/orders")
+    #expect(secondDev.directoryMatch?.projectLabel == "backend/orders")
+    #expect(secondDev.directoryMatch?.basis == .commandLine)
+
+    // 验证按 projectLabel 排序：backend/orders < huanost-web/apps/student-pc
+    #expect(partition.devDirectoryItems.map(\.item.pid) == [40100, 18920])
+    #expect(partition.otherItems.map(\.item.pid) == [39035, 3707])
+
+    // 验证过宽路径拦截
+    #expect(!PortDirectoryMatcher.isUsableRootDirectory("/"))
+    #expect(!PortDirectoryMatcher.isUsableRootDirectory(PortDirectoryMatcher.normalizePath(NSHomeDirectory())))
+}
+
 @Test func devConvertersHandleTimestampJWTCodecHashAndDiff() throws {
     // 1. 时间戳
     let tsSec = try #require(DevConverters.parseTimestamp("1700000000"))

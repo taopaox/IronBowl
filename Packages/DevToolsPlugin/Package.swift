@@ -7,11 +7,12 @@ let package = Package(
     products: [.library(name: "DevToolsPlugin", targets: ["DevToolsPlugin"])],
     dependencies: [
         .package(path: "../IronBowlKit"),
+        .package(path: "../ZentaoLogPlugin"),
     ],
     targets: [
         .target(
             name: "DevToolsPlugin",
-            dependencies: ["IronBowlKit"],
+            dependencies: ["IronBowlKit", "ZentaoLogPlugin"],
             swiftSettings: [
                 .defaultIsolation(MainActor.self),
                 .enableUpcomingFeature("NonisolatedNonsendingByDefault"),
@@ -19,7 +20,7 @@ let package = Package(
         ),
         .testTarget(
             name: "DevToolsPluginTests",
-            dependencies: ["DevToolsPlugin", "IronBowlKit"]
+            dependencies: ["DevToolsPlugin", "IronBowlKit", "ZentaoLogPlugin"]
         ),
     ]
 )

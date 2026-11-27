@@ -351,7 +351,7 @@ final class CommandPaletteController {
                 badge: "考勤"
             ) { [weak app] in
                 guard let app else { return }
-                Task { await app.workCalendar.syncAttendance(force: true) }
+                Task { await app.workCalendar.syncAttendance() }
             },
             PaletteCommand(
                 id: "op.web.suspendAll",

@@ -38,6 +38,8 @@ packages:
     path: Packages/TodoPlugin
   WorkspacePlugin:
     path: Packages/WorkspacePlugin
+  DevToolsPlugin:
+    path: Packages/DevToolsPlugin
 targets:
   IronBowl:
     type: application
@@ -56,6 +58,7 @@ targets:
       - package: ReportPlugin
       - package: TodoPlugin
       - package: WorkspacePlugin
+      - package: DevToolsPlugin
     info:
       path: Apps/IronBowl/Info.plist
       properties:

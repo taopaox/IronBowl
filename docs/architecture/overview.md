@@ -26,6 +26,7 @@ flowchart LR
     IronBowl --> ReportPlugin["Packages/ReportPlugin<br/>(周报月报)"]
     IronBowl --> TodoPlugin["Packages/TodoPlugin<br/>(待办备忘)"]
     IronBowl --> WorkspacePlugin["Packages/WorkspacePlugin<br/>(代码仓库)"]
+    IronBowl --> DevToolsPlugin["Packages/DevToolsPlugin<br/>(研发工具)"]
 
     CalendarApp["Apps/Calendar<br/>(独立版万年历)"] --> IronBowlKit
     CalendarApp --> CalendarPlugin
@@ -41,6 +42,7 @@ flowchart LR
     TodoPlugin --> ZentaoLogPlugin
     WorkspacePlugin --> IronBowlKit
     WorkspacePlugin --> ZentaoLogPlugin
+    DevToolsPlugin --> IronBowlKit
 ```
 
 ## 目录职责划分
@@ -113,5 +115,6 @@ flowchart LR
 10. `TodoPlugin`（`todo`，待办）
 11. `ScratchpadPlugin`（`scratchpad`，随手便签）
 12. `WorkspacePlugin`（`workspace`，代码仓库）
+13. `DevToolsPlugin`（`devtools`，研发工具）
 
 当应用版本升级引入新插件 ID 时，`AppModel` 会比对 `app.knownPlugins` 与 `app.enabledPlugins`，自动将新增插件加入已启用列表，避免老用户升级后看不到新插件。

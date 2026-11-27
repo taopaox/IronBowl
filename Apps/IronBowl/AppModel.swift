@@ -1,6 +1,7 @@
 import AIWebPlugin
 import AppKit
 import CalendarPlugin
+import DevToolsPlugin
 import FeishuPlugin
 import IronBowlKit
 import Observation
@@ -84,6 +85,7 @@ final class AppModel {
             TodoPlugin(),
             ScratchpadPlugin(),
             WorkspacePlugin(),
+            DevToolsPlugin(),
         ]
         self.plugins = plugins
         defer { AppModel.shared = self }
@@ -366,7 +368,7 @@ final class AppModel {
             text.hasPrefix("已写") ? .green : .rose
         case "zentao.bugs":
             .rose
-        case "calendar.weather":
+        case "calendar.weather", "devtools.ports":
             .sky
         case "zentao.commits", "calendar.date", "calendar.lunar":
             .slate

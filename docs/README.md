@@ -30,7 +30,8 @@ docs/
 │   ├── report.md                     # 周报月报与述职插件（周/月日报汇总、季度年报、牛马账本）
 │   ├── todo.md                       # 待办与备忘插件（与万年历、禅道日报及提醒中心联动）
 │   ├── scratchpad.md                 # 随手便签插件（剪贴板历史、常用片段、Markdown 与 JSON）
-│   └── workspace.md                  # 本地仓库工作台插件（分支状态巡检、编辑器与 AI 启动）
+│   ├── workspace.md                  # 本地仓库工作台插件（分支状态巡检、编辑器与 AI 启动）
+│   └── devtools.md                   # 研发工具箱插件（本地端口管家与离线编解码/JWT/Diff）
 ├── apps/                             # 可执行应用宿主
 │   ├── ironbowl.md                   # 饭碗主工作台应用（Apps/IronBowl）
 │   └── standalone-calendar.md        # 独立版万年历应用（Apps/Calendar）
@@ -61,6 +62,7 @@ docs/
 | 待办与备忘 | [待办与备忘](./plugins/todo.md) | 跨万年历与禅道日报共享的待办日程、逾期统计、定时提醒与一键转入日报草稿 |
 | 随手便签 | [随手便签](./plugins/scratchpad.md) | 全局 `⌃⌥⌘N` 悬浮便签、剪贴板历史监听、常用片段库、JSON 美化/压缩及转待办/转日报 |
 | 本地仓库工作台 | [代码仓库](./plugins/workspace.md) | 汇总本地 Git 仓库分支、未提交/未推送状态与关联项目，一键启动编辑器/终端/AI 对话 |
+| 研发工具箱 | [研发工具](./plugins/devtools.md) | 本地 TCP 监听端口查看与安全 Kill、时间戳/JWT/编解码/哈希与文本 Diff |
 | 宿主应用 | [工作台主应用](./apps/ironbowl.md) · [独立版万年历](./apps/standalone-calendar.md) | 窗口、菜单栏、程序坞策略、开机自启与双应用数据共享 |
 | 开发与测试 | [开发与测试指南](./development/getting-started.md) · [插件开发指南](./development/plugin-guide.md) | XcodeGen、`xcodebuild`、`swift test` 与新插件接入步骤 |
 

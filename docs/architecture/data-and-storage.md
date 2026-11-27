@@ -97,7 +97,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `WebKeys` | `web.tombstone.idleMinutes` | `15` | 后台闲置休眠分钟数（0 表示不按时长） |
 | `WebKeys` | `web.tombstone.maxLiveCount` | `4` | 最多同时保活网页数（0 表示不限） |
 | `SchedulerKeys` | `scheduler.seededIDs` | `[]` | 已初始化写入过的内置定时任务 ID 列表（防用户删除后重建） |
-| `LogKeys` | `zentao.*` / `git.*` / `scan.*` / `log.*` / `reminder.*` | 见 [禅道日志文档](../plugins/zentao-log.md) | 禅道账号、Git 扫描、AI 提示词与工时提醒配置 |
+| `LogKeys` | `zentao.*` / `git.*` / `scan.*` / `log.*` / `reminder.*` / `zentao.watch.*` | 见 [禅道日志文档](../plugins/zentao-log.md) | 禅道账号、Git 扫描、AI 提示词、工时提醒与新指派 Bug/任务巡检配置 |
 | `LogKeys.quickLogShortcut` | `log.quickLogShortcut` | `true` | 启用日报插件的全局快捷记日志组合键 ⌃⌥⌘L |
 | `ReportKeys` | `report.*` | 见 [周报月报文档](../plugins/report.md) | 周报/月报提示词、风格、草稿与工时开关及上次周期模式 |
 | `CalendarKeys` | `calendar.*` / `weather.*` | 见 [万年历文档](../plugins/calendar.md) | 周起始日、天气源、城市、菜单栏日历与弹层样式 |

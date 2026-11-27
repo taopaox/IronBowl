@@ -58,6 +58,7 @@ final class LogModel {
     var message: String?
     var errorMessage: String?
     var lastScan: Date?
+    var showAssignedSheet = false
     /// 今天已经提交过（本地记录或禅道已记录）。
     var todaySubmitted = false
     var todayCommitCount: Int?
@@ -334,6 +335,11 @@ final class LogModel {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// 供后台巡检静默拉取最新指派给我的任务与 Bug（失败由调用方处理，不污染日报页错误横幅）。
+    func fetchAssignedSilently() async throws {
+        try await fetchTasksThrowing()
     }
 
     private func fetchTasksThrowing() async throws {

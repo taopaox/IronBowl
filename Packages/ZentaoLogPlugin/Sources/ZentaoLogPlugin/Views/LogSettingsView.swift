@@ -332,9 +332,11 @@ struct GenerateSettings: View {
 struct ReminderSettings: View {
     let model: LogModel
     let scheduler: LogReminderScheduler
+    @Bindable var watcher: ZentaoAssignedWatcher
     @State private var notificationStatus: SystemNotificationStatus?
     @State private var previewing = false
     @State private var requestingAuth = false
+    @State private var checkingAssigned = false
     @State private var previewFeedback: NotificationBannerState?
 
     private enum BannerAction {
@@ -421,6 +423,42 @@ struct ReminderSettings: View {
         if s[LogKeys.reminderStyle] == .system, let banner = activeBanner {
             DSBanner(banner.kind, banner.text, actionTitle: banner.action.title) {
                 performBannerAction(banner.action)
+            }
+        }
+        DSSection("指派任务与 Bug 巡检提醒", footer: "首次检查仅静默记录当前存量基线，后续新指派或重新打开的 Bug/任务才会弹窗提醒。") {
+            DSRow("后台巡检新指派") {
+                DSToggle(isOn: Binding(
+                    get: { s[LogKeys.watchAssignedEnabled] },
+                    set: {
+                        s[LogKeys.watchAssignedEnabled] = $0
+                        watcher.reconfigureTimer()
+                    }
+                ))
+            }
+            DSRow("巡检间隔") {
+                DSStepper(intValue: Binding(
+                    get: { s[LogKeys.watchAssignedInterval] },
+                    set: {
+                        s[LogKeys.watchAssignedInterval] = $0
+                        watcher.reconfigureTimer()
+                    }
+                ), in: 5...120, step: 5) { "\($0) 分钟" }
+            }
+            DSRow("仅提醒 Bug", description: "开启后忽略普通新任务，只提醒指派给我的未解决 Bug。") {
+                DSToggle(isOn: s.binding(LogKeys.watchBugsOnly))
+            }
+            DSRow("立即检查新指派", description: watcher.lastCheckSummary ?? "拉取最新任务与 Bug 列表并与本地基线比对。") {
+                Button {
+                    checkingAssigned = true
+                    Task {
+                        _ = await watcher.checkNow(manual: true)
+                        checkingAssigned = false
+                    }
+                } label: {
+                    if checkingAssigned { ProgressView().controlSize(.small) } else { Text("立即检查") }
+                }
+                .buttonStyle(.dsSecondary)
+                .disabled(checkingAssigned || !model.isConfigured)
             }
         }
         Color.clear

@@ -57,6 +57,7 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
 
     var model: LogModel?
     var scheduler: LogReminderScheduler?
+    var assignedWatcher: ZentaoAssignedWatcher?
     private var quickCapture: QuickLogCapture?
     private var pluginContext: PluginContext?
 
@@ -72,6 +73,9 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
         let scheduler = LogReminderScheduler(model: model)
         self.scheduler = scheduler
         scheduler.start()
+        let watcher = ZentaoAssignedWatcher(model: model)
+        self.assignedWatcher = watcher
+        watcher.start()
         registerScheduledActions(context: context, model: model)
     }
 
@@ -79,6 +83,8 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
         pluginContext?.scheduler.unregister(actionID: Self.autoSubmitActionID)
         quickCapture?.stop()
         quickCapture = nil
+        assignedWatcher?.stop()
+        assignedWatcher = nil
         pluginContext = nil
         scheduler?.stop()
         scheduler = nil
@@ -161,12 +167,12 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
     public static let settingsReposID = "zentao.repos"
 
     public var settingsPages: [SettingsPage] {
-        guard let model, let scheduler, let quickCapture else { return [] }
+        guard let model, let scheduler, let quickCapture, let assignedWatcher else { return [] }
         return [
             SettingsPage(id: Self.settingsAccountID, title: "禅道账号", systemImage: "person.crop.circle") { AnyView(ZentaoAccountSettings(model: model)) },
             SettingsPage(id: Self.settingsReposID, title: "仓库与映射", systemImage: "folder") { AnyView(RepoSettings(model: model)) },
             SettingsPage(id: "zentao.generate", title: "日志生成", systemImage: "sparkles") { AnyView(GenerateSettings(model: model, capture: quickCapture)) },
-            SettingsPage(id: "zentao.reminder", title: "日志提醒", systemImage: "bell") { AnyView(ReminderSettings(model: model, scheduler: scheduler)) },
+            SettingsPage(id: "zentao.reminder", title: "日志提醒", systemImage: "bell") { AnyView(ReminderSettings(model: model, scheduler: scheduler, watcher: assignedWatcher)) },
         ]
     }
 
@@ -423,6 +429,10 @@ public final class ZentaoLogPlugin: IronBowlPlugin {
             MenuBarItem(id: "zentao.gitDirty", title: "未提交/未推送仓库数") {
                 let dirtyCount = model.dirtyRepoStatuses.count
                 return dirtyCount > 0 ? "待推 \(dirtyCount)库" : nil
+            },
+            MenuBarItem(id: "zentao.bugs", title: "未解决 Bug 数") {
+                let bugCount = model.openBugs.count
+                return bugCount > 0 ? "Bug \(bugCount)" : nil
             },
         ]
     }

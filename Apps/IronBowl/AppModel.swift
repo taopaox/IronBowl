@@ -346,6 +346,8 @@ final class AppModel {
             text == "✓" ? .green : .rose
         case "zentao.hours":
             text.hasPrefix("已写") ? .green : .rose
+        case "zentao.bugs":
+            .rose
         case "calendar.weather":
             .sky
         case "zentao.commits", "calendar.date", "calendar.lunar":

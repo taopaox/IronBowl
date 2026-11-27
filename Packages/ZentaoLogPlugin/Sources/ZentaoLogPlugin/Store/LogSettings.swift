@@ -45,6 +45,12 @@ enum LogKeys {
     static let snoozeMinutes = SettingKey<Int>("reminder.snoozeMinutes", default: 15)
     static let remindOnOffDays = SettingKey<Bool>("reminder.offDays", default: false)
     static let skipDate = SettingKey<String>("reminder.skipDate", default: "")
+
+    static let watchAssignedEnabled = SettingKey<Bool>("zentao.watch.enabled", default: true)
+    static let watchAssignedInterval = SettingKey<Int>("zentao.watch.intervalMinutes", default: 15)
+    static let watchBugsOnly = SettingKey<Bool>("zentao.watch.bugsOnly", default: false)
+    static let knownOpenBugIDs = SettingKey<[Int]?>("zentao.watch.knownBugIDs", default: nil)
+    static let knownOpenTaskIDs = SettingKey<[Int]?>("zentao.watch.knownTaskIDs", default: nil)
 }
 
 public extension GitScanner {

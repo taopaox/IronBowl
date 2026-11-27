@@ -4,7 +4,6 @@ import SwiftUI
 struct LogView: View {
     @Bindable var model: LogModel
     @State private var showOvertime = false
-    @State private var showAssigned = false
     @State private var confirmSubmit = false
     @State private var stampToken = 0
 
@@ -79,7 +78,7 @@ struct LogView: View {
             }
         }
         .sheet(isPresented: $showOvertime) { OvertimeSheet(model: model) }
-        .sheet(isPresented: $showAssigned) { ZentaoAssignedSheet(model: model) }
+        .sheet(isPresented: $model.showAssignedSheet) { ZentaoAssignedSheet(model: model) }
         .alert("盖章提交到禅道？", isPresented: $confirmSubmit) {
             Button("确认提交 \(model.pendingDrafts.count) 条") {
                 Task {
@@ -154,7 +153,7 @@ struct LogView: View {
         )
         .help("选择生成草稿的 AI")
 
-        Button("我的禅道 (\(model.openTasks.count + model.openBugs.count))") { showAssigned = true }
+        Button("我的禅道 (\(model.openTasks.count + model.openBugs.count))") { model.showAssignedSheet = true }
             .buttonStyle(.journalSecondary(p))
             .help("查看指派给我的未关任务和 Bug，支持一键转草稿/转待办/复制 Commit")
 

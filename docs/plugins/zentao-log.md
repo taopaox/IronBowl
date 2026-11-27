@@ -13,9 +13,9 @@
 | `DailyLogQuery.swift` | `ZentaoDailyLogService`, `DailyLogItem`, `DailyLogRangeResult` | 面向周报等跨天插件的只读区间日报查询服务（融合禅道远端、本地已提交与未提交草稿并去重） |
 | `Git/GitScanner.swift` | `GitScanner`, `RepoActivity`, `GitCommit`, `RepoWorkspaceStatus` | 多层级发现 Git 仓库、按作者邮箱和本地当天 00:00–24:00 扫描提交（跨仓库按哈希去重），并支持巡检未提交改动与未推送提交（`workspaceStatus`） |
 | `Draft/DraftGenerator.swift` | `DraftGenerator`, `DraftEntry`, `DraftInput` | 按工作日/下班时间拆条、权重分配工时、AI 结构化生成与失败拼接兜底、剩余工时递减 |
-| `Zentao/ZentaoClient.swift` | `ZentaoClient`, `ZentaoTask`, `ZentaoEstimate` | 禅道 PATH_INFO `.json` 客户端（登录、自动重登、企业版 `effort` 与开源版 `recordEstimate` 兼容、提交回查） |
+| `Zentao/ZentaoClient.swift` | `ZentaoClient`, `ZentaoTask`, `ZentaoEstimate`, `ZentaoBug` | 禅道 PATH_INFO `.json` 客户端（登录、自动重登、企业版 `effort` 与开源版 `recordEstimate` 兼容、提交回查、指派给我的任务与 Bug 列表） |
 | `Store/LogSettings.swift` | `LogKeys`, `LogMigrations`, `LogStore` | SQLite 持久化（仓库映射、本地提交记录、上次任务、未提交草稿） |
-| `Views/LogView.swift` | `LogView`, `JournalDayRingStrip`, `JournalWorkHoursCard`, `JournalCommitSlipCard`, `JournalDraftCard`, `JournalRecordedCard`, `OvertimeSheet` | 双页活页手账主视图（左页撕历、7 天圆环打卡条、三段工时刻度与 Git 小票摘录；右页橡皮印章、荧光笔重点标黄、待提交草稿与已入账记录） |
+| `Views/LogView.swift` | `LogView`, `JournalDayRingStrip`, `JournalWorkHoursCard`, `JournalCommitSlipCard`, `JournalDraftCard`, `JournalRecordedCard`, `OvertimeSheet`, `ZentaoAssignedSheet` | 双页活页手账主视图（左页撕历、7 天圆环打卡条、三段工时刻度与 Git 小票摘录；右页橡皮印章、荧光笔重点标黄、待提交草稿与已入账记录；支持「我的禅道」任务/Bug 速览与一键转草稿/转待办/复制 Commit 前缀） |
 | `Views/LogSettingsView.swift` | `ZentaoAccountSettings`, `RepoSettings`, `GenerateSettings`, `ReminderSettings` | 四个设置页：禅道账号、仓库映射、生成提示词与工时、提醒时间与样式 |
 
 ## 当日需填工时与「正常 + 加班」拆条生成

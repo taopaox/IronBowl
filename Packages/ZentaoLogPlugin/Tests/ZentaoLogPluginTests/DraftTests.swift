@@ -681,3 +681,63 @@ import Testing
     #expect(retained.id == draft.id && retained.work == edited.work)
     #expect(retained.allowsRegeneration == false && retained.manualLeft == 1)
 }
+
+@MainActor @Test func parsesZentaoBugsAndAddsDraftOrTodo() throws {
+    let payload: [String: Any] = [
+        "bugs": [
+            [
+                "id": "881",
+                "title": " 修复登录态失效弹窗 ",
+                "severity": "2",
+                "pri": "1",
+                "status": "active",
+                "project": "566",
+                "productName": "饭碗工作台",
+            ],
+            [
+                "id": "882",
+                "title": "历史已关闭 Bug",
+                "severity": "3",
+                "pri": "3",
+                "status": "closed",
+                "project": "566",
+                "productName": "饭碗工作台",
+            ],
+        ]
+    ]
+    let bugs = ZentaoClient.parseBugs(payload)
+    #expect(bugs.count == 2)
+    #expect(bugs[0].id == 881)
+    #expect(bugs[0].title == "修复登录态失效弹窗")
+    #expect(bugs[0].isOpen)
+    #expect(!bugs[1].isOpen)
+
+    let url = FileManager.default.temporaryDirectory.appending(path: "zentao-assigned-\(UUID()).sqlite")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let db = try AppDatabase(url: url, migrations: LogMigrations.all)
+    let settings = SettingsStore(database: db)
+    let context = PluginContext(
+        database: db,
+        settings: settings,
+        reminders: ReminderCenter(),
+        workCalendar: WorkCalendar(database: db, settings: settings),
+        providers: AIProviderStore(settings: settings),
+        openPlugin: { _ in },
+        openSettings: { _ in }
+    )
+    let model = LogModel(context: context)
+    model.tasks = [ZentaoTask(id: 301, name: "客户端稳定性优化", projectID: 566, projectName: "饭碗", status: "doing", left: 6, consumed: 2)]
+    model.bugs = bugs
+    #expect(model.openBugs.count == 1)
+
+    model.addDraftFromAssignedBug(bugs[0])
+    #expect(model.drafts.count == 1)
+    #expect(model.drafts[0].taskID == 301)
+    #expect(model.drafts[0].work.contains("#881"))
+
+    #expect(model.addTodoFromBug(bugs[0]))
+    #expect(!model.addTodoFromBug(bugs[0])) // 重复添加应被去重跳过
+    #expect(context.todos.items.count == 1)
+    #expect(context.todos.items[0].zentaoObjectType == "bug")
+    #expect(context.todos.items[0].zentaoObjectID == 881)
+}

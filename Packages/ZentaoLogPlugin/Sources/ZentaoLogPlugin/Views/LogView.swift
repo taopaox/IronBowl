@@ -4,6 +4,7 @@ import SwiftUI
 struct LogView: View {
     @Bindable var model: LogModel
     @State private var showOvertime = false
+    @State private var showAssigned = false
     @State private var confirmSubmit = false
     @State private var stampToken = 0
 
@@ -78,6 +79,7 @@ struct LogView: View {
             }
         }
         .sheet(isPresented: $showOvertime) { OvertimeSheet(model: model) }
+        .sheet(isPresented: $showAssigned) { ZentaoAssignedSheet(model: model) }
         .alert("盖章提交到禅道？", isPresented: $confirmSubmit) {
             Button("确认提交 \(model.pendingDrafts.count) 条") {
                 Task {
@@ -151,6 +153,10 @@ struct LogView: View {
             }
         )
         .help("选择生成草稿的 AI")
+
+        Button("我的禅道 (\(model.openTasks.count + model.openBugs.count))") { showAssigned = true }
+            .buttonStyle(.journalSecondary(p))
+            .help("查看指派给我的未关任务和 Bug，支持一键转草稿/转待办/复制 Commit")
 
         Button("记加班") { showOvertime = true }
             .buttonStyle(.journalSecondary(p))
@@ -1077,5 +1083,206 @@ struct OvertimeSheet: View {
             hours = model.settings[LogKeys.overtimeDefaultHours]
             taskID = model.busiestTaskID
         }
+    }
+}
+
+private struct ZentaoAssignedSheet: View {
+    let model: LogModel
+    @Environment(\.dismiss) private var dismiss
+
+    enum Tab: String, CaseIterable, Hashable {
+        case tasks
+        case bugs
+    }
+
+    @State private var tab: Tab = .tasks
+    @State private var query = ""
+    @State private var toast: String?
+
+    private var filteredTasks: [ZentaoTask] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let list = model.openTasks
+        guard !q.isEmpty else { return list }
+        return list.filter {
+            $0.name.localizedCaseInsensitiveContains(q)
+                || $0.projectName.localizedCaseInsensitiveContains(q)
+                || "\($0.id)".contains(q)
+        }
+    }
+
+    private var filteredBugs: [ZentaoBug] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let list = model.openBugs
+        guard !q.isEmpty else { return list }
+        return list.filter {
+            $0.title.localizedCaseInsensitiveContains(q)
+                || $0.productName.localizedCaseInsensitiveContains(q)
+                || "\($0.id)".contains(q)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("我的禅道（指派给我）").font(DS.pageTitle)
+                    Text("直接将任务或 Bug 记入当日日报草稿、加入待办，或复制 Commit 前缀。").font(DS.caption).foregroundStyle(DS.textSecondary)
+                }
+                Spacer()
+                Button {
+                    Task { await model.loadTasks() }
+                } label: {
+                    if model.isLoadingTasks {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("刷新", systemImage: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.dsSecondary)
+                Button("关闭") { dismiss() }.buttonStyle(.dsSecondary)
+            }
+
+            HStack(spacing: 10) {
+                DSTabs(selection: $tab, options: [
+                    (.tasks, "任务 (\(model.openTasks.count))"),
+                    (.bugs, "Bug (\(model.openBugs.count))"),
+                ])
+                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(DS.textTertiary)
+                    TextField("搜索编号、标题或项目", text: $query).textFieldStyle(.plain)
+                }
+                .font(DS.body)
+                .padding(.horizontal, 10)
+                .frame(width: 240, height: DS.s(28))
+                .background(DS.card, in: .rect(cornerRadius: DS.controlRadius))
+                .overlay { RoundedRectangle(cornerRadius: DS.controlRadius).strokeBorder(DS.borderStrong) }
+            }
+
+            if let toast {
+                DSBanner(.success, toast)
+            }
+
+            ScrollView {
+                VStack(spacing: 8) {
+                    switch tab {
+                    case .tasks:
+                        if filteredTasks.isEmpty {
+                            emptyRow("没有进行中的禅道任务")
+                        } else {
+                            ForEach(filteredTasks) { task in
+                                DSCard(padding: 12) {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            HStack(spacing: 6) {
+                                                Tag("#\(task.id)", color: DS.brand)
+                                                Tag(task.statusText, color: DS.textSecondary)
+                                                Text(task.projectName).font(DS.caption).foregroundStyle(DS.textSecondary)
+                                            }
+                                            Text(task.name).font(DS.rowTitle)
+                                            Text("已消耗 \(hoursText(task.consumed))h · 剩余 \(hoursText(task.left))h")
+                                                .font(DS.caption.monospacedDigit())
+                                                .foregroundStyle(DS.textTertiary)
+                                        }
+                                        Spacer(minLength: 8)
+                                        VStack(alignment: .trailing, spacing: 6) {
+                                            HStack(spacing: 4) {
+                                                Button("+ 记入草稿") {
+                                                    model.addDraftFromAssignedTask(task)
+                                                    toast = "已加入任务 #\(task.id) 到今日草稿"
+                                                }
+                                                .buttonStyle(.dsSecondary)
+                                                Button("+ 转待办") {
+                                                    let added = model.addTodoFromTask(task)
+                                                    toast = added ? "已添加任务 #\(task.id) 到待办" : "该任务已在未完成待办中"
+                                                }
+                                                .buttonStyle(.dsSecondary)
+                                            }
+                                            HStack(spacing: 4) {
+                                                Button("复制 Commit") {
+                                                    copyText("feat: #\(task.id) \(task.name)")
+                                                    toast = "已复制 Commit 前缀"
+                                                }
+                                                .buttonStyle(.dsGhost)
+                                                if let url = model.zentaoItemWebURL(type: "task", id: task.id) {
+                                                    Button("打开网页") { NSWorkspace.shared.open(url) }
+                                                        .buttonStyle(.dsGhost)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                    case .bugs:
+                        if filteredBugs.isEmpty {
+                            emptyRow("当前没有指派给你的未解决 Bug")
+                        } else {
+                            ForEach(filteredBugs) { bug in
+                                DSCard(padding: 12) {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            HStack(spacing: 6) {
+                                                Tag("#\(bug.id)", color: DS.danger)
+                                                Tag("严重度 S\(bug.severity)", color: bug.severity <= 2 ? DS.danger : DS.warning)
+                                                Tag("P\(bug.priority)", color: DS.textSecondary)
+                                                Text(bug.productName).font(DS.caption).foregroundStyle(DS.textSecondary)
+                                            }
+                                            Text(bug.title).font(DS.rowTitle)
+                                        }
+                                        Spacer(minLength: 8)
+                                        VStack(alignment: .trailing, spacing: 6) {
+                                            HStack(spacing: 4) {
+                                                Button("+ 记入草稿") {
+                                                    model.addDraftFromAssignedBug(bug)
+                                                    toast = "已加入 Bug #\(bug.id) 到今日草稿"
+                                                }
+                                                .buttonStyle(.dsSecondary)
+                                                Button("+ 转待办") {
+                                                    let added = model.addTodoFromBug(bug)
+                                                    toast = added ? "已添加 Bug #\(bug.id) 到待办" : "该 Bug 已在未完成待办中"
+                                                }
+                                                .buttonStyle(.dsSecondary)
+                                            }
+                                            HStack(spacing: 4) {
+                                                Button("复制 Commit") {
+                                                    copyText("fix: #\(bug.id) \(bug.title)")
+                                                    toast = "已复制 Commit 前缀"
+                                                }
+                                                .buttonStyle(.dsGhost)
+                                                if let url = model.zentaoItemWebURL(type: "bug", id: bug.id) {
+                                                    Button("打开网页") { NSWorkspace.shared.open(url) }
+                                                        .buttonStyle(.dsGhost)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(height: 400)
+        }
+        .padding(22)
+        .frame(width: 720)
+        .background(DS.groupBackground)
+    }
+
+    private func emptyRow(_ title: String) -> some View {
+        DSCard {
+            Text(title)
+                .font(DS.body)
+                .foregroundStyle(DS.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 20)
+        }
+    }
+
+    private func copyText(_ s: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
     }
 }

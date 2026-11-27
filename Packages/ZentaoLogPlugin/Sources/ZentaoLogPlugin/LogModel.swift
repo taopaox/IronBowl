@@ -37,6 +37,8 @@ final class LogModel {
     var repoStatuses: [RepoWorkspaceStatus] = []
     var dirtyRepoStatuses: [RepoWorkspaceStatus] { repoStatuses.filter(\.needsAttention) }
     var tasks: [ZentaoTask] = []
+    var bugs: [ZentaoBug] = []
+    var openBugs: [ZentaoBug] { bugs.filter(\.isOpen) }
     var drafts: [DraftEntry] = [] {
         didSet {
             if !isSwitchingDate {
@@ -335,7 +337,11 @@ final class LogModel {
     }
 
     private func fetchTasksThrowing() async throws {
-        tasks = try await zentao().myTasks()
+        let z = try zentao()
+        async let fetchedTasks = z.myTasks()
+        async let fetchedBugs = (try? z.myBugs()) ?? []
+        tasks = try await fetchedTasks
+        bugs = await fetchedBugs
         if settings[LogKeys.fallbackTaskID] == nil,
            let misc = openTasks.first(where: { $0.name.contains("杂项") }) {
             settings[LogKeys.fallbackTaskID] = misc.id
@@ -599,6 +605,80 @@ final class LogModel {
         drafts.append(DraftEntry(taskID: taskID, hours: hours, left: 0, work: work.isEmpty ? "加班处理工作" : work,
                                  isFallback: taskID == settings[LogKeys.fallbackTaskID], isOvertime: true, isManual: true))
         recomputeLefts()
+    }
+
+    // MARK: 我的禅道速览操作
+
+    func addDraftFromAssignedTask(_ task: ZentaoTask) {
+        let fallback = settings[LogKeys.fallbackTaskID]
+        drafts.append(DraftEntry(
+            taskID: task.id,
+            taskTitle: task.name,
+            hours: 1,
+            left: max(0, task.left - 1),
+            work: "1. 推进「\(task.name)」相关工作",
+            isFallback: task.id == fallback,
+            isManual: true
+        ))
+        recomputeLefts()
+        message = "已将任务 #\(task.id) 加入 \(dateString) 草稿"
+    }
+
+    func addDraftFromAssignedBug(_ bug: ZentaoBug) {
+        let matchedTaskID = openTasks.first(where: { $0.projectID == bug.projectID && bug.projectID > 0 })?.id
+            ?? settings[LogKeys.fallbackTaskID]
+        drafts.append(DraftEntry(
+            taskID: matchedTaskID,
+            hours: 1,
+            left: 0,
+            work: "1. 修复问题 #\(bug.id)：\(bug.title)",
+            isFallback: matchedTaskID == settings[LogKeys.fallbackTaskID],
+            isManual: true
+        ))
+        recomputeLefts()
+        message = "已将 Bug #\(bug.id) 加入 \(dateString) 草稿"
+    }
+
+    @discardableResult
+    func addTodoFromTask(_ task: ZentaoTask) -> Bool {
+        if context.todos.items.contains(where: { !$0.isCompleted && $0.zentaoObjectType == "task" && $0.zentaoObjectID == task.id }) {
+            return false
+        }
+        let item = context.todos.add(
+            title: "#\(task.id) \(task.name)",
+            notes: task.projectName,
+            dueDate: dateString,
+            priority: .important,
+            estimatedHours: max(0.5, min(8, task.left > 0 ? task.left : 1)),
+            zentaoObjectType: "task",
+            zentaoObjectID: task.id
+        )
+        return item != nil
+    }
+
+    @discardableResult
+    func addTodoFromBug(_ bug: ZentaoBug) -> Bool {
+        if context.todos.items.contains(where: { !$0.isCompleted && $0.zentaoObjectType == "bug" && $0.zentaoObjectID == bug.id }) {
+            return false
+        }
+        let priority: TodoPriority = bug.severity <= 2 ? .urgent : .important
+        let item = context.todos.add(
+            title: "修复 Bug #\(bug.id)：\(bug.title)",
+            notes: bug.productName,
+            dueDate: dateString,
+            priority: priority,
+            estimatedHours: 1,
+            zentaoObjectType: "bug",
+            zentaoObjectID: bug.id
+        )
+        return item != nil
+    }
+
+    func zentaoItemWebURL(type: String, id: Int) -> URL? {
+        var base = settings[LogKeys.baseURL].trimmingCharacters(in: .whitespacesAndNewlines)
+        while base.hasSuffix("/") { base.removeLast() }
+        guard !base.isEmpty else { return nil }
+        return URL(string: "\(base)/\(type)-view-\(id).html")
     }
 
     func recomputeLefts() {

@@ -99,6 +99,7 @@ flowchart LR
 | `openPlugin` | `(String) -> Void` | 跳转到指定插件主视图并激活主窗口 |
 | `openSettings` | `(String?) -> Void` | 打开设置窗口并定位到指定设置页 ID |
 | `openChatInWorkspace` | `(String) -> Void` | 切到首页「今天」并绑定指定仓库目录发起对话 |
+| `appendDailyLogDraft` | `((String, Double, Date) -> Bool)?` | 允许万年历等解耦插件按日期追加禅道日报草稿（独立版中为 `nil`） |
 
 ### 运行时注册与占位插件
 

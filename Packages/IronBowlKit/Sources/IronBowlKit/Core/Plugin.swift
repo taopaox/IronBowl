@@ -286,6 +286,8 @@ public final class PluginContext {
     public let openSettings: (String?) -> Void
     /// 切换到首页「今天」并绑定指定工作目录发起对话。
     public let openChatInWorkspace: (String) -> Void
+    /// 从万年历等解耦插件向禅道日报写入外部草稿（独立版万年历中为 nil）。
+    public let appendDailyLogDraft: ((_ work: String, _ hours: Double, _ date: Date) -> Bool)?
 
     public init(
         database: AppDatabase,
@@ -300,7 +302,8 @@ public final class PluginContext {
         clipboard: ClipboardHistoryStore? = nil,
         openPlugin: @escaping (String) -> Void,
         openSettings: @escaping (String?) -> Void,
-        openChatInWorkspace: @escaping (String) -> Void = { _ in }
+        openChatInWorkspace: @escaping (String) -> Void = { _ in },
+        appendDailyLogDraft: ((_ work: String, _ hours: Double, _ date: Date) -> Bool)? = nil
     ) {
         self.database = database
         self.settings = settings
@@ -322,6 +325,7 @@ public final class PluginContext {
         self.openPlugin = openPlugin
         self.openSettings = openSettings
         self.openChatInWorkspace = openChatInWorkspace
+        self.appendDailyLogDraft = appendDailyLogDraft
     }
 }
 

@@ -139,7 +139,10 @@ final class AppModel {
             scheduler: scheduler,
             openPlugin: { [weak self] id in self?.open(plugin: id) },
             openSettings: { [weak self] page in self?.openSettings(page: page) },
-            openChatInWorkspace: { [weak self] path in self?.openChat(inWorkspace: path) }
+            openChatInWorkspace: { [weak self] path in self?.openChat(inWorkspace: path) },
+            appendDailyLogDraft: { [database, settings] work, hours, date in
+                ZentaoLogPlugin.appendExternalDraft(work: work, hours: hours, on: date, database: database, settings: settings)
+            }
         )
         context.clipboard.startMonitoring()
         syncPlugins()
@@ -368,6 +371,8 @@ final class AppModel {
             text.hasPrefix("已写") ? .green : .rose
         case "zentao.bugs":
             .rose
+        case "calendar.nextMeeting":
+            .amber
         case "calendar.weather", "devtools.ports":
             .sky
         case "zentao.commits", "calendar.date", "calendar.lunar":

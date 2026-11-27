@@ -1,8 +1,65 @@
+import AppKit
+import EventKit
 import IronBowlKit
 import SwiftUI
 
 struct CalendarDisplaySettings: View {
     let model: CalendarModel
+
+    private var systemCalendarBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings[MeetingKeys.systemCalendarEnabled] },
+            set: { on in
+                model.settings[MeetingKeys.systemCalendarEnabled] = on
+                if on {
+                    Task {
+                        if model.meetings.authorizationStatus == .notDetermined {
+                            _ = await model.meetings.requestSystemCalendarAccess()
+                        } else {
+                            await model.meetings.refresh(around: model.month)
+                        }
+                    }
+                } else {
+                    Task { await model.meetings.refresh(around: model.month) }
+                }
+            }
+        )
+    }
+
+    private var dingtalkCalendarBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings[MeetingKeys.dingtalkCalendarEnabled] },
+            set: { on in
+                model.settings[MeetingKeys.dingtalkCalendarEnabled] = on
+                Task { await model.meetings.refresh(around: model.month) }
+            }
+        )
+    }
+
+    private var hideAllDayBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings[MeetingKeys.hideAllDayEvents] },
+            set: { val in
+                model.settings[MeetingKeys.hideAllDayEvents] = val
+                Task { await model.meetings.refresh(around: model.month) }
+            }
+        )
+    }
+
+    private var authorizationDescription: String {
+        switch model.meetings.authorizationStatus {
+        case .fullAccess:
+            "已授权读取 macOS「日历」事件，自动聚合到万年历月历和当日详情。"
+        case .notDetermined:
+            "首次开启时将请求读取 macOS「日历」权限（仅在您主动启用时弹出授权提示）。"
+        case .denied, .restricted:
+            "系统日历权限未开启，请在「系统设置 → 隐私与安全性 → 日历」中允许访问。"
+        case .writeOnly:
+            "当前仅授予写入权限，请在系统设置中改为「完全访问权限」。"
+        @unknown default:
+            "读取 macOS「日历」中的本地及订阅会议日程。"
+        }
+    }
 
     var body: some View {
         let s = model.settings
@@ -18,6 +75,49 @@ struct CalendarDisplaySettings: View {
             }
             DSRow("时间制式", description: "切换 12 小时制或 24 小时制显示。") {
                 CalendarTimeFormatPicker(selection: s.binding(CalendarKeys.menuBarTime24Hour))
+            }
+        }
+
+        DSSection("会议与日程同步", footer: "月历格子底部橙色圆点表示当天有会议安排；点击日期可在右侧一键入会或将会议时长记入禅道日报草稿。") {
+            DSRow("读取 macOS 系统日历", description: authorizationDescription) {
+                HStack(spacing: 8) {
+                    if model.meetings.authorizationStatus == .denied || model.meetings.authorizationStatus == .restricted || model.meetings.authorizationStatus == .writeOnly {
+                        Button("打开系统隐私设置") {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .buttonStyle(.dsSecondary)
+                    } else if model.meetings.authorizationStatus == .notDetermined && s[MeetingKeys.systemCalendarEnabled] {
+                        Button("授权访问") {
+                            Task { _ = await model.meetings.requestSystemCalendarAccess() }
+                        }
+                        .buttonStyle(.dsSecondary)
+                    }
+                    DSToggle(isOn: systemCalendarBinding)
+                }
+            }
+            DSRow("同步钉钉日程", description: "通过已登录的钉钉 CLI（dws）只读拉取近期会议日程并提取入会链接。") {
+                DSToggle(isOn: dingtalkCalendarBinding)
+            }
+            DSRow("隐藏全天事件", description: "过滤系统日历中的全天节假日或纪念日条目，只专注限时会议。") {
+                DSToggle(isOn: hideAllDayBinding)
+            }
+            if s[MeetingKeys.systemCalendarEnabled] || s[MeetingKeys.dingtalkCalendarEnabled] {
+                let count = model.meetings.eventsByDay.values.reduce(0) { $0 + $1.count }
+                DSRow("日程同步状态", description: model.meetings.lastError ?? "当前月前后共加载 \(count) 条会议日程") {
+                    Button {
+                        Task { await model.meetings.refresh(around: model.month) }
+                    } label: {
+                        if model.meetings.isRefreshing {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("立即刷新")
+                        }
+                    }
+                    .buttonStyle(.dsSecondary)
+                    .disabled(model.meetings.isRefreshing)
+                }
             }
         }
     }

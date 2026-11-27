@@ -229,6 +229,7 @@ struct DayCell: Identifiable, Hashable {
 @Observable
 public final class CalendarModel {
     public let context: PluginContext
+    public let meetings: MeetingScheduleService
     var settings: SettingsStore { context.settings }
     var workCalendar: WorkCalendar { context.workCalendar }
 
@@ -267,6 +268,7 @@ public final class CalendarModel {
 
     public init(context: PluginContext) {
         self.context = context
+        self.meetings = MeetingScheduleService(settings: context.settings)
         let today = Self.cal.startOfDay(for: Date())
         selected = today
         month = Self.firstOfMonth(today)
@@ -408,12 +410,18 @@ public final class CalendarModel {
             refreshStandaloneCalendarState()
             CalendarMenuBarPolicy.postStandaloneProbe()
         }
-        Task { await refreshWeatherIfNeeded() }
+        Task {
+            await refreshWeatherIfNeeded()
+            await meetings.refresh(around: month)
+        }
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                Task { await self.refreshWeatherIfNeeded() }
+                Task {
+                    await self.refreshWeatherIfNeeded()
+                    await self.meetings.refresh(around: self.month)
+                }
             }
         }
         timer?.tolerance = 60
@@ -459,10 +467,11 @@ public final class CalendarModel {
         refreshStandaloneCalendarState()
     }
 
-    /// 跨进程设置变更后同步天气快照与时钟精度。
+    /// 跨进程设置变更后同步天气快照、会议日程与时钟精度。
     public func syncExternalChanges() {
         weather = settings[CalendarKeys.lastWeather]
         syncClockTimer()
+        Task { await meetings.refresh(around: month) }
     }
 
     /// 根据是否开启「时间精确到秒」在整分钟与整秒定时器之间动态切换。
@@ -701,17 +710,27 @@ public final class CalendarModel {
         if let year { c.year = year }
         if let m { c.month = m }
         c.day = 1
-        if let d = Self.cal.date(from: c) { month = d }
+        if let d = Self.cal.date(from: c) {
+            month = d
+            Task { await meetings.refresh(around: d) }
+        }
     }
 
     func shiftMonth(_ delta: Int) {
-        if let d = Self.cal.date(byAdding: .month, value: delta, to: month) { month = d }
+        if let d = Self.cal.date(byAdding: .month, value: delta, to: month) {
+            month = d
+            Task { await meetings.refresh(around: d) }
+        }
     }
 
     func select(_ d: Date) {
         let day = Self.cal.startOfDay(for: d)
         if selected != day { selected = day }
-        if !Self.cal.isDate(d, equalTo: month, toGranularity: .month) { month = Self.firstOfMonth(d) }
+        if !Self.cal.isDate(d, equalTo: month, toGranularity: .month) {
+            let nextMonth = Self.firstOfMonth(d)
+            month = nextMonth
+            Task { await meetings.refresh(around: nextMonth) }
+        }
     }
 
     func goToday() { select(Date()) }
@@ -775,5 +794,25 @@ public final class CalendarModel {
     var weatherShort: String? {
         guard let w = weather else { return nil }
         return "\(w.text) \(Int(w.temperature.rounded()))°"
+    }
+
+    // MARK: 会议日程联动
+
+    /// 菜单栏展示：当前进行中或 60 分钟内即将开始的会议。
+    public var nextMeetingMenuBarText: String? {
+        guard let meeting = meetings.nextUpcomingMeeting(now: now, withinMinutes: 60) else { return nil }
+        let rawTitle = meeting.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let shortTitle = rawTitle.count > 10 ? String(rawTitle.prefix(9)) + "…" : rawTitle
+        if meeting.isOngoing(at: now) {
+            return "会议中 \(shortTitle)"
+        }
+        let mins = max(1, meeting.minutesUntilStart(from: now))
+        return "\(mins)分后 \(shortTitle)"
+    }
+
+    /// 将会议记录一键写入指定日期的禅道日报草稿。
+    @discardableResult
+    public func logMeeting(_ event: MeetingEvent, on date: Date) -> Bool {
+        context.appendDailyLogDraft?("参加会议：\(event.title)", event.suggestedLogHours, date) ?? false
     }
 }

@@ -59,6 +59,7 @@ public final class CalendarPlugin: IronBowlPlugin {
             },
             MenuBarItem(id: "calendar.lunar", title: "农历（十月十七）") { Lunar.lunar(Date()).text },
             MenuBarItem(id: "calendar.weather", title: "天气（晴 12°）") { model.weatherShort },
+            MenuBarItem(id: "calendar.nextMeeting", title: "即将开始的会议（15分后 周会）") { model.nextMeetingMenuBarText },
         ]
     }
 

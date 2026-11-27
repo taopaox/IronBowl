@@ -353,6 +353,7 @@ private struct PopoverDayCell: View {
         let label = Lunar.cellLabel(cell.date)
         let badge = model.dayBadge(cell.date)
         let todoCounts = model.context.todos.counts(on: cell.date)
+        let hasMeetings = !model.meetings.events(on: cell.date).isEmpty
 
         Button { model.select(cell.date) } label: {
             VStack(spacing: 1) {
@@ -405,12 +406,22 @@ private struct PopoverDayCell: View {
                 }
             }
             .overlay(alignment: .bottomTrailing) {
-                if todoCounts.incomplete + todoCounts.completed > 0 {
-                    Circle()
-                        .fill(todoCounts.incomplete > 0 ? DS.brand : DS.success)
-                        .frame(width: 4, height: 4)
-                        .opacity(cell.inMonth ? 1 : 0.5)
-                        .padding(3)
+                let hasTodos = todoCounts.incomplete + todoCounts.completed > 0
+                if hasTodos || hasMeetings {
+                    HStack(spacing: 2) {
+                        if hasMeetings {
+                            Circle()
+                                .fill(DS.warning)
+                                .frame(width: 4, height: 4)
+                        }
+                        if hasTodos {
+                            Circle()
+                                .fill(todoCounts.incomplete > 0 ? DS.brand : DS.success)
+                                .frame(width: 4, height: 4)
+                        }
+                    }
+                    .opacity(cell.inMonth ? 1 : 0.5)
+                    .padding(3)
                 }
             }
             .contentShape(.rect)
@@ -497,6 +508,17 @@ private struct PopoverSidePanel: View {
                         text: isHoliday ? "放假" : "调休上班",
                         background: isHoliday ? palette.sidebarHolidayPillBackground : palette.sidebarMakeupPillBackground,
                         foreground: isHoliday ? palette.sidebarHolidayPillText : palette.sidebarMakeupPillText
+                    )
+                }
+                if let upcoming = model.meetings.nextUpcomingMeeting(now: model.now, withinMinutes: 90) {
+                    let shortTitle = upcoming.title.count > 7 ? String(upcoming.title.prefix(6)) + "…" : upcoming.title
+                    let pillText = upcoming.isOngoing(at: model.now)
+                        ? "会议中 · \(shortTitle)"
+                        : "\(max(1, upcoming.minutesUntilStart(from: model.now)))分后 · \(shortTitle)"
+                    PopoverSidebarPill(
+                        text: pillText,
+                        background: palette.sidebarPillBackground,
+                        foreground: palette.sidebarPillText
                     )
                 }
             }

@@ -148,6 +148,7 @@ struct DayCellView: View {
         let label = Lunar.cellLabel(cell.date)
         let badge = model.dayBadge(cell.date)
         let todoCounts = model.context.todos.counts(on: cell.date)
+        let hasMeetings = !model.meetings.events(on: cell.date).isEmpty
 
         Button { model.select(cell.date) } label: {
             VStack(spacing: compact ? 0 : 2) {
@@ -196,12 +197,22 @@ struct DayCellView: View {
                 }
             }
             .overlay(alignment: .bottomTrailing) {
-                if todoCounts.incomplete + todoCounts.completed > 0 {
-                    Circle()
-                        .fill(todoCounts.incomplete > 0 ? DS.brand : DS.success)
-                        .frame(width: compact ? 4 : 5, height: compact ? 4 : 5)
-                        .opacity(cell.inMonth ? 1 : 0.5)
-                        .padding(compact ? 3 : 5)
+                let hasTodos = todoCounts.incomplete + todoCounts.completed > 0
+                if hasTodos || hasMeetings {
+                    HStack(spacing: compact ? 2 : 3) {
+                        if hasMeetings {
+                            Circle()
+                                .fill(DS.warning)
+                                .frame(width: compact ? 4 : 5, height: compact ? 4 : 5)
+                        }
+                        if hasTodos {
+                            Circle()
+                                .fill(todoCounts.incomplete > 0 ? DS.brand : DS.success)
+                                .frame(width: compact ? 4 : 5, height: compact ? 4 : 5)
+                        }
+                    }
+                    .opacity(cell.inMonth ? 1 : 0.5)
+                    .padding(compact ? 3 : 5)
                 }
             }
             .contentShape(.rect)
@@ -236,6 +247,7 @@ struct DayDetailCard: View {
     let model: CalendarModel
     let compact: Bool
     @State private var newTodoTitle = ""
+    @State private var loggedMeetingIDs: Set<String> = []
 
     var body: some View {
         let d = model.selected
@@ -243,6 +255,8 @@ struct DayDetailCard: View {
         let info = model.workCalendar.dayInfo(d)
         let extra = [Lunar.festival(d), Lunar.solarTerm(d)].compactMap { $0 }
         let dayTodos = model.context.todos.items(on: d)
+        let dayMeetings = model.meetings.events(on: d)
+        let meetingsSyncEnabled = model.settings[MeetingKeys.systemCalendarEnabled] || model.settings[MeetingKeys.dingtalkCalendarEnabled]
         DSCard(padding: compact ? 12 : 16) {
             VStack(alignment: .leading, spacing: compact ? 6 : 10) {
                 HStack(alignment: .firstTextBaseline) {
@@ -270,6 +284,47 @@ struct DayDetailCard: View {
                     .font(DS.caption).foregroundStyle(DS.textSecondary)
 
                 if !compact {
+                    if !dayMeetings.isEmpty || meetingsSyncEnabled {
+                        Divider().overlay(DS.border)
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("当日会议与日程")
+                                    .font(DS.font(13, .semibold))
+                                    .foregroundStyle(DS.textSecondary)
+                                Spacer()
+                                if !dayMeetings.isEmpty {
+                                    Text("\(dayMeetings.count) 场")
+                                        .font(DS.caption.monospacedDigit())
+                                        .foregroundStyle(DS.textTertiary)
+                                }
+                            }
+                            if dayMeetings.isEmpty {
+                                Text("当天暂无会议或日程")
+                                    .font(DS.caption)
+                                    .foregroundStyle(DS.textTertiary)
+                            } else {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(dayMeetings) { event in
+                                        MeetingEventRow(
+                                            event: event,
+                                            use24Hour: model.use24HourTime,
+                                            canLogDraft: model.context.appendDailyLogDraft != nil,
+                                            isLogged: loggedMeetingIDs.contains(event.id),
+                                            onOpenURL: { url in
+                                                NSWorkspace.shared.open(url)
+                                            },
+                                            onLogDraft: {
+                                                if model.logMeeting(event, on: d) {
+                                                    loggedMeetingIDs.insert(event.id)
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Divider().overlay(DS.border)
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -331,11 +386,18 @@ struct DayDetailCard: View {
                             .disabled(newTodoTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                     }
-                } else if !dayTodos.isEmpty {
-                    let pendingCount = dayTodos.filter { !$0.isCompleted }.count
-                    Label(pendingCount > 0 ? "当日待办 \(pendingCount) 项未完成" : "当日 \(dayTodos.count) 项待办均已完成", systemImage: "checklist")
-                        .font(DS.caption)
-                        .foregroundStyle(pendingCount > 0 ? DS.brand : DS.success)
+                } else {
+                    if !dayMeetings.isEmpty {
+                        Label("当日 \(dayMeetings.count) 场会议日程", systemImage: "video")
+                            .font(DS.caption)
+                            .foregroundStyle(DS.warning)
+                    }
+                    if !dayTodos.isEmpty {
+                        let pendingCount = dayTodos.filter { !$0.isCompleted }.count
+                        Label(pendingCount > 0 ? "当日待办 \(pendingCount) 项未完成" : "当日 \(dayTodos.count) 项待办均已完成", systemImage: "checklist")
+                            .font(DS.caption)
+                            .foregroundStyle(pendingCount > 0 ? DS.brand : DS.success)
+                    }
                 }
             }
         }
@@ -357,6 +419,66 @@ struct DayDetailCard: View {
         case .holiday: Tag(info.name.map { "\($0) 放假" } ?? "放假", color: DS.success)
         case .makeupWorkday: Tag("调休上班", color: DS.danger)
         }
+    }
+}
+
+private struct MeetingEventRow: View {
+    let event: MeetingEvent
+    let use24Hour: Bool
+    let canLogDraft: Bool
+    let isLogged: Bool
+    let onOpenURL: (URL) -> Void
+    let onLogDraft: () -> Void
+
+    private var timeText: String {
+        if event.isAllDay { return "全天" }
+        let start = CalendarModel.formatShortTime(event.startDate, use24Hour: use24Hour)
+        let end = CalendarModel.formatShortTime(event.endDate, use24Hour: use24Hour)
+        return "\(start)–\(end)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Circle()
+                    .fill(DS.warning)
+                    .frame(width: 6, height: 6)
+                Text(event.title)
+                    .font(DS.font(13, .medium))
+                    .foregroundStyle(DS.text)
+                    .lineLimit(2)
+                Spacer(minLength: 4)
+            }
+
+            HStack(spacing: 6) {
+                Text(timeText)
+                    .font(DS.font(11.5))
+                    .monospacedDigit()
+                    .foregroundStyle(DS.textSecondary)
+                if !event.calendarTitle.isEmpty {
+                    Text("· \(event.calendarTitle)")
+                        .font(DS.font(11.5))
+                        .foregroundStyle(DS.textTertiary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if let url = event.meetingURL {
+                    Button("入会") {
+                        onOpenURL(url)
+                    }
+                    .buttonStyle(.dsChip)
+                }
+                if canLogDraft {
+                    Button(isLogged ? "已记草稿" : "+ 记日报") {
+                        onLogDraft()
+                    }
+                    .buttonStyle(.dsChip)
+                    .disabled(isLogged)
+                }
+            }
+            .padding(.leading, 12)
+        }
+        .padding(.vertical, 4)
     }
 }
 

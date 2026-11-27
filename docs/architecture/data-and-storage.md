@@ -101,7 +101,7 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `LogKeys` | `zentao.*` / `git.*` / `scan.*` / `log.*` / `reminder.*` / `zentao.watch.*` | 见 [禅道日志文档](../plugins/zentao-log.md) | 禅道账号、Git 扫描、AI 提示词、工时提醒与新指派 Bug/任务巡检配置 |
 | `LogKeys.quickLogShortcut` | `log.quickLogShortcut` | `true` | 启用日报插件的全局快捷记日志组合键 ⌃⌥⌘L |
 | `ReportKeys` | `report.*` | 见 [周报月报文档](../plugins/report.md) | 周报/月报提示词、风格、草稿与工时开关及上次周期模式 |
-| `CalendarKeys` | `calendar.*` / `weather.*` | 见 [万年历文档](../plugins/calendar.md) | 周起始日、天气源、城市、菜单栏日历与弹层样式 |
+| `CalendarKeys` | `calendar.*` / `weather.*` / `calendar.events.*` | 见 [万年历文档](../plugins/calendar.md) | 周起始日、天气源、城市、菜单栏日历、弹层样式及系统/钉钉日程同步开关 |
 | `FeishuKeys` | `feishu.*` | 见 [飞书文档](../plugins/feishu.md) | 飞书主页、固定网页列表与上次打开页 |
 | `AIWebKeys` | `aiweb.apps` / `aiweb.activeAppID` | `nil` / `nil` | AI 目录应用列表与当前选中 AI |
 | `ClipboardKeys` | `clipboard.enabled` / `clipboard.maxCount` | `true` / `200` | 剪贴板历史监听开关与非片段历史保留条数上限 |

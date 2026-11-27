@@ -28,7 +28,7 @@ struct MainView: View {
         ZStack(alignment: .topLeading) {
             HStack(spacing: 0) {
                 HStack(spacing: 0) {
-                    Sidebar(app: app, isVisible: !collapsed)
+                    Sidebar(app: app, isVisible: !collapsed && app.isMainWindowOpen)
                         .frame(width: sidebarWidth)
                     Rectangle().fill(DS.border).frame(width: 1)
                 }
@@ -65,8 +65,6 @@ struct MainView: View {
         .frame(minWidth: 860, minHeight: 600)
         .id(app.fontScale)
         .environment(\.locale, CN.locale)
-        .onAppear { app.mainWindow(isOpen: true) }
-        .onDisappear { app.mainWindow(isOpen: false) }
     }
 
     @ViewBuilder
@@ -113,7 +111,7 @@ struct MainView: View {
             .allowsHitTesting(selectedWebPlugin == nil)
             .accessibilityHidden(selectedWebPlugin != nil)
 
-            if let selectedWebPlugin {
+            if app.isMainWindowOpen, let selectedWebPlugin {
                 selectedWebPlugin.makeMainView()
                     .id(selectedWebPlugin.id)
             }
@@ -305,7 +303,6 @@ private final class PageDeckContainerView: NSView {
 struct Sidebar: View {
     let app: AppModel
     let isVisible: Bool
-    @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarCollapsedDirs") private var collapsedDirsRaw = ""
     @State private var renamingItem: SidebarPinnedItem?
     @State private var renameText = ""
@@ -464,7 +461,7 @@ struct Sidebar: View {
                 .onHover { hoveringProfile = $0 }
                 .help(profileHelpText(name: app.userProfile.effectiveDisplayName, slogan: slogan))
 
-                Button { openWindow(id: "settings") } label: { Image(systemName: "gearshape") }
+                Button { app.openSettings() } label: { Image(systemName: "gearshape") }
                     .buttonStyle(.dsGhost)
                     .help("设置")
             }

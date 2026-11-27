@@ -52,6 +52,7 @@ private nonisolated final class MenuBarCardImageCache: @unchecked Sendable {
         let segments: [MenuBarCardSegment]
         let icon: String
         let iconImageID: ObjectIdentifier?
+        let showIcon: Bool
         let isDark: Bool
         let scale: CGFloat
     }
@@ -59,7 +60,42 @@ private nonisolated final class MenuBarCardImageCache: @unchecked Sendable {
     static let shared = MenuBarCardImageCache()
 
     private let lock = NSLock()
-    private let maxEntries = 6
+    private let maxEntries = 8
+    private var entries: [(key: Key, image: NSImage)] = []
+
+    func image(for key: Key) -> NSImage? {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries.first { $0.key == key }?.image
+    }
+
+    func store(_ image: NSImage, for key: Key) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let idx = entries.firstIndex(where: { $0.key == key }) {
+            entries[idx] = (key, image)
+            return
+        }
+        if entries.count >= maxEntries {
+            entries.removeFirst()
+        }
+        entries.append((key, image))
+    }
+}
+
+private nonisolated final class MenuBarLogoBadgeCache: @unchecked Sendable {
+    struct Key: Equatable {
+        let icon: String
+        let iconImageID: ObjectIdentifier?
+        let unreadCount: Int
+        let isDark: Bool
+        let scale: CGFloat
+    }
+
+    static let shared = MenuBarLogoBadgeCache()
+
+    private let lock = NSLock()
+    private let maxEntries = 12
     private var entries: [(key: Key, image: NSImage)] = []
 
     func image(for key: Key) -> NSImage? {
@@ -99,29 +135,15 @@ public enum MenuBarCardRenderer {
         }
     }
 
-    public static func renderImage(
-        segments: [MenuBarCardSegment],
-        icon: String = "🍚",
-        iconImage: NSImage? = nil,
-        isDark: Bool = true,
-        scale: CGFloat? = nil
-    ) -> NSImage {
-        let resolvedScale = max(1.0, scale ?? max(2.0, NSScreen.screens.map(\.backingScaleFactor).max() ?? 2.0))
-        let cacheKey = MenuBarCardImageCache.Key(
-            segments: segments,
-            icon: icon,
-            iconImageID: iconImage.map(ObjectIdentifier.init),
-            isDark: isDark,
-            scale: resolvedScale
-        )
-        if let cached = MenuBarCardImageCache.shared.image(for: cacheKey) {
-            return cached
-        }
-        let iconFont = NSFont.systemFont(ofSize: 12)
-        let topFont = NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .semibold)
-        let bottomFont = NSFont.monospacedDigitSystemFont(ofSize: 10.0, weight: .bold)
-        let inlineFont = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold)
+    private static func resolveScale(_ scale: CGFloat?) -> CGFloat {
+        max(1.0, scale ?? max(2.0, NSScreen.screens.map(\.backingScaleFactor).max() ?? 2.0))
+    }
 
+    private static func resolveIconMetrics(
+        icon: String,
+        iconImage: NSImage?
+    ) -> (attr: NSAttributedString, size: NSSize) {
+        let iconFont = NSFont.systemFont(ofSize: 12)
         let iconAttr = NSAttributedString(string: icon, attributes: [.font: iconFont])
         let iconSize: NSSize
         if let iconImage {
@@ -132,6 +154,80 @@ public enum MenuBarCardRenderer {
         } else {
             iconSize = iconAttr.size()
         }
+        return (iconAttr, iconSize)
+    }
+
+    private static func makeBitmapImage(
+        logicalSize: NSSize,
+        scale: CGFloat,
+        draw: () -> Void
+    ) -> NSImage {
+        let pixelWidth = max(1, Int(ceil(logicalSize.width * scale)))
+        let pixelHeight = max(1, Int(ceil(logicalSize.height * scale)))
+
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelWidth,
+            pixelsHigh: pixelHeight,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            let fallback = NSImage(size: logicalSize)
+            fallback.isTemplate = false
+            return fallback
+        }
+        rep.size = logicalSize
+
+        if let ctx = NSGraphicsContext(bitmapImageRep: rep) {
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = ctx
+            ctx.imageInterpolation = .high
+            ctx.cgContext.setShouldAntialias(true)
+            ctx.cgContext.setAllowsAntialiasing(true)
+            ctx.cgContext.setShouldSmoothFonts(false)
+
+            draw()
+
+            ctx.flushGraphics()
+            NSGraphicsContext.restoreGraphicsState()
+        }
+
+        let image = NSImage(size: logicalSize)
+        image.addRepresentation(rep)
+        image.isTemplate = false
+        return image
+    }
+
+    public static func renderImage(
+        segments: [MenuBarCardSegment],
+        icon: String = "🍚",
+        iconImage: NSImage? = nil,
+        showIcon: Bool = true,
+        isDark: Bool = true,
+        scale: CGFloat? = nil
+    ) -> NSImage {
+        let resolvedScale = resolveScale(scale)
+        let cacheKey = MenuBarCardImageCache.Key(
+            segments: segments,
+            icon: icon,
+            iconImageID: iconImage.map(ObjectIdentifier.init),
+            showIcon: showIcon,
+            isDark: isDark,
+            scale: resolvedScale
+        )
+        if let cached = MenuBarCardImageCache.shared.image(for: cacheKey) {
+            return cached
+        }
+
+        let topFont = NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .semibold)
+        let bottomFont = NSFont.monospacedDigitSystemFont(ofSize: 10.0, weight: .bold)
+        let inlineFont = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold)
+        let (iconAttr, iconSize) = resolveIconMetrics(icon: icon, iconImage: iconImage)
 
         let measured: [MeasuredSegment] = segments.map { segment in
             switch segment {
@@ -162,43 +258,16 @@ public enum MenuBarCardRenderer {
 
         let totalWidth: CGFloat
         if measured.isEmpty {
-            totalWidth = max(22, ceil(iconSize.width + 2))
+            totalWidth = showIcon ? max(22, ceil(iconSize.width + 2)) : 1
         } else {
             let segmentsWidth = measured.reduce(CGFloat(0)) { $0 + $1.width }
             let dividersWidth = CGFloat(max(0, measured.count - 1)) * (dividerGap * 2 + 1)
-            totalWidth = ceil(horizontalPadding * 2 + iconSize.width + iconGap + segmentsWidth + dividersWidth)
+            let leadingIconWidth = showIcon ? (iconSize.width + iconGap) : 0
+            totalWidth = ceil(horizontalPadding * 2 + leadingIconWidth + segmentsWidth + dividersWidth)
         }
 
         let logicalSize = NSSize(width: totalWidth, height: barHeight)
-        let pixelWidth = max(1, Int(ceil(logicalSize.width * resolvedScale)))
-        let pixelHeight = max(1, Int(ceil(logicalSize.height * resolvedScale)))
-
-        guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: pixelWidth,
-            pixelsHigh: pixelHeight,
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) else {
-            let fallback = NSImage(size: logicalSize)
-            fallback.isTemplate = false
-            return fallback
-        }
-        rep.size = logicalSize
-
-        if let ctx = NSGraphicsContext(bitmapImageRep: rep) {
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = ctx
-            ctx.imageInterpolation = .high
-            ctx.cgContext.setShouldAntialias(true)
-            ctx.cgContext.setAllowsAntialiasing(true)
-            ctx.cgContext.setShouldSmoothFonts(false)
-
+        let image = makeBitmapImage(logicalSize: logicalSize, scale: resolvedScale) {
             let iconY = (barHeight - iconSize.height) / 2
             let drawIcon: (CGFloat) -> Void = { iconX in
                 if let iconImage {
@@ -212,43 +281,145 @@ public enum MenuBarCardRenderer {
                     iconAttr.draw(at: NSPoint(x: iconX, y: iconY))
                 }
             }
+
             if measured.isEmpty {
-                let iconX = (totalWidth - iconSize.width) / 2
-                drawIcon(iconX)
-            } else {
-                var x = horizontalPadding
-                drawIcon(x)
-                x += iconSize.width + iconGap
-
-                for (index, item) in measured.enumerated() {
-                    if index > 0 {
-                        x += dividerGap
-                        NSColor(white: isDark ? 1 : 0, alpha: isDark ? 0.22 : 0.18).setFill()
-                        NSRect(x: x, y: (barHeight - 11) / 2, width: 1, height: 11).fill()
-                        x += 1 + dividerGap
-                    }
-
-                    switch item {
-                    case .stacked(let topAttr, let bottomAttr, let width):
-                        bottomAttr.draw(at: NSPoint(x: x, y: 1.4))
-                        topAttr.draw(at: NSPoint(x: x, y: 11.2))
-                        x += width
-                    case .inline(let attr, let size):
-                        let y = (barHeight - size.height) / 2
-                        attr.draw(at: NSPoint(x: x, y: y))
-                        x += ceil(size.width)
-                    }
+                if showIcon {
+                    let iconX = (totalWidth - iconSize.width) / 2
+                    drawIcon(iconX)
                 }
+                return
             }
 
-            ctx.flushGraphics()
-            NSGraphicsContext.restoreGraphicsState()
+            var x = horizontalPadding
+            if showIcon {
+                drawIcon(x)
+                x += iconSize.width + iconGap
+            }
+
+            for (index, item) in measured.enumerated() {
+                if index > 0 {
+                    x += dividerGap
+                    NSColor(white: isDark ? 1 : 0, alpha: isDark ? 0.22 : 0.18).setFill()
+                    NSRect(x: x, y: (barHeight - 11) / 2, width: 1, height: 11).fill()
+                    x += 1 + dividerGap
+                }
+
+                switch item {
+                case .stacked(let topAttr, let bottomAttr, let width):
+                    bottomAttr.draw(at: NSPoint(x: x, y: 1.4))
+                    topAttr.draw(at: NSPoint(x: x, y: 11.2))
+                    x += width
+                case .inline(let attr, let size):
+                    let y = (barHeight - size.height) / 2
+                    attr.draw(at: NSPoint(x: x, y: y))
+                    x += ceil(size.width)
+                }
+            }
         }
 
-        let image = NSImage(size: logicalSize)
-        image.addRepresentation(rep)
-        image.isTemplate = false
         MenuBarCardImageCache.shared.store(image, for: cacheKey)
+        return image
+    }
+
+    /// 绘制独立状态栏 Logo 图标（支持右下角红色未读数字角标）。
+    public static func renderLogoBadgeImage(
+        icon: String = "🍚",
+        iconImage: NSImage? = nil,
+        unreadCount: Int = 0,
+        isDark: Bool = true,
+        scale: CGFloat? = nil
+    ) -> NSImage {
+        let clampedUnread = max(0, unreadCount)
+        let resolvedScale = resolveScale(scale)
+        let cacheKey = MenuBarLogoBadgeCache.Key(
+            icon: icon,
+            iconImageID: iconImage.map(ObjectIdentifier.init),
+            unreadCount: clampedUnread,
+            isDark: isDark,
+            scale: resolvedScale
+        )
+        if let cached = MenuBarLogoBadgeCache.shared.image(for: cacheKey) {
+            return cached
+        }
+
+        let (iconAttr, iconSize) = resolveIconMetrics(icon: icon, iconImage: iconImage)
+        let iconY = (barHeight - iconSize.height) / 2
+
+        if clampedUnread == 0 {
+            let totalWidth = max(22, ceil(iconSize.width + 2))
+            let logicalSize = NSSize(width: totalWidth, height: barHeight)
+            let image = makeBitmapImage(logicalSize: logicalSize, scale: resolvedScale) {
+                let iconX = (totalWidth - iconSize.width) / 2
+                if let iconImage {
+                    iconImage.draw(
+                        in: NSRect(x: iconX, y: iconY, width: iconSize.width, height: iconSize.height),
+                        from: .zero,
+                        operation: .sourceOver,
+                        fraction: 1.0
+                    )
+                } else {
+                    iconAttr.draw(at: NSPoint(x: iconX, y: iconY))
+                }
+            }
+            MenuBarLogoBadgeCache.shared.store(image, for: cacheKey)
+            return image
+        }
+
+        let badgeText = clampedUnread > 99 ? "99+" : "\(clampedUnread)"
+        let badgeFont = NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .bold)
+        let badgeAttr = NSAttributedString(
+            string: badgeText,
+            attributes: [.font: badgeFont, .foregroundColor: NSColor.white]
+        )
+        let textSize = badgeAttr.size()
+        let badgeHeight: CGFloat = 10.5
+        let badgeWidth = max(badgeHeight, ceil(textSize.width) + 4.5)
+
+        let iconX: CGFloat = 1.0
+        let badgeY: CGFloat = 0.5
+        let badgeX = max(iconX + iconSize.width - 7.5, iconX + iconSize.width * 0.48)
+        let totalWidth = ceil(max(iconX + iconSize.width + 1.5, badgeX + badgeWidth + 1.0))
+
+        let logicalSize = NSSize(width: totalWidth, height: barHeight)
+        let image = makeBitmapImage(logicalSize: logicalSize, scale: resolvedScale) {
+            if let iconImage {
+                iconImage.draw(
+                    in: NSRect(x: iconX, y: iconY, width: iconSize.width, height: iconSize.height),
+                    from: .zero,
+                    operation: .sourceOver,
+                    fraction: 1.0
+                )
+            } else {
+                iconAttr.draw(at: NSPoint(x: iconX, y: iconY))
+            }
+
+            let strokeRect = NSRect(
+                x: badgeX - 0.8,
+                y: badgeY - 0.8,
+                width: badgeWidth + 1.6,
+                height: badgeHeight + 1.6
+            )
+            NSColor(white: isDark ? 0.08 : 1.0, alpha: 0.85).setFill()
+            NSBezierPath(
+                roundedRect: strokeRect,
+                xRadius: strokeRect.height / 2,
+                yRadius: strokeRect.height / 2
+            ).fill()
+
+            let badgeRect = NSRect(x: badgeX, y: badgeY, width: badgeWidth, height: badgeHeight)
+            NSColor(srgbRed: 239 / 255, green: 68 / 255, blue: 68 / 255, alpha: 1).setFill()
+            NSBezierPath(
+                roundedRect: badgeRect,
+                xRadius: badgeHeight / 2,
+                yRadius: badgeHeight / 2
+            ).fill()
+
+            let textX = badgeX + (badgeWidth - textSize.width) / 2
+            let textY = badgeY + (badgeHeight - textSize.height) / 2 - 0.3
+            badgeAttr.draw(at: NSPoint(x: textX, y: textY))
+        }
+
+        MenuBarLogoBadgeCache.shared.store(image, for: cacheKey)
         return image
     }
 }

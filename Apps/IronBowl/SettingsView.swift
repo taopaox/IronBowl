@@ -190,7 +190,7 @@ struct GeneralSettings: View {
                 }
             }
         }
-        DSSection("菜单栏显示", footer: "饭碗图标一直显示；打开的信息按顺序跟在后面，用箭头调整顺序。") {
+        DSSection("菜单栏显示", footer: "饭碗 Logo 单独显示在菜单栏（可按住 ⌘ 拖动调整位置），右键或 ⌥+左键随时弹出快捷面板；开启下方信息项后，会在菜单栏额外显示双行微缩仪表卡。") {
             MenuBarItemsEditor(app: app)
         }
         DSSection("功能插件") {
@@ -376,16 +376,79 @@ struct MenuBarItemsEditor: View {
         let availableIDs = Set(all.map(\.id))
         let activeSelected = selected.filter { availableIDs.contains($0) }
         let ordered = activeSelected.compactMap { id in all.first { $0.id == id } } + all.filter { !activeSelected.contains($0.id) }
-        DSRow("当前预览", description: "双行微缩仪表卡会实时渲染在系统菜单栏右侧。") {
-            Image(nsImage: MenuBarCardRenderer.renderImage(
-                segments: app.menuBarCardSegments,
-                iconImage: NSImage(named: "MenuBarIcon"),
-                isDark: colorScheme == .dark
-            ))
+        let showUnreadBadge = s[AppKeys.menuBarLogoShowUnreadBadge]
+        let unreadCount = app.reminders.unreadCount
+        let segments = app.menuBarCardSegments
+        let iconImage = NSImage(named: "MenuBarIcon")
+
+        DSRow("独立 Logo 预览", description: "图标独立常驻菜单栏；有未读提醒时右下角显示红色数字角标。") {
+            HStack(spacing: 8) {
+                Image(nsImage: MenuBarCardRenderer.renderLogoBadgeImage(
+                    iconImage: iconImage,
+                    unreadCount: showUnreadBadge ? unreadCount : 0,
+                    isDark: colorScheme == .dark
+                ))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(DS.well, in: .rect(cornerRadius: 8))
+
+                if showUnreadBadge && unreadCount == 0 {
+                    HStack(spacing: 4) {
+                        Text("未读示例")
+                            .font(DS.font(11))
+                            .foregroundStyle(DS.textTertiary)
+                        Image(nsImage: MenuBarCardRenderer.renderLogoBadgeImage(
+                            iconImage: iconImage,
+                            unreadCount: 3,
+                            isDark: colorScheme == .dark
+                        ))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(DS.well.opacity(0.6), in: .rect(cornerRadius: 8))
+                }
+            }
         }
+
+        DSRow("点击 Logo 行为", description: s[AppKeys.menuBarLogoClickAction].detail) {
+            DSPicker(
+                selection: Binding(
+                    get: { s[AppKeys.menuBarLogoClickAction] },
+                    set: { s[AppKeys.menuBarLogoClickAction] = $0 }
+                ),
+                options: MenuBarLogoAction.allCases.map {
+                    DSPickerOption($0, title: $0.displayName, subtitle: $0.detail)
+                }
+            )
+        }
+
+        DSRow("Logo 右下角未读角标", description: "有未读消息提醒时在菜单栏 Logo 右下角显示数字角标。") {
+            DSToggle(isOn: Binding(
+                get: { s[AppKeys.menuBarLogoShowUnreadBadge] },
+                set: { s[AppKeys.menuBarLogoShowUnreadBadge] = $0 }
+            ))
+        }
+
+        DSRow("信息仪表卡预览", description: segments.isEmpty ? "未开启信息项，菜单栏当前仅显示独立 Logo。" : "双行微缩仪表卡会单独显示在菜单栏中。") {
+            if segments.isEmpty {
+                Text("未启用信息项")
+                    .font(DS.font(12))
+                    .foregroundStyle(DS.textTertiary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(DS.well, in: .rect(cornerRadius: 8))
+            } else {
+                Image(nsImage: MenuBarCardRenderer.renderImage(
+                    segments: segments,
+                    showIcon: false,
+                    isDark: colorScheme == .dark
+                ))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(DS.well, in: .rect(cornerRadius: 8))
+            }
+        }
+
         ForEach(ordered) { item in
             DSRow(item.title, description: activeSelected.contains(item.id) ? "当前显示：\(item.text() ?? "—")" : nil) {
                 HStack(spacing: 4) {

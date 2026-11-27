@@ -85,7 +85,9 @@ IronBowl 主工作台与独立版万年历共用同一个本地 SQLite 数据库
 | `AppKeys` | `app.fontScale` | `1.0` | 全局字体缩放档位（`0.9...1.4`） |
 | `AppKeys` | `app.enabledPlugins` | `nil` | 已启用插件 ID 列表（`nil` 表示全启用） |
 | `AppKeys` | `app.knownPlugins` | `[]` | 已知插件 ID 列表（用于升级自动发现新插件） |
-| `AppKeys` | `app.menuBarItems` | `["zentao.status"]` | 菜单栏图标后拼接显示的条目及顺序 |
+| `AppKeys` | `app.menuBarItems` | `["zentao.status"]` | 菜单栏右侧信息仪表卡拼接显示的条目及顺序 |
+| `AppKeys` | `app.menuBar.logoClickAction` | `.toggleHome` | 菜单栏独立 Logo 左键点击行为（`toggleHome` / `openMainWindow` / `unreadOrHome` / `openReminders` / `commandPalette` / `openMenuPanel`） |
+| `AppKeys` | `app.menuBar.logoShowUnreadBadge` | `true` | 是否在菜单栏独立 Logo 右下角显示未读提醒数字角标 |
 | `AppKeys` | `app.dockMode` | `.whenWindowOpen` | 程序坞图标策略（`always` / `whenWindowOpen` / `never`） |
 | `AppKeys` | `app.lastPlugin` | `"home"` | 上次停留在主窗口的页面 ID |
 | `AppKeys` | `app.commandPalette.globalShortcut` | `true` | 启用全局 `⌃⌥⌘K` 命令面板与全文搜索快捷键 |

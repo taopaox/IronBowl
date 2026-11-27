@@ -49,6 +49,20 @@ struct WorkLedgerView: View {
                     .toggleStyle(.checkbox)
                     .font(DS.caption)
 
+                if model.isDingTalkAttendanceEnabled {
+                    Button {
+                        Task { await model.syncPeriodAttendance() }
+                    } label: {
+                        if model.isSyncingAttendance {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("同步钉钉考勤", systemImage: "person.badge.clock")
+                        }
+                    }
+                    .buttonStyle(.dsSecondary)
+                    .disabled(model.isSyncingAttendance)
+                }
+
                 if model.isZentaoConfigured {
                     Button {
                         Task { await model.refreshFromZentao() }
@@ -71,6 +85,11 @@ struct WorkLedgerView: View {
                     if let err = model.remoteError {
                         DSBanner(.warning, "禅道同步失败（当前展示本地数据）：\(err)")
                     }
+                    if let attErr = model.attendanceSyncError {
+                        DSBanner(.warning, "钉钉考勤同步失败：\(attErr)")
+                    } else if let attMsg = model.attendanceSyncMessage {
+                        DSBanner(.success, attMsg)
+                    }
 
                     metricsGrid(palette: p)
 
@@ -84,8 +103,11 @@ struct WorkLedgerView: View {
                         }
                         .frame(maxWidth: .infinity)
 
-                        projectBreakdownCard(palette: p)
-                            .frame(width: DS.s(320))
+                        VStack(spacing: 16) {
+                            projectBreakdownCard(palette: p)
+                            attendanceAnomalyCard(palette: p)
+                        }
+                        .frame(width: DS.s(320))
                     }
                 }
                 .padding(28)
@@ -125,9 +147,11 @@ struct WorkLedgerView: View {
                 valueColor: s.loggedDaysCount > 0 ? DS.success : DS.text
             )
             DSMetric(
-                "平均上班打卡",
-                value: s.averageClockInText ?? "—",
-                detail: s.earliestClockInText.map { "最早 \($0)" } ?? (s.latestOffWorkText.map { "最晚下班 \($0)" } ?? "暂无打卡时间")
+                "在岗 vs 填报",
+                value: s.clockOutDaysCount > 0 ? "\(WorkCalendar.hoursText(s.actualStayHours))h" : (s.averageClockInText ?? "—"),
+                detail: s.clockOutDaysCount > 0
+                    ? "填报 \(WorkCalendar.hoursText(s.totalHours))h · \(s.clockOutDaysCount) 天有下班卡"
+                    : (s.earliestClockInText.map { "最早 \($0)" } ?? "暂无上下班打卡对")
             )
         }
     }
@@ -218,9 +242,14 @@ struct WorkLedgerView: View {
             Spacer(minLength: 0)
 
             if let ci = day.clockInText {
-                Text("打 \(ci)")
-                    .font(DS.font(9.5).monospacedDigit())
-                    .foregroundStyle(DS.textSecondary)
+                Text(day.clockOutText.map { "\(ci)-\($0)" } ?? "打 \(ci)")
+                    .font(DS.font(9).monospacedDigit())
+                    .foregroundStyle(day.anomalies.isEmpty ? DS.textSecondary : DS.danger)
+                    .lineLimit(1)
+            } else if !day.anomalies.isEmpty {
+                Text(day.anomalies.joined(separator: "/"))
+                    .font(DS.font(9))
+                    .foregroundStyle(DS.danger)
                     .lineLimit(1)
             }
         }
@@ -338,6 +367,63 @@ struct WorkLedgerView: View {
                             Text("最晚下班：\(latest)")
                                 .font(DS.caption.monospacedDigit())
                                 .foregroundStyle(p.stampPurple)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - 考勤异常与漏卡核对
+
+    private func attendanceAnomalyCard(palette p: JournalPalette) -> some View {
+        let anomalies = model.summary.anomalyDays
+        return DSCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("考勤异常与漏卡核对")
+                        .font(DS.sectionTitle)
+                        .foregroundStyle(DS.textSecondary)
+                    Spacer()
+                    if !anomalies.isEmpty {
+                        Text("\(anomalies.count) 天")
+                            .font(DS.font(11, .semibold).monospacedDigit())
+                            .foregroundStyle(DS.danger)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(DS.danger.opacity(0.12), in: .capsule)
+                    }
+                }
+
+                if model.summary.clockInDaysCount == 0 && anomalies.isEmpty {
+                    Text(model.isDingTalkAttendanceEnabled ? "点击右上角「同步钉钉考勤」可核对本周期漏卡、迟到与早退情况。" : "可在「设置 → 工作时间」开启钉钉考勤同步，自动核对漏卡与在岗时长。")
+                        .font(DS.caption)
+                        .foregroundStyle(DS.textTertiary)
+                } else if anomalies.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundStyle(DS.success)
+                        Text("已核对 \(model.summary.clockInDaysCount) 天考勤，全勤无缺卡或异常。")
+                            .font(DS.caption)
+                            .foregroundStyle(DS.textSecondary)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(anomalies.prefix(10)) { item in
+                            HStack(spacing: 8) {
+                                Text(item.dateString)
+                                    .font(DS.font(12, .medium).monospacedDigit())
+                                    .foregroundStyle(DS.text)
+                                Spacer()
+                                Text(item.reasons)
+                                    .font(DS.caption)
+                                    .foregroundStyle(DS.danger)
+                            }
+                        }
+                        if anomalies.count > 10 {
+                            Text("另有 \(anomalies.count - 10) 天异常未展开")
+                                .font(DS.caption)
+                                .foregroundStyle(DS.textTertiary)
                         }
                     }
                 }

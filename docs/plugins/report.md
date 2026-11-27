@@ -7,8 +7,8 @@
 | 文件 | 核心符号 | 职责 |
 | :--- | :--- | :--- |
 | `ReportPlugin.swift` | `ReportPlugin`, `MonthlyReportPlugin`, `WorkLedgerPlugin` | 三个独立侧边栏插件入口：周报（ID：`report`，锁定 `.weekly`，含「Tita 对接」设置页）、月报（ID：`report.monthly`，锁定 `.monthly`）与牛马账本（ID：`report.stats`） |
-| `WorkLedgerModel.swift` | `WorkLedgerModel`, `WorkLedgerSummary`, `LedgerPeriodMode`, `LedgerDayStat`, `LedgerMonthStat`, `LedgerProjectStat` | 按月/年汇总禅道工时、本地加班记录、钉钉上班打卡均值/极值与项目工时占比 |
-| `Views/WorkLedgerView.swift` | `WorkLedgerView` | 「牛马账本」工时热力日历、年度柱状分布、作息极值与项目投入占比看板 |
+| `WorkLedgerModel.swift` | `WorkLedgerModel`, `WorkLedgerSummary`, `LedgerPeriodMode`, `LedgerDayStat`, `LedgerAnomalyDay`, `LedgerMonthStat`, `LedgerProjectStat` | 按月/年汇总禅道工时、本地加班记录、钉钉上下班打卡与真实在岗时长、缺卡/迟到早退核对及项目工时占比 |
+| `Views/WorkLedgerView.swift` | `WorkLedgerView` | 「牛马账本」工时热力日历、年度柱状分布、在岗 vs 填报时长对比、考勤异常核对与项目投入占比看板（支持一键同步区间钉钉考勤） |
 | `ReportChatHandler.swift` | `ReportChatHandler`, `ReportChatIntent` | 识别首页对话中的生成/查看周报或月报指令（过滤代码/调试类提问） |
 | `Views/ReportChatCard.swift` | `ReportChatCard` | 在首页聊天流内直接展示并操作的周报/月报卡片（Markdown 预览、展开、重新生成、复制与打开 Tita） |
 | `ReportModel.swift` | `WeeklyReportModel` | `@Observable` 业务状态：支持 `lockedPeriodKind` 锁定周/月模式、上下周与上下月切换、调用 `ZentaoDailyLogService` 查区间日报、生成/编辑/自动保存、历史列表、复制/导出 Markdown 与 Tita 状态查询/草稿保存/提交 |

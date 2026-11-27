@@ -368,4 +368,8 @@ import Testing
     #expect(reminders.history[0].source == .scheduler)
     #expect(reminders.history[0].style == .cornerCard)
     #expect(reminders.history[0].title == "下班打卡提醒")
+
+    // dismissActiveClockOutReminders 应能清理全部打卡提醒弹窗
+    await scheduler.runNow(taskID: task.id)
+    scheduler.dismissActiveClockOutReminders()
 }

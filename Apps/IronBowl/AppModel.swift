@@ -153,6 +153,11 @@ final class AppModel {
         workCalendar.onAttendanceIssue = { [weak self] issue in
             self?.showAttendanceIssue(issue)
         }
+        workCalendar.onClockOutSynced = { [weak self] day, _ in
+            if Calendar.current.isDateInToday(day) {
+                self?.scheduler.dismissActiveClockOutReminders()
+            }
+        }
         clock = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }

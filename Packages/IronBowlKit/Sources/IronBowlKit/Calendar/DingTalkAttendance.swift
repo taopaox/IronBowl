@@ -52,6 +52,29 @@ public nonisolated enum DingTalkAttendanceError: LocalizedError, Sendable, Equat
     }
 }
 
+/// 单日钉钉考勤打卡解析结果（含上下班卡与打卡状态）。
+public nonisolated struct DingTalkDayAttendance: Sendable, Equatable {
+    public let date: String
+    public let clockIn: Date?
+    public let clockOut: Date?
+    public let onDutyResult: String
+    public let offDutyResult: String
+
+    public init(
+        date: String,
+        clockIn: Date? = nil,
+        clockOut: Date? = nil,
+        onDutyResult: String = "",
+        offDutyResult: String = ""
+    ) {
+        self.date = date
+        self.clockIn = clockIn
+        self.clockOut = clockOut
+        self.onDutyResult = onDutyResult
+        self.offDutyResult = offDutyResult
+    }
+}
+
 /// 通过钉钉官方 CLI（dws，DingTalk Workspace CLI）只读查询本人的考勤打卡。
 public enum DingTalkAttendance {
     public nonisolated static let binaryName = "dws"
@@ -78,13 +101,51 @@ public enum DingTalkAttendance {
     /// `dws attendance +check-result` 查某天（yyyy-MM-dd）的上班打卡时间，没打卡返回 nil。
     @concurrent
     public nonisolated static func fetchClockIn(executable: String, userID: String, day: String) async throws -> Date? {
-        let r = try await runDws(executable, [
-            "attendance", "+check-result",
-            "--users", userID, "--start", day, "--end", day,
-            "--format", "json",
-        ], timeout: 45)
-        guard r.status == 0 else { throw classifyFailure(status: r.status, stdout: r.stdout, stderr: r.stderr) }
-        return try parseOnDutyClockIn(r.stdout)
+        try await fetchDayAttendance(executable: executable, userID: userID, day: day)?.clockIn
+    }
+
+    /// `dws attendance +check-result` 查某天（yyyy-MM-dd）的完整上下班打卡与异常状态。
+    @concurrent
+    public nonisolated static func fetchDayAttendance(executable: String, userID: String, day: String) async throws -> DingTalkDayAttendance? {
+        let map = try await fetchRangeAttendance(executable: executable, userID: userID, startDay: day, endDay: day)
+        return map[day]
+    }
+
+    /// 批量拉取日期区间 `[startDay, endDay]`（`yyyy-MM-dd`）的考勤打卡记录，自动按最多 7 天分批调用 dws。
+    @concurrent
+    public nonisolated static func fetchRangeAttendance(
+        executable: String,
+        userID: String,
+        startDay: String,
+        endDay: String
+    ) async throws -> [String: DingTalkDayAttendance] {
+        guard let startDate = WorkCalendar.dayFormatter.date(from: startDay),
+              let endDate = WorkCalendar.dayFormatter.date(from: endDay),
+              startDate <= endDate else {
+            return [:]
+        }
+        let cal = Calendar(identifier: .gregorian)
+        var merged: [String: DingTalkDayAttendance] = [:]
+        var cursor = startDate
+        while cursor <= endDate {
+            let chunkEndCandidate = cal.date(byAdding: .day, value: 6, to: cursor) ?? endDate
+            let chunkEnd = min(chunkEndCandidate, endDate)
+            let s = WorkCalendar.dayString(cursor)
+            let e = WorkCalendar.dayString(chunkEnd)
+            let r = try await runDws(executable, [
+                "attendance", "+check-result",
+                "--users", userID, "--start", s, "--end", e,
+                "--format", "json",
+            ], timeout: 45)
+            guard r.status == 0 else { throw classifyFailure(status: r.status, stdout: r.stdout, stderr: r.stderr) }
+            let parsed = try parseDayAttendance(r.stdout, defaultDay: s == e ? s : "")
+            for (k, v) in parsed {
+                merged[k] = v
+            }
+            guard let next = cal.date(byAdding: .day, value: 1, to: chunkEnd) else { break }
+            cursor = next
+        }
+        return merged
     }
 
     /// 运行 dws，把找不到程序、超时这类 Shell 错误换成考勤错误。
@@ -159,6 +220,92 @@ public enum DingTalkAttendance {
             return Date(timeIntervalSince1970: ms / 1000)
         }
         return times.min()
+    }
+
+    /// 解析单日或跨多日的上下班打卡记录，按 `yyyy-MM-dd` 归组返回。
+    /// `OnDuty` 取最早有效打卡，`OffDuty` 取最晚有效打卡；未打卡（`NotSigned`）也会保留 `onDutyResult`/`offDutyResult` 供异常识别。
+    public nonisolated static func parseDayAttendance(_ stdout: String, defaultDay: String = "") throws -> [String: DingTalkDayAttendance] {
+        let obj = try jsonObject(stdout)
+        if obj["ok"] as? Bool == false { throw classifyFailure(status: 1, stdout: stdout, stderr: "") }
+        let records = (obj["data"] as? [String: Any])?["records"] as? [[String: Any]] ?? []
+
+        struct Accumulator {
+            var clockIn: Date?
+            var onDutyResult: String = ""
+            var clockOut: Date?
+            var offDutyResult: String = ""
+        }
+
+        var grouped: [String: Accumulator] = [:]
+
+        for rec in records {
+            guard let checkType = rec["checkType"] as? String else { continue }
+            let timeResult = (rec["timeResult"] as? String) ?? ""
+            let ms = (rec["userCheckTime"] as? NSNumber)?.doubleValue
+            let checkDate: Date? = (timeResult != "NotSigned" && (ms ?? 0) > 0)
+                ? Date(timeIntervalSince1970: ms! / 1000)
+                : nil
+
+            let dayKey: String = {
+                if let workDateMs = (rec["workDate"] as? NSNumber)?.doubleValue, workDateMs > 0 {
+                    return WorkCalendar.dayString(Date(timeIntervalSince1970: workDateMs / 1000))
+                }
+                if let workDateStr = rec["workDate"] as? String, workDateStr.count >= 10 {
+                    return String(workDateStr.prefix(10))
+                }
+                if !defaultDay.isEmpty {
+                    return defaultDay
+                }
+                if let checkDate {
+                    return WorkCalendar.dayString(checkDate)
+                }
+                if let planMs = (rec["planCheckTime"] as? NSNumber)?.doubleValue, planMs > 0 {
+                    return WorkCalendar.dayString(Date(timeIntervalSince1970: planMs / 1000))
+                }
+                return ""
+            }()
+            guard !dayKey.isEmpty else { continue }
+
+            var acc = grouped[dayKey] ?? Accumulator()
+            if checkType == "OnDuty" {
+                if let checkDate {
+                    if acc.clockIn == nil || checkDate < acc.clockIn! {
+                        acc.clockIn = checkDate
+                        acc.onDutyResult = timeResult
+                    }
+                } else if acc.clockIn == nil && acc.onDutyResult.isEmpty {
+                    acc.onDutyResult = timeResult
+                }
+            } else if checkType == "OffDuty" {
+                if let checkDate {
+                    if acc.clockOut == nil || checkDate > acc.clockOut! {
+                        acc.clockOut = checkDate
+                        acc.offDutyResult = timeResult
+                    }
+                } else if acc.clockOut == nil && acc.offDutyResult.isEmpty {
+                    acc.offDutyResult = timeResult
+                }
+            }
+            grouped[dayKey] = acc
+        }
+
+        return grouped.mapValues { acc in
+            DingTalkDayAttendance(
+                date: "",
+                clockIn: acc.clockIn,
+                clockOut: acc.clockOut,
+                onDutyResult: acc.onDutyResult,
+                offDutyResult: acc.offDutyResult
+            )
+        }.map { (key, val) in
+            (key, DingTalkDayAttendance(
+                date: key,
+                clockIn: val.clockIn,
+                clockOut: val.clockOut,
+                onDutyResult: val.onDutyResult,
+                offDutyResult: val.offDutyResult
+            ))
+        }.reduce(into: [:]) { $0[$1.0] = $1.1 }
     }
 
     /// 把 dws 的失败输出归类。dws 失败时输出 `{"ok":false,"error":{"type"/"category":…,"message":…}}`（stdout 或 stderr），

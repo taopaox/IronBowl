@@ -19,18 +19,21 @@
 - **`onWorkTimeText(on:)`**：返回当日上班时间文字，有打卡记录时显示实际打卡时间（`HH:mm`），否则显示配置的固定上班时间（`work.start`），供侧栏今日卡片展示。
 - **`workStart(on:)`**：同样按弹性偏移折算后的上班时刻，侧栏今日卡片与状态栏面板主卡的下班进度条以它为起点。
 - **`workProgress(on:)`**：计算当前时刻在 `workStart(on:)` 与 `effectiveWorkEnd(on:)` 之间的工作进度比例（`0...1`），供主窗口侧栏 `TodayCard` 与状态栏 `MenuWorkHeroCard` 共用。
-- **`scheduleText(on:)`**：上下班说明文字，无加班时有打卡为「打卡 08:29 · 17:29 下班」、无打卡为「08:30–17:30」；设置加班后同步顺延下班时间并追加「（加班 Xh）」，用于首页下班卡与设置页。
+- **`scheduleText(on:)`**：上下班说明文字，无加班时有打卡为「打卡 08:29 · 17:29 下班」、已有下班卡时为「打卡 08:55–18:06（已下班打卡）」、无打卡为「08:30–17:30」；设置加班后同步顺延下班时间并追加「（加班 Xh）」，用于首页下班卡与设置页。
 
 ## 弹性上下班与钉钉考勤
 
 适用于「早到早走、晚到晚走」的弹性工时（例如规定 08:30–17:30、弹性 30 分钟：8:00 到 17:00 走，9:00 到 18:00 走）。
 
 - **弹性偏移 `flexOffset(clockIn:plannedStart:flexMinutes:)`**：上班打卡按分钟计（忽略秒），与 `work.start` 的差值限制在 ±`work.flexMinutes` 内；`workEnd` / `workStart` 都加上这个偏移。早于最早时间按最早算，晚于最晚时间按最晚算。
-- **打卡数据**：存于 `attendanceClockIn` 表（迁移 `core.v3`），`clockIn(on:)` 读取，`setClockIn(_:on:source:)` 写入或清除，写入后通过 `com.taopaox.ironbowl.holidaysDidChange` 通知另一个进程重新 `reload()`。
+- **打卡数据**：上班简表存于 `attendanceClockIn`（`core.v3`），完整上下班打卡与异常状态（`AttendanceRecord`）存于 `attendanceDailyRecord`（`core.v10`），由 `clockIn(on:)`、`clockOut(on:)`、`attendance(on:)`、`actualStayHours(on:)` 与 `attendanceAnomalies(on:now:)` 读取，写入后通过 `com.taopaox.ironbowl.holidaysDidChange` 通知另一个进程重新 `reload()`。
 - **钉钉 CLI 读取**：[`DingTalkAttendance.swift`](../../Packages/IronBowlKit/Sources/IronBowlKit/Calendar/DingTalkAttendance.swift) 调用钉钉官方命令行工具 [dws（DingTalk Workspace CLI）](https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli)，全部只读：
   1. `dws auth status --format json` 取当前登录账号的 `user_id`（进程内缓存）；
-  2. `dws attendance +check-result --users <userId> --start <日期> --end <日期> --format json`，在 `data.records` 中取 `checkType == "OnDuty"` 且有 `userCheckTime`（毫秒时间戳）的最早一条作为上班打卡；`timeResult == "NotSigned"` 视为未打卡。
-- **同步时机 `syncAttendanceIfNeeded(now:)`**：主工作台启动时与每 30 秒的时钟里调用；仅在开启钉钉同步、当天是工作日、当天还没有打卡记录、处于「`work.start` − 弹性」到「`effectiveWorkEnd` + 弹性」之间才执行 `syncAttendance(for:)`。普通失败 5 分钟后重试，需要用户处理的问题 30 分钟后重试；拿到当天打卡后不再查询。
+  2. `dws attendance +check-result --users <userId> --start <日期> --end <日期> --format json`，`parseDayAttendance` 按 `workDate` 归组解析 `OnDuty`（最早有效打卡与 `onDutyResult`）及 `OffDuty`（最晚有效打卡与 `offDutyResult`），支持单日与按最多 7 天分批拉取的 `fetchRangeAttendance` / `syncAttendanceRange(from:to:)`。
+- **同步时机 `syncAttendanceIfNeeded(now:)`**：主工作台启动时与每 30 秒的时钟里调用；开启钉钉同步且当天是工作日时：
+  - 未拿到上班打卡且处于「`work.start` − 弹性」到「`effectiveWorkEnd` + 弹性」之间时自动查询；
+  - 未拿到下班打卡且处于「`effectiveWorkEnd` − 10 分钟」到「`effectiveWorkEnd` + 4 小时」之间时自动查询；
+  - 首次同步到今日下班打卡时触发 `onClockOutSynced`，主工作台随即调用 `TaskScheduler.dismissActiveClockOutReminders()` 自动消除桌面上常驻的「下班打卡提醒」卡片。普通失败 5 分钟后重试，需要用户处理的问题 30 分钟后重试。
 - **状态**：`isSyncingAttendance`、`attendanceIssue`（`DingTalkAttendanceError?`，成功后清空）、`attendanceError`（其文字描述）、`attendanceLastSync` 供设置页与首页展示。
 
 ### 容错

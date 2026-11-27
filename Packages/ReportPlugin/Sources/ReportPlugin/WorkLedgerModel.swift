@@ -16,10 +16,19 @@ public nonisolated struct LedgerDayStat: Sendable, Identifiable, Equatable {
     public let normalHours: Double
     public let overtimeHours: Double
     public let clockInText: String?
+    public let clockOutText: String?
+    public let stayHours: Double?
     public let offWorkText: String?
+    public let anomalies: [String]
 
     public var id: String { dateString }
     public var totalHours: Double { normalHours + overtimeHours }
+}
+
+public nonisolated struct LedgerAnomalyDay: Sendable, Identifiable, Equatable {
+    public let dateString: String
+    public let reasons: String
+    public var id: String { dateString }
 }
 
 public nonisolated struct LedgerMonthStat: Sendable, Identifiable, Equatable {
@@ -48,16 +57,19 @@ public nonisolated struct WorkLedgerSummary: Sendable, Equatable {
     public let totalHours: Double
     public let normalHours: Double
     public let overtimeHours: Double
+    public let actualStayHours: Double
     public let overtimeDaysCount: Int
     public let loggedDaysCount: Int
     public let expectedWorkdaysCount: Int
     public let clockInDaysCount: Int
+    public let clockOutDaysCount: Int
     public let averageClockInMinutes: Int?
     public let earliestClockInText: String?
     public let latestOffWorkText: String?
     public let dailyCells: [LedgerDayStat]
     public let monthlyBuckets: [LedgerMonthStat]
     public let projectBreakdown: [LedgerProjectStat]
+    public let anomalyDays: [LedgerAnomalyDay]
 
     public var averageClockInText: String? {
         guard let m = averageClockInMinutes else { return nil }
@@ -68,16 +80,19 @@ public nonisolated struct WorkLedgerSummary: Sendable, Equatable {
         totalHours: 0,
         normalHours: 0,
         overtimeHours: 0,
+        actualStayHours: 0,
         overtimeDaysCount: 0,
         loggedDaysCount: 0,
         expectedWorkdaysCount: 0,
         clockInDaysCount: 0,
+        clockOutDaysCount: 0,
         averageClockInMinutes: nil,
         earliestClockInText: nil,
         latestOffWorkText: nil,
         dailyCells: [],
         monthlyBuckets: [],
-        projectBreakdown: []
+        projectBreakdown: [],
+        anomalyDays: []
     )
 
     public static func computeSummary(
@@ -86,6 +101,9 @@ public nonisolated struct WorkLedgerSummary: Sendable, Equatable {
         workdayFlags: [String: Bool],
         itemsByDate: [String: [DailyLogItem]],
         clockInsByDate: [String: Date],
+        clockOutsByDate: [String: Date] = [:],
+        stayHoursByDate: [String: Double] = [:],
+        anomaliesByDate: [String: [String]] = [:],
         plannedOvertimeByDate: [String: Double],
         offWorkTextByDate: [String: String] = [:]
     ) -> WorkLedgerSummary {
@@ -98,9 +116,11 @@ public nonisolated struct WorkLedgerSummary: Sendable, Equatable {
 
         var totalNormal = 0.0
         var totalOvertime = 0.0
+        var totalStayHours = 0.0
         var overtimeDays = 0
         var loggedDays = 0
         var expectedWorkdays = 0
+        var clockOutDays = 0
         var clockInMinutesList: [Int] = []
         var earliestClockIn: (minuteOfDay: Int, label: String)?
         var latestOffWork: (secondsFromStart: TimeInterval, label: String)?
@@ -112,6 +132,7 @@ public nonisolated struct WorkLedgerSummary: Sendable, Equatable {
         var monthWorkdays: [Int: Int] = [:]
         var projectHours: [String: Double] = [:]
         var projectCounts: [String: Int] = [:]
+        var anomalyDays: [LedgerAnomalyDay] = []
 
         for date in dates {
             let ds = WorkCalendar.dayString(date)
@@ -163,8 +184,34 @@ public nonisolated struct WorkLedgerSummary: Sendable, Equatable {
                 }
             }
 
+            var clockOutStr: String?
+            if let co = clockOutsByDate[ds] {
+                clockOutDays += 1
+                let hhmm = timeFmt.string(from: co)
+                clockOutStr = hhmm
+                let isNextDay = !cal.isDate(co, inSameDayAs: date)
+                let comps = cal.dateComponents([.hour, .minute], from: co)
+                let baseMinutes = isNextDay ? 24 * 60 : 0
+                let totalMinutes = baseMinutes + (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
+                let secs = TimeInterval(totalMinutes) * 60
+                let label = isNextDay ? "\(CN.monthDay(date)) 次日 \(hhmm)" : "\(CN.monthDay(date)) \(hhmm)"
+                if latestOffWork == nil || secs > latestOffWork!.secondsFromStart {
+                    latestOffWork = (secs, label)
+                }
+            }
+
+            let stay = stayHoursByDate[ds]
+            if let stay {
+                totalStayHours += stay
+            }
+
+            let dayAnomalies = anomaliesByDate[ds] ?? []
+            if !dayAnomalies.isEmpty {
+                anomalyDays.append(LedgerAnomalyDay(dateString: ds, reasons: dayAnomalies.joined(separator: "、")))
+            }
+
             let offText = offWorkTextByDate[ds]
-            if let offText, !offText.isEmpty, isWorkday || dayOT > 0 {
+            if clockOutStr == nil, let offText, !offText.isEmpty, isWorkday || dayOT > 0 {
                 let isNextDay = offText.hasPrefix("次日 ")
                 let cleanHHMM = offText.replacingOccurrences(of: "次日 ", with: "")
                 let parts = cleanHHMM.split(separator: ":").compactMap { Int($0) }
@@ -185,7 +232,10 @@ public nonisolated struct WorkLedgerSummary: Sendable, Equatable {
                 normalHours: dayNormal,
                 overtimeHours: dayOT,
                 clockInText: clockInStr,
-                offWorkText: offText
+                clockOutText: clockOutStr,
+                stayHours: stay,
+                offWorkText: offText,
+                anomalies: dayAnomalies
             ))
         }
 
@@ -222,16 +272,19 @@ public nonisolated struct WorkLedgerSummary: Sendable, Equatable {
             totalHours: totalNormal + totalOvertime,
             normalHours: totalNormal,
             overtimeHours: totalOvertime,
+            actualStayHours: totalStayHours,
             overtimeDaysCount: overtimeDays,
             loggedDaysCount: loggedDays,
             expectedWorkdaysCount: expectedWorkdays,
             clockInDaysCount: clockInMinutesList.count,
+            clockOutDaysCount: clockOutDays,
             averageClockInMinutes: avgMinute,
             earliestClockInText: earliestClockIn?.label,
             latestOffWorkText: latestOffWork?.label,
             dailyCells: dailyCells,
             monthlyBuckets: monthlyBuckets,
-            projectBreakdown: projectBreakdown
+            projectBreakdown: projectBreakdown,
+            anomalyDays: anomalyDays
         )
     }
 }
@@ -261,8 +314,11 @@ final class WorkLedgerModel {
 
     var summary: WorkLedgerSummary = .empty
     var isLoading = false
+    var isSyncingAttendance = false
     var syncedFromZentao = false
     var remoteError: String?
+    var attendanceSyncMessage: String?
+    var attendanceSyncError: String?
 
     @ObservationIgnored private var rawItemsByDate: [String: [DailyLogItem]] = [:]
 
@@ -273,6 +329,7 @@ final class WorkLedgerModel {
     }
 
     var isZentaoConfigured: Bool { dailyLogService.isZentaoConfigured }
+    var isDingTalkAttendanceEnabled: Bool { context.settings[WorkCalendar.dingtalkEnabledKey] }
 
     var periodTitle: String {
         switch mode {
@@ -352,11 +409,39 @@ final class WorkLedgerModel {
         recomputeSummary(with: result.itemsByDate)
     }
 
+    func syncPeriodAttendance() async {
+        guard !isSyncingAttendance else { return }
+        isSyncingAttendance = true
+        attendanceSyncError = nil
+        attendanceSyncMessage = nil
+        defer { isSyncingAttendance = false }
+
+        let dates = activeDates()
+        guard let first = dates.first, let last = dates.last else { return }
+        let today = Calendar.current.startOfDay(for: Date())
+        let effectiveEnd = min(last, today)
+        guard first <= effectiveEnd else {
+            attendanceSyncMessage = "该周期尚未开始，无需同步考勤。"
+            return
+        }
+        do {
+            let count = try await context.workCalendar.syncAttendanceRange(from: first, to: effectiveEnd)
+            recomputeSummary(with: rawItemsByDate)
+            attendanceSyncMessage = "已同步 \(count) 天钉钉考勤记录"
+        } catch {
+            attendanceSyncError = error.localizedDescription
+        }
+    }
+
     private func recomputeSummary(with itemsByDate: [String: [DailyLogItem]]) {
         let dates = activeDates()
         let cal = context.workCalendar
+        let now = Date()
         var workdayFlags: [String: Bool] = [:]
         var clockIns: [String: Date] = [:]
+        var clockOuts: [String: Date] = [:]
+        var stayHours: [String: Double] = [:]
+        var anomalies: [String: [String]] = [:]
         var plannedOT: [String: Double] = [:]
         var offTexts: [String: String] = [:]
 
@@ -365,6 +450,16 @@ final class WorkLedgerModel {
             workdayFlags[ds] = cal.isWorkday(d)
             if let ci = cal.clockIn(on: d) {
                 clockIns[ds] = ci
+            }
+            if let co = cal.clockOut(on: d) {
+                clockOuts[ds] = co
+            }
+            if let stay = cal.actualStayHours(on: d) {
+                stayHours[ds] = stay
+            }
+            let dayAnomalies = cal.attendanceAnomalies(on: d, now: now).map(\.displayName)
+            if !dayAnomalies.isEmpty {
+                anomalies[ds] = dayAnomalies
             }
             let ot = cal.overtimeHours(on: d)
             if ot > 0 {
@@ -382,6 +477,9 @@ final class WorkLedgerModel {
             workdayFlags: workdayFlags,
             itemsByDate: itemsByDate,
             clockInsByDate: clockIns,
+            clockOutsByDate: clockOuts,
+            stayHoursByDate: stayHours,
+            anomaliesByDate: anomalies,
             plannedOvertimeByDate: plannedOT,
             offWorkTextByDate: offTexts
         )

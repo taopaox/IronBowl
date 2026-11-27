@@ -1380,3 +1380,32 @@ import Testing
     #expect(!detail.richtextModules[0].plainText.contains("#tita-n#"))
     #expect(detail.richtextModules[1].plainText == "第一行\n第二行")
 }
+
+@Test func workLedgerSummaryComputesStayHoursAndAnomalies() {
+    let cal = Calendar(identifier: .gregorian)
+    let d1 = cal.date(from: DateComponents(year: 2026, month: 11, day: 24))!
+    let d2 = cal.date(from: DateComponents(year: 2026, month: 11, day: 25))!
+    let ci1 = cal.date(from: DateComponents(year: 2026, month: 11, day: 24, hour: 8, minute: 55))!
+    let co1 = cal.date(from: DateComponents(year: 2026, month: 11, day: 24, hour: 18, minute: 10))!
+
+    let summary = WorkLedgerSummary.computeSummary(
+        year: 2026,
+        dates: [d1, d2],
+        workdayFlags: ["2026-11-24": true, "2026-11-25": true],
+        itemsByDate: [
+            "2026-11-24": [DailyLogItem(id: "1", date: "2026-11-24", taskID: 1, taskTitle: "A", projectID: 1, projectName: "饭碗", hours: 8, work: "开发", isOvertime: false, isDraft: false)],
+        ],
+        clockInsByDate: ["2026-11-24": ci1],
+        clockOutsByDate: ["2026-11-24": co1],
+        stayHoursByDate: ["2026-11-24": 8.25],
+        anomaliesByDate: ["2026-11-25": ["缺上班卡", "缺下班卡"]],
+        plannedOvertimeByDate: [:]
+    )
+
+    #expect(summary.clockOutDaysCount == 1)
+    #expect(abs(summary.actualStayHours - 8.25) < 0.01)
+    #expect(summary.anomalyDays.count == 1)
+    #expect(summary.anomalyDays[0].dateString == "2026-11-25")
+    #expect(summary.anomalyDays[0].reasons == "缺上班卡、缺下班卡")
+    #expect(summary.dailyCells[0].clockOutText == "18:10")
+}

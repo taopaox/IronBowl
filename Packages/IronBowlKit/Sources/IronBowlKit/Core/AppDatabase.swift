@@ -213,5 +213,22 @@ public nonisolated final class AppDatabase: Sendable {
                 t.column("updatedAt", .datetime).notNull().indexed()
             }
         },
+        DatabaseMigration("core.v10") { db in
+            try db.create(table: "attendanceDailyRecord") { t in
+                t.primaryKey("date", .text)          // yyyy-MM-dd
+                t.column("clockIn", .datetime)
+                t.column("clockOut", .datetime)
+                t.column("onDutyResult", .text).notNull().defaults(to: "")
+                t.column("offDutyResult", .text).notNull().defaults(to: "")
+                t.column("source", .text).notNull().defaults(to: "dingtalk")
+                t.column("fetchedAt", .datetime).notNull()
+            }
+            if try db.tableExists("attendanceClockIn") {
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO attendanceDailyRecord(date, clockIn, onDutyResult, offDutyResult, source, fetchedAt)
+                    SELECT date, clockIn, 'Normal', '', source, fetchedAt FROM attendanceClockIn
+                    """)
+            }
+        },
     ]
 }

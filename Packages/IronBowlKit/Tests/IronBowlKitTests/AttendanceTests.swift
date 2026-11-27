@@ -354,3 +354,59 @@ private func fakeDws(auth: String, attendance: String = #"{"ok":true,"data":{"re
     #expect(cal.overtimeHours(on: day) == 2.5)
     #expect(cal.effectiveWorkEnd(on: day) == time("2026-11-25", "20:30"))
 }
+
+@MainActor @Test func parsesDayAttendanceStayHoursAnomaliesAndClockOutCallback() async throws {
+    let dayStr = "2026-11-25"
+    let onMs = Int64(time(dayStr, "08:50").timeIntervalSince1970 * 1000)
+    let offEarlyMs = Int64(time(dayStr, "18:05").timeIntervalSince1970 * 1000)
+    let offLateMs = Int64(time(dayStr, "19:20").timeIntervalSince1970 * 1000)
+    let json = """
+    {"ok":true,"data":{"records":[
+      {"workDate":\(onMs),"checkType":"OnDuty","timeResult":"Normal","userCheckTime":\(onMs)},
+      {"workDate":\(onMs),"checkType":"OffDuty","timeResult":"Normal","userCheckTime":\(offEarlyMs)},
+      {"workDate":\(onMs),"checkType":"OffDuty","timeResult":"Normal","userCheckTime":\(offLateMs)}
+    ]}}
+    """
+    let parsed = try DingTalkAttendance.parseDayAttendance(json, defaultDay: dayStr)
+    #expect(parsed[dayStr]?.clockIn == time(dayStr, "08:50"))
+    #expect(parsed[dayStr]?.clockOut == time(dayStr, "19:20"))
+    #expect(parsed[dayStr]?.onDutyResult == "Normal")
+    #expect(parsed[dayStr]?.offDutyResult == "Normal")
+
+    let dws = try fakeDws(auth: #"{"authenticated":true,"user_id":"u1"}"#, attendance: json)
+    let (cal, dbURL) = try makeCalendar(dws: dws)
+    defer { try? FileManager.default.removeItem(at: dws); try? FileManager.default.removeItem(at: dbURL) }
+
+    var syncedClockOut: Date?
+    cal.onClockOutSynced = { _, out in
+        syncedClockOut = out
+    }
+
+    let day = time(dayStr, "12:00")
+    await cal.syncAttendance(for: day)
+    #expect(cal.clockIn(on: day) == time(dayStr, "08:50"))
+    #expect(cal.clockOut(on: day) == time(dayStr, "19:20"))
+    #expect(syncedClockOut == time(dayStr, "19:20"))
+    #expect(cal.scheduleText(on: day) == "打卡 08:50–19:20（已下班打卡）")
+
+    // 08:50 到 19:20 共 10.5 小时，扣除默认午休 60 分钟 = 9.5 小时
+    let stay = cal.actualStayHours(on: day)
+    #expect(stay != nil && abs((stay ?? 0) - 9.5) < 0.01)
+    #expect(cal.attendanceAnomalies(on: day, now: time("2026-11-26", "10:00")).isEmpty)
+
+    // 迟到与缺下班卡判定（过去工作日缺卡才报，今天下班前不误报缺下班卡）
+    let pastDay = time("2026-11-24", "12:00")
+    cal.saveAttendance(AttendanceRecord(
+        date: "2026-11-24",
+        clockIn: time("2026-11-24", "09:20"),
+        clockOut: nil,
+        onDutyResult: "Late",
+        offDutyResult: "NotSigned"
+    ))
+    let pastAnomalies = cal.attendanceAnomalies(on: pastDay, now: time("2026-11-25", "10:00"))
+    #expect(pastAnomalies == [.late, .missingClockOut])
+
+    // 当天尚未到下班时间，不误报缺下班卡
+    let sameDayMorningAnomalies = cal.attendanceAnomalies(on: pastDay, now: time("2026-11-24", "11:00"))
+    #expect(sameDayMorningAnomalies == [.late])
+}
